@@ -1,4 +1,6 @@
-## Demo steps
+## Demo Description
+
+<details><summary>Details</summary><p>
 
 ### Use Case Target
 
@@ -17,17 +19,26 @@ Following binaries to be installed in the environment.
 1. [postman cli](https://learning.postman.com/docs/postman-cli/postman-cli-installation/)
 1. [jq](https://jqlang.github.io/jq/download/)
 
-## NetFoundry Components
 
-## Create Network and Public Router - NF Console
+### Notes
 
-<details><summary>Steps</summary><p>
+**IMPORTANT: Copy the code directly to the linux terminal to create required files/resources. In AWS, the VPC and network will be created part of `eksctl create cluster` command and one needs to have administrator permissions. Whereas in GKE, it is expected that VPC and network are already prebuilt. The service account is the part before @ and can be found under IAM-->Permissions, i.e. `{GKE_SERVICE_ACCOUNT}@{GKE_PROJECT_NAME}.iam.gserviceaccount.com`. The subnetwork is the subnet name and must be in the same region as indicated in GKE_REGION. If you already have clusters up, then you can skip to [Export Cluster Context Names](#export-cluster-context-names) section**
+
+</p></details>
+
+## NetFoundry Components Deployment
+
+<details><summary>Details</summary><p>
+
+### Create Network and Public Router - NF Console
+
+  <details><summary>Steps</summary><p>
 
   1. Login to  [NetFoundry Console](https://cloudziti.io/)
   1. Create Network
   1. Create Public Router with role attribute == `public`
 
-  ### Create Admin User:
+  #### Create Admin User:
 
   1. Identities --> Create
 
@@ -42,7 +53,7 @@ Following binaries to be installed in the environment.
       ziti edge enroll -j adminUser.jwt -o adminUser.json
       ```
 
-  ### Create Test User:
+  #### Create Test User:
 
   1. Repeat the same steps but dont enable `IS Admin` option
 
@@ -54,25 +65,24 @@ Following binaries to be installed in the environment.
       ```
       If using Windows/Mac App - [WinOS Enrolling](https://openziti.io/docs/reference/tunnelers/windows#enrolling), [MacOS Enrolling](https://openziti.io/docs/reference/tunnelers/windows#enrolling)
 
-</p></details>
+  </p></details>
 
-## Create Network and Public Router - NF API
+### Create Network and Public Router - NF API
 
-<details><summary>Steps</summary><p>
+  <details><summary>Steps</summary><p>
 
-1. Export your NF API Credentials
+1. Export your NF API Credentials File path.
 
     ```shell
-      export NF_API_CLIENT_ID="your id"
-      export NF_API_CLIENT_SECRET="your passwd"
+      export NF_API_CREDENTIALS_PATH="/path/to/your/netfoundry api credentials file"
     ```
-    
+
 1. Copy the code into a terminal to create Postman collection file
 
     <details><summary>Code</summary><p>
 
     ```shell
-    cat <<EOF >Inf-network-create.postman_collection.json
+    cat <<EOF >nf-network-create.postman_collection.json
     {
       "info": {
         "_postman_id": "d81c56cc-f00e-4785-91ff-775c21e89ea0",
@@ -692,6 +702,8 @@ Following binaries to be installed in the environment.
     <details><summary>Code</summary><p>
 
     ```shell
+      export NF_API_CLIENT_ID=`jq .clientId $NF_API_CREDENTIALS_PATH`
+      export NF_API_CLIENT_SECRET=`jq .password $NF_API_CREDENTIALS_PATH`
       cat <<EOF >nf-network-create.postman_environment.json
       {
         "id": "8cbd9872-4829-4670-ae4f-9642416c3b28",
@@ -719,13 +731,13 @@ Following binaries to be installed in the environment.
           },
           {
             "key": "client_id",
-            "value": "",
+            "value": $NF_API_CLIENT_ID,
             "type": "default",
             "enabled": true
           },
           {
             "key": "client_secret",
-            "value": "",
+            "value": $NF_API_CLIENT_SECRET,
             "type": "default",
             "enabled": true
           },
@@ -804,49 +816,24 @@ Following binaries to be installed in the environment.
       ```
 
     </p></details>
-  
-  </p></details>
 
-  ### Export NetFoundry Network and EKS/GKE Details
+1. Run postman cli to configure NetFoundry Network and Public Router.
 
-  --------------------
+      ```shell
+      postman collection run nf-network-create.postman_collection.json \
+              -e nf-network-create.postman_environment.json
+      ```
+    
+  </p></details> 
 
-  **IMPORTANT: Copy the code directly to the linux terminal to create required files/resources. In AWS, the VPC and network will be created part of `eksctl create cluster` command and one needs to have administrator permissions. Whereas in GKE, it is expected that VPC and network are already prebuilt. The service account is the part before @ and can be found under IAM-->Permissions, i.e. `{GKE_SERVICE_ACCOUNT}@{GKE_PROJECT_NAME}.iam.gserviceaccount.com`. The subnetwork is the subnet name and must be in the same region as indicated in GKE_REGION. If you already have clusters up, then you can skip to [Export Cluster Context Names](#export-cluster-context-names) section**
+### Create Services and required resoources to support service access.
 
-  --------------------
+  <details><summary>Steps</summary><p>
 
-  ```shell
-  export NF_IDENTITY_PATH="path/to/adminUser.json"
-  export CLUSTER_NAME=""
-  export AWS_PROFILE=""
-  export AWS_SSO_ACCOUNT_ID=""
-  export AWS_SSO_SESSION=""
-  export AWS_SSO_START_URL=""
-  export AWS_REGION=""
-  export GKE_PROJECT_NAME=""
-  export GKE_NETWORK_NAME=""
-  export GKE_SUBNETWORK_NAME=""
-  export GKE_SERVICE_ACCOUNT=""
-  export GKE_REGION=""
-  ```
+1. Export your NF API Credentials File path.
 
-    </p></details>
-
-</p></details>
-
-### Create Services, Service Policies, Edge Router Policy, Service Edge Router Policy
-1. Get ctrl-address/cert/ca/key files created.
     ```shell
-    export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_IDENTITY_PATH`)
-    export NF_IDENTITY_CERT_PATH="nf_identity_cert.pem"
-    export NF_IDENTITY_KEY_PATH="nf_identity_key.pem"
-    export NF_IDENTITY_CA_PATH="nf_identity_ca.pem"
-    sed "s/pem://" <<< `jq -r .id.cert $NF_IDENTITY_PATH` > $NF_IDENTITY_CERT_PATH
-    sed "s/pem://" <<< `jq -r .id.key $NF_IDENTITY_PATH` > $NF_IDENTITY_KEY_PATH
-    sed "s/pem://" <<< `jq -r .id.ca $NF_IDENTITY_PATH` > $NF_IDENTITY_CA_PATH
-    export NF_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_IDENTITY_PATH`)
-    export NF_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_IDENTITY_PATH`)
-    export NF_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_IDENTITY_PATH`)
+    export NF_IDENTITY_PATH="path/to/adminUser.json"
     ```
 
 1. Copy the code into a terminal to create Postman collection file
@@ -854,11 +841,11 @@ Following binaries to be installed in the environment.
     <details><summary>Code</summary><p>
 
     ```shell
-    cat <<EOF >Istio_Bookinfo_App.postman_collection.json
+    cat <<EOF >nf-services-create.postman_collection.json
     {
       "info": {
         "_postman_id": "843b4884-994c-4611-9db1-3c63ea78e904",
-        "name": "Istio Bookinfo App",
+        "name": "nf-services-create",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
         "_exporter_id": "3145648"
       },
@@ -1986,17 +1973,28 @@ Following binaries to be installed in the environment.
     EOF
     ```
 
-    </p></details>
+    </p></Code>
 
 1. Copy the code into a terminal to create Postman collection environmental variables file
 
     <details><summary>Code</summary><p>
 
     ```shell
-    cat <<EOF >Istio_Bookinfo_App.postman_environment.json
+    export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_IDENTITY_PATH`)
+    export NF_IDENTITY_CERT_PATH="nf_identity_cert.pem"
+    export NF_IDENTITY_KEY_PATH="nf_identity_key.pem"
+    export NF_IDENTITY_CA_PATH="nf_identity_ca.pem"
+    sed "s/pem://" <<< `jq -r .id.cert $NF_IDENTITY_PATH` > $NF_IDENTITY_CERT_PATH
+    sed "s/pem://" <<< `jq -r .id.key $NF_IDENTITY_PATH` > $NF_IDENTITY_KEY_PATH
+    sed "s/pem://" <<< `jq -r .id.ca $NF_IDENTITY_PATH` > $NF_IDENTITY_CA_PATH
+    export NF_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_IDENTITY_PATH`)
+    export NF_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_IDENTITY_PATH`)
+    export NF_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_IDENTITY_PATH`)
+
+    cat <<EOF >nf-services-create.postman_environment.json
       {
         "id": "8fd7318e-55d4-4814-b035-2b1c0d6edd28",
-        "name": "Istio Bookinfo App",
+        "name": "nf-services-create",
         "values": [
           {
             "key": "controller-api-endpoint",
@@ -2059,18 +2057,43 @@ Following binaries to be installed in the environment.
     EOF
     ```
 
-    </p></details>
+    </p></Code>
 
-1. Run postman cli to configure NetFoundry Components.
+1. Run postman cli to configure NetFoundry Services.
+
     ```shell
-    postman collection run Istio_Bookinfo_App.postman_collection.json \
-            -e Istio_Bookinfo_App.postman_environment.json \
+    postman collection run nf-services-create.postman_collection.json \
+            -e nf-services-create.postman_environment.json \
             --ssl-client-cert $NF_IDENTITY_CERT_PATH \
             --ssl-client-key $NF_IDENTITY_KEY_PATH \
             --ssl-extra-ca-certs $NF_IDENTITY_CA_PATH
     ```
 
-## Create Cluster(s)
+  </p></details>
+
+</p></details>
+
+
+
+## Cluster(s) Deployment
+
+<details><summary>Details</summary><p>
+
+### Export EKS/GKE Details
+
+```shell
+export CLUSTER_NAME=""
+export AWS_PROFILE=""
+export AWS_SSO_ACCOUNT_ID=""
+export AWS_SSO_SESSION=""
+export AWS_SSO_START_URL=""
+export AWS_REGION=""
+export GKE_PROJECT_NAME=""
+export GKE_NETWORK_NAME=""
+export GKE_SUBNETWORK_NAME=""
+export GKE_SERVICE_ACCOUNT=""
+export GKE_REGION=""
+```
 
 ### AWS
 
@@ -2100,6 +2123,7 @@ Following binaries to be installed in the environment.
     </p></details>
 
 1. Login with SSO
+
     ```shell
     aws sso login --profile $AWS_PROFILE
     ```
@@ -2107,6 +2131,10 @@ Following binaries to be installed in the environment.
     ```shell
     aws sso login --profile $AWS_PROFILE --no-browser
     ```
+
+
+
+    
 1. Create cluster config template
 
     <details><summary>Code</summary><p>
@@ -2185,6 +2213,12 @@ If you have your own clusters, then you need to replace the dynamic cluster name
 export AWS_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep eksctl`
 export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep gke`
 ```
+
+</p></details>
+
+## Ziti K8S Agent's Webbhook and Test Application Deployment
+
+<details><summary>Details</summary><p>
 
 ### Create Ziti Webhook Deployment Template.
 
@@ -2695,7 +2729,13 @@ kubectl apply -f bookinfo-app.yaml --context $GKE_CLUSTER -n test2
 Identities should be all green as shown in this screen shot.
 ![image](./images/identitiesStatus.png)
 
-### App Test and Verification of Access
+</p></details>
+
+## App Test and Verification of Access to Test Application
+
+<details><summary>Details</summary><p>
+
+### Execute the test 
 Look up pod names for Bookinfo App
 ```shell
 kubectl get pods -n test1 --context  $AWS_CLUSTER
@@ -2771,3 +2811,5 @@ kubectl delete -f bookinfo-app.yaml --context $GKE_CLUSTER -n test2
 eksctl delete cluster -f ./eks-cluster.yaml --profile $AWS_PROFILE --force --disable-nodegroup-eviction 
 gcloud container --project $GKE_PROJECT_NAME clusters delete $CLUSTER_NAME --region $GKE_REGION
 ```
+
+</p></details>
