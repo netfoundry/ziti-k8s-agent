@@ -42,7 +42,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		return toV1AdmissionResponse(err)
 	}
 
-	zitiCfg := zitiEdge.Config{ApiEndpoint: zitiCtrlAddress, Cert: parsedCert, PrivateKey: zitiTlsCertificate.PrivateKey}
+	zitiCfg := zitiEdge.Config{ApiEndpoint: zitiCtrlMgmtApi, Cert: parsedCert, PrivateKey: zitiTlsCertificate.PrivateKey}
 
 	klog.Infof(fmt.Sprintf("Admission Request UID: %s", ar.Request.UID))
 	switch ar.Request.Operation {
@@ -118,9 +118,16 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		}
 
 		// update pod dns config and policy
-		pod.Spec.DNSConfig = &corev1.PodDNSConfig{
-			Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
-			Searches:    searchDomainList,
+		if len(searchDomainList) > 0 {
+			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
+				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
+				Searches:    searchDomainList,
+			}
+		} else {
+			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
+				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
+				Searches:    []string{"cluster.local", pod.Namespace + ".svc"},
+			}
 		}
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
 		if err != nil {

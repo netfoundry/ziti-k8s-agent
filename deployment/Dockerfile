@@ -18,8 +18,8 @@ LABEL name="openziti/ziti-router" \
 USER root
 
 # install artifacts as root
-COPY ${ARTIFACTS_DIR}/ziti-agent /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/ziti-agent
+COPY ${ARTIFACTS_DIR}/ziti-k8s-agent /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/ziti-k8s-agent
 
 USER ziggy
 #COPY ${DOCKER_BUILD_DIR}/deployment/bashrc /home/ziggy/.bashrc

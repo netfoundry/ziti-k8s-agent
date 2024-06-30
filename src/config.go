@@ -84,12 +84,12 @@ func lookupEnvVars() {
 			klog.Error(&MissingEnvVarError{variable: "SIDECAR_PREFIX"})
 		}
 	}
-	value, ok = os.LookupEnv("ZITI_CTRL_ADDRESS")
+	value, ok = os.LookupEnv("ZITI_CTRL_MGMT_API")
 	if ok {
-		zitiCtrlAddress = value
+		zitiCtrlMgmtApi = value
 	} else {
-		if len(zitiCtrlAddress) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_ADDRESS"})
+		if len(zitiCtrlMgmtApi) == 0 {
+			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_MGMT_API"})
 		}
 	}
 	value, ok = os.LookupEnv("ZITI_CTRL_ADMIN_CERT")

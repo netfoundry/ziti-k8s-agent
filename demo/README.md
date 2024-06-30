@@ -19,67 +19,825 @@ Following binaries to be installed in the environment.
 
 ## NetFoundry Components
 
-### Create Network and Public Router
+## Create Network and Public Router - NF Console
 
-1. Login to  [NetFoundry Console](https://cloudziti.io/)
-1. Create Network
-1. Create Public Router with role attribute == `public`
+<details><summary>Steps</summary><p>
 
-### Create Admin User:
+  1. Login to  [NetFoundry Console](https://cloudziti.io/)
+  1. Create Network
+  1. Create Public Router with role attribute == `public`
 
-1. Identities --> Create
+  ### Create Admin User:
 
-1. Fill in details and save (i.e. ott type)
+  1. Identities --> Create
 
-    ![image](./images/CreateAdminIdentity.png)
+  1. Fill in details and save (i.e. ott type)
 
-1. Download jwt token and enroll it.
+      ![image](./images/CreateAdminIdentity.png)
 
-    ![image](./images/EnrollAdminIdentity.png)
+  1. Download jwt token and enroll it.
+
+      ![image](./images/EnrollAdminIdentity.png)
+      ```shell
+      ziti edge enroll -j adminUser.jwt -o adminUser.json
+      ```
+
+  ### Create Test User:
+
+  1. Repeat the same steps but dont enable `IS Admin` option
+
+      ![image](./images/CreateTestIdentity.png)
+
+      If using ziti-edge-tunnel - [Linux based Installations](https://openziti.io/docs/reference/tunnelers/linux/)
+      ```shell
+      sudo ziti-edge-tunnel add --jwt "$(< ./testUser.jwt)" --identity testUser
+      ```
+      If using Windows/Mac App - [WinOS Enrolling](https://openziti.io/docs/reference/tunnelers/windows#enrolling), [MacOS Enrolling](https://openziti.io/docs/reference/tunnelers/windows#enrolling)
+
+</p></details>
+
+## Create Network and Public Router - NF API
+
+<details><summary>Steps</summary><p>
+
+1. Export your NF API Credentials
+
     ```shell
-    ziti edge enroll -j adminUser.jwt -o adminUser.json
+      export NF_API_CLIENT_ID="your id"
+      export NF_API_CLIENT_SECRET="your passwd"
+    ```
+    
+1. Copy the code into a terminal to create Postman collection file
+
+    <details><summary>Code</summary><p>
+
+    ```shell
+    cat <<EOF >Inf-network-create.postman_collection.json
+    {
+      "info": {
+        "_postman_id": "d81c56cc-f00e-4785-91ff-775c21e89ea0",
+        "name": "nf-network-create",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "3145648"
+      },
+      "item": [
+        {
+          "name": "GetTokenFromCognito",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();",
+                  "pm.environment.set(\"jwt_token\", jsonData.access_token);",
+                  "pm.environment.set(\"jwt_type\", jsonData.token_type);"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "password",
+                  "value": "{{client_secret}}",
+                  "type": "string"
+                },
+                {
+                  "key": "username",
+                  "value": "{{client_id}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{token}}",
+              "host": [
+                "{{token}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "CreateNetwork",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('networkId', jsonData.id)"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "NF-OrganizationId",
+                "value": "a645e9ce-e49f-49f2-a6f8-6369822dd412"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"networkGroupId\": \"bce07cd1-8f36-44a3-b279-26426e7a53ef\",\n  \"name\" : \"DariuszDemo\",\n  \"provider\": \"AWS\",\n  \"size\" : \"medium\",\n  \"region\" : \"us-east-2\"\n}"
+            },
+            "url": {
+              "raw": "{{api}}/networks",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "networks"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GetNetwork",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Repeating request with capture (recursive)\", function () {\r",
+                  "  let repetitions = 200;\r",
+                  "  let delayInMilliseconds = 10000;\r",
+                  "  let currentIteration = 1;\r",
+                  "\r",
+                  "  function handleResponse(err, response) {\r",
+                  "    if (err) {\r",
+                  "        console.error(\"Request failed:\", err);\r",
+                  "        return;\r",
+                  "    }\r",
+                  "    console.log(\"Iteration\", currentIteration, \"Date:\", response.headers.get(\"Date\"), \"Status:\", response.json().status); \r",
+                  "    if (response.json().status === \"PROVISIONED\") {\r",
+                  "        repetitions = 0;\r",
+                  "    }\r",
+                  "  }\r",
+                  "\r",
+                  "  function repeatRequest() {\r",
+                  "    \r",
+                  "    pm.sendRequest(pm.request, handleResponse);\r",
+                  "    if (currentIteration > repetitions) {\r",
+                  "      return;\r",
+                  "    }\r",
+                  "\r",
+                  "    setTimeout(function() {\r",
+                  "      currentIteration++;\r",
+                  "      repeatRequest(); \r",
+                  "    }, delayInMilliseconds);\r",
+                  "  }\r",
+                  "\r",
+                  "  repeatRequest();\r",
+                  "});\r",
+                  "\r",
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/networks/{{networkId}}",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "networks",
+                "{{networkId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "NetworkExchange",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('api_token', jsonData.value)\r",
+                  "pm.environment.set('controller-api-endpoint', jsonData.networkControllerUrl)"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "NF-OrganizationId",
+                "value": "a645e9ce-e49f-49f2-a6f8-6369822dd412"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"session\"\n}"
+            },
+            "url": {
+              "raw": "{{api}}/networks/{{networkId}}/exchange",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "networks",
+                "{{networkId}}",
+                "exchange"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Edge Router Ziti",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('edgeRouterId', jsonData.data.id)"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "packages": {},
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "zt-session",
+                "value": "{{api_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Public-AWS-Router-01\",\r\n  \"appData\": {},\r\n  \"roleAttributes\": [\r\n    \"public\"\r\n  ],\r\n  \"isTunnelerEnabled\": false,\r\n  \"noTraversal\": false,\r\n  \"cost\": 0,\r\n  \"tags\": {},\r\n  \"enrollment\": {\r\n    \"ott\": true\r\n  }\r\n}"
+            },
+            "url": {
+              "raw": "{{controller-api-endpoint}}/edge-routers",
+              "host": [
+                "{{controller-api-endpoint}}"
+              ],
+              "path": [
+                "edge-routers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Edge Router MOP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('mopEdgeRouterId', jsonData.id)"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Public-AWS-Router-01\",\n  \"networkId\": \"{{networkId}}\",\n  \"zitiId\": \"{{edgeRouterId}}\",\n  \"provider\": \"AWS\",\n  \"region\": \"us-east-2\",\n  \"linkListener\": true,\n  \"wssListener\": false\n}"
+            },
+            "url": {
+              "raw": "{{api}}/edge-routers",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "edge-routers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Admin Identity",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('adminIdentityId', jsonData.data.id)"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "zt-session",
+                "value": "{{api_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"adminUser\",\r\n  \"type\": \"Device\",\r\n  \"appData\": {},\r\n  \"isAdmin\": true,\r\n  \"roleAttributes\": [],\r\n  \"authPolicyId\": \"default\",\r\n  \"tags\": {},\r\n  \"enrollment\": {\r\n    \"ott\": true\r\n  }\r\n}"
+            },
+            "url": {
+              "raw": "{{controller-api-endpoint}}/identities",
+              "host": [
+                "{{controller-api-endpoint}}"
+              ],
+              "path": [
+                "identities"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Client Identity",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('clientIdentityId', jsonData.data.id)\r",
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "zt-session",
+                "value": "{{api_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"testUser\",\r\n  \"type\": \"Device\",\r\n  \"appData\": {},\r\n  \"isAdmin\": false,\r\n  \"roleAttributes\": [\r\n    \"users\"\r\n  ],\r\n  \"authPolicyId\": \"default\",\r\n  \"tags\": {},\r\n  \"enrollment\": {\r\n    \"ott\": true\r\n  }\r\n}"
+            },
+            "url": {
+              "raw": "{{controller-api-endpoint}}/identities",
+              "host": [
+                "{{controller-api-endpoint}}"
+              ],
+              "path": [
+                "identities"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Admin Identity JWT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('adminIdentityJwt', jsonData.data.enrollment.ott.jwt)"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "zt-session",
+                "value": "{{api_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{controller-api-endpoint}}/identities/{{adminIdentityId}}",
+              "host": [
+                "{{controller-api-endpoint}}"
+              ],
+              "path": [
+                "identities",
+                "{{adminIdentityId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Client Identity JWT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();\r",
+                  "pm.environment.set('clientIdentityJwt', jsonData.data.enrollment.ott.jwt)"
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {}
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "zt-session",
+                "value": "{{api_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{controller-api-endpoint}}/identities/{{clientIdentityId}}",
+              "host": [
+                "{{controller-api-endpoint}}"
+              ],
+              "path": [
+                "identities",
+                "{{clientIdentityId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{jwt_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              ""
+            ]
+          }
+        }
+      ]
+    }
+    EOF
     ```
 
-### Create Test User:
+    </p></details>
 
-1. Repeat the same steps but dont enable `IS Admin` option
+1. Copy the code into a terminal to create Postman collection environmental variables file
 
-    ![image](./images/CreateTestIdentity.png)
+    <details><summary>Code</summary><p>
 
-    If using ziti-edge-tunnel - [Linux based Installations](https://openziti.io/docs/reference/tunnelers/linux/)
     ```shell
-    sudo ziti-edge-tunnel add --jwt "$(< ./testUser.jwt)" --identity testUser
-    ```
-    If using Windows/Mac App - [WinOS Enrolling](https://openziti.io/docs/reference/tunnelers/windows#enrolling), [MacOS Enrolling](https://openziti.io/docs/reference/tunnelers/windows#enrolling)
+      cat <<EOF >nf-network-create.postman_environment.json
+      {
+        "id": "8cbd9872-4829-4670-ae4f-9642416c3b28",
+        "name": "nf-network-create",
+        "values": [
+          {
+            "key": "api",
+            "value": "https://gateway.production.netfoundry.io/core/v3",
+            "enabled": true
+          },
+          {
+            "key": "token",
+            "value": "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token",
+            "enabled": true
+          },
+          {
+            "key": "jwt_token",
+            "value": "",
+            "enabled": true
+          },
+          {
+            "key": "jwt_type",
+            "value": "Bearer",
+            "enabled": true
+          },
+          {
+            "key": "client_id",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "client_secret",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "networkId",
+            "value": "",
+            "type": "any",
+            "enabled": true
+          },
+          {
+            "key": "networkStatus",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "api_token",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "controller-api-endpoint",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "edgeRouterId",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "mopEdgeRouterId",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "mopEdgeRouterStatus",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "clientIdentityId",
+            "value": "",
+            "type": "any",
+            "enabled": true
+          },
+          {
+            "key": "adminIdentityId",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          },
+          {
+            "key": "clientIdentityJwt",
+            "value": "",
+            "type": "any",
+            "enabled": true
+          },
+          {
+            "key": "adminIdentityJwt",
+            "value": "",
+            "type": "default",
+            "enabled": true
+          }
+        ],
+        "_postman_variable_scope": "environment",
+        "_postman_exported_at": "2024-06-30T14:59:30.311Z",
+        "_postman_exported_using": "Postman/11.2.24"
+      }
+      EOF
+      ```
 
+    </p></details>
+  
+  </p></details>
 
-### Export NetFoundry Network and EKS/GKE Details
+  ### Export NetFoundry Network and EKS/GKE Details
 
---------------------
+  --------------------
 
-**IMPORTANT: Copy the code directly to the linux terminal to create required files/resources. In AWS, the VPC and network will be created part of `eksctl create cluster` command and one needs to have administrator permissions. Whereas in GKE, it is expected that VPC and network are already prebuilt. The service account is the part before @ and can be found under IAM-->Permissions, i.e. `{GKE_SERVICE_ACCOUNT}@{GKE_PROJECT_NAME}.iam.gserviceaccount.com`. The subnetwork is the subnet name and must be in the same region as indicated in GKE_REGION. If you already have clusters up, then you can skip to [Export Cluster Context Names](#export-cluster-context-names) section**
+  **IMPORTANT: Copy the code directly to the linux terminal to create required files/resources. In AWS, the VPC and network will be created part of `eksctl create cluster` command and one needs to have administrator permissions. Whereas in GKE, it is expected that VPC and network are already prebuilt. The service account is the part before @ and can be found under IAM-->Permissions, i.e. `{GKE_SERVICE_ACCOUNT}@{GKE_PROJECT_NAME}.iam.gserviceaccount.com`. The subnetwork is the subnet name and must be in the same region as indicated in GKE_REGION. If you already have clusters up, then you can skip to [Export Cluster Context Names](#export-cluster-context-names) section**
 
---------------------
+  --------------------
 
-```shell
-export NF_IDENTITY_PATH="path/to/adminUser.json"
-export CLUSTER_NAME=""
-export AWS_PROFILE=""
-export AWS_SSO_ACCOUNT_ID=""
-export AWS_SSO_SESSION=""
-export AWS_SSO_START_URL=""
-export AWS_REGION=""
-export GKE_PROJECT_NAME=""
-export GKE_NETWORK_NAME=""
-export GKE_SUBNETWORK_NAME=""
-export GKE_SERVICE_ACCOUNT=""
-export GKE_REGION=""
-```
+  ```shell
+  export NF_IDENTITY_PATH="path/to/adminUser.json"
+  export CLUSTER_NAME=""
+  export AWS_PROFILE=""
+  export AWS_SSO_ACCOUNT_ID=""
+  export AWS_SSO_SESSION=""
+  export AWS_SSO_START_URL=""
+  export AWS_REGION=""
+  export GKE_PROJECT_NAME=""
+  export GKE_NETWORK_NAME=""
+  export GKE_SUBNETWORK_NAME=""
+  export GKE_SERVICE_ACCOUNT=""
+  export GKE_REGION=""
+  ```
+
+    </p></details>
+
+</p></details>
 
 ### Create Services, Service Policies, Edge Router Policy, Service Edge Router Policy
 1. Get ctrl-address/cert/ca/key files created.
     ```shell
-    export CTRL_ADDRESS=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_IDENTITY_PATH`)
+    export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_IDENTITY_PATH`)
     export NF_IDENTITY_CERT_PATH="nf_identity_cert.pem"
     export NF_IDENTITY_KEY_PATH="nf_identity_key.pem"
     export NF_IDENTITY_CA_PATH="nf_identity_ca.pem"
@@ -1242,7 +2000,7 @@ export GKE_REGION=""
         "values": [
           {
             "key": "controller-api-endpoint",
-            "value": "$CTRL_ADDRESS",
+            "value": "$CTRL_MGMT_API",
             "enabled": true
           },
           {
@@ -1428,26 +2186,65 @@ export AWS_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | g
 export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep gke`
 ```
 
-### Create Webhook Sidecar Injector Template.
+### Create Ziti Webhook Deployment Template.
 
 <details><summary>Code</summary><p>
 
 ```shell
-cat <<EOF >sidecar-injection-webhook-spec.yaml
+export $WEBHOOK_NAMESPACE="ziti"
+
+cat <<EOF >ziti-webhook-spec.yaml
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ziti
+  name: $WEBHOOK_NAMESPACE
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: $WEBHOOK_NAMESPACE
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ziti-admission-cert
+  namespace: $WEBHOOK_NAMESPACE
+spec:
+  secretName: ziti-webhook-server-cert
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+  subject:
+    organizations:
+    - netfoundry
+  commonName: ziti-admission-service.$WEBHOOK_NAMESPACE.svc
+  isCA: false
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+  - ziti-admission-service.$WEBHOOK_NAMESPACE.svc.cluster.local
+  - ziti-admission-service.$WEBHOOK_NAMESPACE.svc
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ziti-sidecar-injector-service
-  namespace: ziti
+  name: ziti-admission-service
+  namespace: $WEBHOOK_NAMESPACE
 spec:
   selector:
-    app: ziti-sidecar-injector-webhook
+    app: ziti-admission-webhook
   ports:
     - name: https
       protocol: TCP
@@ -1458,36 +2255,42 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ziti-sidecar-injector-wh-deployment
-  namespace: ziti
+  name: ziti-admission-wh-deployment
+  namespace: $WEBHOOK_NAMESPACE
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ziti-sidecar-injector-webhook
+      app: ziti-admission-webhook
   template:
     metadata:
       labels:
-        app: ziti-sidecar-injector-webhook
+        app: ziti-admission-webhook
     spec:
       containers:
-      - name: ziti-sidecar-injector
-        image: docker.io/elblag91/ziti-agent-wh:0.3.3
+      - name: ziti-admission-webhook
+        image: docker.io/elblag91/ziti-k8s-agent:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 9443
         args:
           - webhook
-          - --tls-cert-file
-          - /home/ziggy/cert.pem
-          - --tls-private-key-file 
-          - /home/ziggy/key.pem
         env:
-          - name: ZITI_CTRL_ADDRESS
+          - name: TLS-CERT
+            valueFrom:
+              secretKeyRef:
+                name: ziti-webhook-server-cert
+                key: tls.crt
+          - name: TLS-PRIVATE-KEY
+            valueFrom:
+              secretKeyRef:
+                name: ziti-webhook-server-cert
+                key: tls.key
+          - name: ZITI_CTRL_MGMT_API
             valueFrom:
               configMapKeyRef:
                 name: ziti-ctrl-cfg
-                key:  address
+                key:  zitiMgmtApi
           - name: ZITI_CTRL_ADMIN_CERT
             valueFrom:
               secretKeyRef:
@@ -1519,7 +2322,7 @@ kind: MutatingWebhookConfiguration
 metadata:
   name: ziti-tunnel-sidecar
   annotations:
-    cert-manager.io/inject-ca-from: ziti/ziti-sidecar-injector-cert
+    cert-manager.io/inject-ca-from: $WEBHOOK_NAMESPACE/ziti-admission-cert
 webhooks:
   - name: tunnel.ziti.webhook
     admissionReviewVersions: ["v1"]
@@ -1534,19 +2337,18 @@ webhooks:
         scope: "*"
     clientConfig:
       service:
-        name: ziti-sidecar-injector-service
-        namespace: ziti
+        name: ziti-admission-service
+        namespace: $WEBHOOK_NAMESPACE
         port: 443
         path: "/ziti-tunnel"
-      caBundle: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUdPakNDQkNLZ0F3SUJBZ0lVVHZPVnlqemFBakdnajE2bTA2cHpjcGxBMk40d0RRWUpLb1pJaHZjTkFRRUwKQlFBd2RERUxNQWtHQTFVRUJoTUNWVk14Q3pBSkJnTlZCQWdNQWs1RE1SSXdFQVlEVlFRSERBbERhR0Z5Ykc5MApkR1V4RXpBUkJnTlZCQW9NQ2s1bGRFWnZkVzVrY25reEVUQVBCZ05WQkFzTUNFOXdaVzVhYVhScE1Sd3dHZ1lEClZRUUREQk5hYVhScElGQnZaQ0JEYjI1MGNtOXNiR1Z5TUI0WERUSTBNRFV3TVRFNE1EWXpOVm9YRFRNME1EUXkKT1RFNE1EWXpOVm93ZERFTE1Ba0dBMVVFQmhNQ1ZWTXhDekFKQmdOVkJBZ01BazVETVJJd0VBWURWUVFIREFsRAphR0Z5Ykc5MGRHVXhFekFSQmdOVkJBb01DazVsZEVadmRXNWtjbmt4RVRBUEJnTlZCQXNNQ0U5d1pXNWFhWFJwCk1Sd3dHZ1lEVlFRRERCTmFhWFJwSUZCdlpDQkRiMjUwY205c2JHVnlNSUlDSWpBTkJna3Foa2lHOXcwQkFRRUYKQUFPQ0FnOEFNSUlDQ2dLQ0FnRUFsMURnZGJJMkdLWTl0UU5EOGgxbTBibnlGbVZZclo5am1leUtRcUIreGZiSwpHNEpOcnFtdEdiSmtndUpVOVBaNmxsMTZjam1wUm1ERmp2NDZ0cDhTYWh2alUyeVRPV3dlTmY5WTloZWJmMk84CjkrdzBITXdab0VmUzNWS1VqVXFMcEtGN3lXeVA5ek9icGdoSFc2WHQwQVJFT0s4WXdrTE9BcXlKR2JWNVJjOXYKTlVWOEtnUWwvR1Q0UWs1SklvYitOVk1EenFNUmJVL083dW1sNHVSL3ZOZHVKc1B4dDExbDNjY3YyQTJkZXc2dgpNYXFVcEZzUFVQajUwai9pS1JoSTh5TlYxem9ub1lOUm91QXNJaHN0bWRSOVdLTEE2cVFXQmJPanNCKytpRzNhClp4ZkVBL2V3dW14a0dKV2FKaE1qcjFhNnZieldxUThLK3RzRGMyb29lNUpzcG5OU2ZQakVFc2FZME5Cc0hBdVIKUVdselhNcFdma2ZJc2Erdkc4Tkl0SmFoMW5TUExVMVRpWDR3aWxNSlFadlcrRVhXRnlmUnJBdTZsQ2tLMXdpKwpOaGcwcDhWVFp3djZUclRyQXVWVTlzWDJyV0c3bVN2R1lOdjF6K0dFTk5ISWR2elcwWUQ3ZGRNMThHanlEQ3h0CjZnMUpmZFV6T29uSDZPdFVISXNOYjRtcEJjVC8xOUtENVJxdFoyYXBzdUJ1YTBLUUpKVHpCdkhFd25mUmtRMngKMG8yUU9SWXJiQ2VBMm5LY2Vxc2dITis1RnA3VGN1M24xZ3ZJUTc3K3MxbU41bW1nRGZaQ1dWRDRPOGFNbUY5OQp0a2plU1dlejk5bDhjdUdvUXo3cmRDVW03YlVVRWNKNDlLZmdTYnlHL09XRXdvNWpQVG9ONmlIWCtvVXl4V2tDCkF3RUFBYU9Cd3pDQndEQWRCZ05WSFE0RUZnUVVwU0diN1hsa0xTSGNuKzEyZU8zaFFtaEh1Ymt3SHdZRFZSMGoKQkJnd0ZvQVVwU0diN1hsa0xTSGNuKzEyZU8zaFFtaEh1Ymt3RHdZRFZSMFRBUUgvQkFVd0F3RUIvekJ0QmdOVgpIUkVFWmpCa2dpWjZhWFJwTFhOcFpHVmpZWEl0YVc1cVpXTjBiM0l0YzJWeWRtbGpaUzU2YVhScExuTjJZNEkwCmVtbDBhUzF6YVdSbFkyRnlMV2x1YW1WamRHOXlMWE5sY25acFkyVXVlbWwwYVM1emRtTXVZMngxYzNSbGNpNXMKYjJOaGJJY0Vmd0FBQVRBTkJna3Foa2lHOXcwQkFRc0ZBQU9DQWdFQWxDRlRzSDlXeGE2YjBINE5YZmhpUVBQRgpCU3lQRlVkZlJZVWNMeGNPOC9VMXQ0S1JEL2NMdDQwcmxhT2ZrRE01dHRoaUpwbHoxRzdPK2U0dndXRk1qRnQ3CjdyUTVVOFdOSi9tUE1UanI0N3BFNUFzUHhGOHR6em1ySHE5S3hKdjFtWjk4WFpiUlQxZlBpeGNTUVFvYlovSFMKcnY1KzVrN1pjcC9SUkR5REtaVy9lbVpwUUxWQW9XdXhkMitVVWpuZHNXc3pxVzZ0a0x2VkFmSnRULzNhY2dBQwozUVBLanMvRG4xNjlXamZRNm8xM05DT0hCcHVTUDluY0pVUytWQmJDQko4QVJiVTFhdG0zSEJHZFpTT0VvWDM2Cmh4bngvM1c0KzZKRW9NbUVMTDFzb0F6dFRPK2NYNWJSRFYrcXlLMXFtQ0ZJb3ZmWFlnT0FBa3BKalhJRG5YSUwKVTJsUFM0enh5Y3JOZytXZVNoWXp5NjZkc0c5WDBndVdiTm9QTDRReHc4bS9ESWFhb3FkTW9WWkorWGlmMHE4agpFQVYwVm9SY3l0c0hZZ2lkNDlVT01uZmhWaDl3TW5ja0tmNGE1ZVAvb2FvcWVBbHZSZlUzZEo3LzErTTZ3SlZyCitwSGZoa3hucEFRZEVZY3FObzU5azlJVGYvTzYxaXZIdTI5UkJTRVVaMUViK3NBQ2E5aUM5TGlvWEEvT3VXcHkKcFV0ejU2bnI1VmZjY0w3MkRRenl0WGQ3SDk0bEdXMno1ZTljaDJoMTNlSkxyZ2JNRDdxMFAySXY4aG5ic05UVwpXd2o5L2lrZURocTBlNCtRRkIrNC9jMWFleGhtckdRZG10OFBkOWVwVUtnMGdLcTlaVHpMbmtxanFnUXUrYlVHCnQxaVEvUXJzVDlLbDBXMjBJRkU9Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0="
-    failurePolicy: Ignore
+      caBundle: ""
     sideEffects: None
     timeoutSeconds: 30
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  namespace: ziti
+  namespace: $WEBHOOK_NAMESPACE
   name: ziti-agent-wh-roles
 rules:
 - apiGroups: [""] # "" indicates the core API group
@@ -1567,29 +2369,29 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: default
-  namespace: ziti
+  namespace: $WEBHOOK_NAMESPACE
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: ziti-ctrl-tls
-  namespace: ziti
+  namespace: $WEBHOOK_NAMESPACE
 type: kubernetes.io/tls
 stringData:
-  tls.crt: $NF_IDENTITY_CERT
-  tls.key: $NF_IDENTITY_KEY
-  tls.ca:  $NF_IDENTITY_CA
+  tls.crt: $NF_ADMIN_IDENTITY_CERT
+  tls.key: $NF_ADMIN_IDENTITY_KEY
+  tls.ca:  $NF_ADMIN_IDENTITY_CA
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ziti-ctrl-cfg
-  namespace: ziti
+  namespace: $WEBHOOK_NAMESPACE
 data:
-  address: $CTRL_ADDRESS
+  zitiMgmtAPI: $CTRL_MGMT_API
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "true"
-  SearchDomainList: cluster.local,ziti.svc
+  SearchDomainList:
 EOF
 ```
 

@@ -25,7 +25,7 @@ var (
 	sidecarImage           string
 	sidecarImageVersion    string
 	sidecarPrefix          string
-	zitiCtrlAddress        string
+	zitiCtrlMgmtApi        string
 	zitiCtrlClientCertFile string
 	zitiCtrlClientKeyFile  string
 	podSecurityOverride    bool
@@ -61,8 +61,8 @@ func init() {
 		"Image Varsion to be used as the injected sidecar")
 	CmdWebhook.Flags().StringVar(&sidecarPrefix, "sidecar-prefix", "zt",
 		"ContainerName to be used for the injected sidecar")
-	CmdWebhook.Flags().StringVar(&zitiCtrlAddress, "ziti-ctrl-addr", "",
-		"Ziti Controller IP Address / FQDN")
+	CmdWebhook.Flags().StringVar(&zitiCtrlMgmtApi, "ziti-ctrl-addr", "",
+		"Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1 ")
 	CmdWebhook.Flags().StringVar(&zitiCtrlClientCertFile, "ziti-ctrl-client-cert-file", "",
 		"Ziti Controller Client Certificate")
 	CmdWebhook.Flags().StringVar(&zitiCtrlClientKeyFile, "ziti-ctrl-client-key-file", "",
