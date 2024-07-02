@@ -17,8 +17,8 @@ stringData:
 data:
   zitiMgmtApi: $NF_MGMT_API # https://{FQDN}:{PORT}/edge/management/v1                
   zitiRoleKey: identity.openziti.io/role-attributes
-  podSecurityContextOverride: "true"
-  SearchDomainList: "$COMMA_SEPERATED_STRING" #Default cluster.local, $POD_NAMESPACE.svc
+  podSecurityContextOverride: "false"
+  SearchDomainList: "$WHITESPACE_SEPERATED_STRING" #Default cluster.local $POD_NAMESPACE.svc
 ```
 
 Run the spec
@@ -301,8 +301,6 @@ data:
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "true"
   SearchDomainList:
-
-
 EOF
 ```
 

@@ -40,7 +40,7 @@ func lookupEnvVars() {
 	if ok {
 		cert = []byte(value)
 	} else {
-		if len(cert) == 0 {
+		if cert == nil {
 			klog.Error(&MissingEnvVarError{variable: "TLS-CERT"})
 		}
 	}
@@ -48,7 +48,7 @@ func lookupEnvVars() {
 	if ok {
 		key = []byte(value)
 	} else {
-		if len(key) == 0 {
+		if key == nil {
 			klog.Error(&MissingEnvVarError{variable: "TLS-PRIVATE-KEY"})
 		}
 	}
@@ -96,7 +96,7 @@ func lookupEnvVars() {
 	if ok {
 		zitiAdminCert = []byte(value)
 	} else {
-		if len(zitiAdminCert) == 0 {
+		if zitiAdminCert == nil {
 			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_ADMIN_CERT"})
 		}
 	}
@@ -104,7 +104,7 @@ func lookupEnvVars() {
 	if ok {
 		zitiAdminKey = []byte(value)
 	} else {
-		if len(zitiAdminKey) == 0 {
+		if zitiAdminKey == nil {
 			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_ADMIN_KEY"})
 		}
 	}
@@ -127,11 +127,9 @@ func lookupEnvVars() {
 	}
 	value, ok = os.LookupEnv("SEARCH_DOMAIN_LIST")
 	if ok {
-		searchDomainList = []string(strings.Split(value, ","))
+		searchDomainList = []string(strings.Split(value, " "))
 	} else {
-		if len(searchDomainList) == 0 {
-			klog.Infof(fmt.Sprintf("A list of DNS search domains for host-name lookup is empty"))
-		}
+		klog.Infof(fmt.Sprintf("A list of DNS search domains for host-name lookup is not set"))
 	}
 	value, ok = os.LookupEnv("ZITI_ROLE_KEY")
 	if ok {

@@ -25,7 +25,7 @@ Following binaries to be installed in the environment.
 1. Copy the code directly to the linux terminal to create required files/resources. 
 1. In AWS, the VPC and network will be created part of `eksctl create cluster` command and one needs to have administrator permissions. 
 1. Whereas in GKE, it is expected that VPC and network are already prebuilt. The service account is the part before @ and can be found under IAM-->Permissions, i.e. `{GKE_SERVICE_ACCOUNT}@{GKE_PROJECT_NAME}.iam.gserviceaccount.com`. The subnetwork is the subnet name and must be in the same region as indicated in GKE_REGION. 
-1. If you already have clusters up, then you can skip [Cluster(s) Deployment](#clusters-deployment) section. Go to [Export Cluster Context Names](#export-cluster-context-names), where you need to export your cluster context names as variables. Kubectl commands will utilized them in the subsequent sections
+1. If you already have clusters up, then you can skip [Cluster(s) Deployment](#clusters-deployment) section. Go to [Export Cluster Context Names](#export-cluster-context-names), where you need to export your cluster context names as variables. Kubectl commands will utilized them in the subsequent sections. FYI, EKS and GKE are just examples, but this can work in any K8S cluster, whether is private or public.
 
 </p></details>
 
@@ -3203,7 +3203,7 @@ If you have the NF Console API credentials file in your test environment, then y
    1. Export the adminUser API Credentials File path.
 
       ```shell
-      export NF_IDENTITY_PATH="path/to/adminUser.json"
+      export NF_ADMIN_IDENTITY_PATH="path/to/adminUser.json"
       ```
 
   1. If using ziti-edge-tunnel - [Linux based Installations](https://openziti.io/docs/reference/tunnelers/linux/)
@@ -3353,7 +3353,7 @@ export GKE_REGION="The region where the above subnet is configured"
 
 <details><summary>Details</summary><p>
 
-If you have your own clusters, then you need to replace the dynamic cluster name search to actual cluster names, i.e. `export AWS_CLUSTER={your cluster namne}`, etc.
+If you have your own clusters, then you need to replace the dynamic cluster name search to actual cluster names, i.e. `export AWS_CLUSTER={your cluster context name}`, etc.
 ```shell
 export AWS_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep eksctl`
 export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep gke`
@@ -3361,18 +3361,33 @@ export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | g
 
 </p></details>
 
-## Ziti K8S Agent's Webbhook and Test Application Deployment
+## Ziti K8S Agent Webhook and Test Application Deployment
 
 <details><summary>Details</summary><p>
 
-### Create Ziti Webhook Deployment Template.
+### Create Ziti K8S Agent Webhook Deployment Template.
 
 <details><summary>Code</summary><p>
 
 ```shell
-export $WEBHOOK_NAMESPACE="ziti"
+if [ -z "$NF_ADMIN_IDENTITY_PATH" ]; then
+  echo "Error: Variable 'NF_IDENTITY_PATH' is not set!"
+  exit 1
+fi
 
-cat <<EOF >ziti-webhook-spec.yaml
+export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_ADMIN_IDENTITY_PATH`)
+export NF_ADMIN_IDENTITY_CERT_PATH="nf_identity_cert.pem"
+export NF_ADMIN_IDENTITY_KEY_PATH="nf_identity_key.pem"
+export NF_ADMIN_IDENTITY_CA_PATH="nf_identity_ca.pem"
+sed "s/pem://" <<< `jq -r .id.cert $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CERT_PATH
+sed "s/pem://" <<< `jq -r .id.key $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_KEY_PATH
+sed "s/pem://" <<< `jq -r .id.ca $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CA_PATH
+export NF_ADMIN_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_ADMIN_IDENTITY_PATH`)
+export NF_ADMIN_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_ADMIN_IDENTITY_PATH`)
+export NF_ADMIN_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_ADMIN_IDENTITY_PATH`)
+export WEBHOOK_NAMESPACE="ziti"
+
+cat <<EOF >ziti-k8s-agent-webhook-spec.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -3490,11 +3505,6 @@ spec:
               configMapKeyRef:
                 name: ziti-ctrl-cfg
                 key:  podSecurityContextOverride
-          - name: SEARCH_DOMAIN_LIST
-            valueFrom:
-              configMapKeyRef:
-                name: ziti-ctrl-cfg
-                key:  SearchDomainList
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
@@ -3567,307 +3577,52 @@ metadata:
   name: ziti-ctrl-cfg
   namespace: $WEBHOOK_NAMESPACE
 data:
-  zitiMgmtAPI: $CTRL_MGMT_API
+  zitiMgmtApi: $CTRL_MGMT_API
   zitiRoleKey: identity.openziti.io/role-attributes
-  podSecurityContextOverride: "true"
-  SearchDomainList:
+  podSecurityContextOverride: "false"
 EOF
 ```
 
 </p></details>
 
-### Create Bookinfo App Template
-
-<details><summary>Code</summary><p>
-
+### Deploy Cert-manager CRDs to EKS
 ```shell
-cat <<EOF >bookinfo-app.yaml
-# Copyright Istio Authors
-#
-#   Licensed under the Apache License, Version 2.0 (the "License");
-#   you may not use this file except in compliance with the License.
-#   You may obtain a copy of the License at
-#
-#       http://www.apache.org/licenses/LICENSE-2.0
-#
-#   Unless required by applicable law or agreed to in writing, software
-#   distributed under the License is distributed on an "AS IS" BASIS,
-#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#   See the License for the specific language governing permissions and
-#   limitations under the License.
-
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: bookinfo-details
-  labels:
-    account: details
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: details-v1
-  labels:
-    app: details
-    version: v1
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: details
-      version: v1
-  template:
-    metadata:
-      labels:
-        app: details
-        version: v1
-    spec:
-      serviceAccountName: bookinfo-details
-      containers:
-      - name: details
-        image: docker.io/istio/examples-bookinfo-details-v1:1.19.1
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 9080
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: bookinfo-ratings
-  labels:
-    account: ratings
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ratings-v1
-  labels:
-    app: ratings
-    version: v1
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ratings
-      version: v1
-  template:
-    metadata:
-      labels:
-        app: ratings
-        version: v1
-    spec:
-      serviceAccountName: bookinfo-ratings
-      containers:
-      - name: ratings
-        image: docker.io/istio/examples-bookinfo-ratings-v1:1.19.1
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 9080
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: bookinfo-reviews
-  labels:
-    account: reviews
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: reviews-v1
-  labels:
-    app: reviews
-    version: v1
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: reviews
-      version: v1
-  template:
-    metadata:
-      labels:
-        app: reviews
-        version: v1
-    spec:
-      serviceAccountName: bookinfo-reviews
-      containers:
-      - name: reviews
-        image: docker.io/istio/examples-bookinfo-reviews-v1:1.19.1
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: LOG_DIR
-          value: "/tmp/logs"
-        ports:
-        - containerPort: 9080
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: wlp-output
-          mountPath: /opt/ibm/wlp/output
-      volumes:
-      - name: wlp-output
-        emptyDir: {}
-      - name: tmp
-        emptyDir: {}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: reviews-v2
-  labels:
-    app: reviews
-    version: v2
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: reviews
-      version: v2
-  template:
-    metadata:
-      labels:
-        app: reviews
-        version: v2
-    spec:
-      serviceAccountName: bookinfo-reviews
-      containers:
-      - name: reviews
-        image: docker.io/istio/examples-bookinfo-reviews-v2:1.19.1
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: LOG_DIR
-          value: "/tmp/logs"
-        ports:
-        - containerPort: 9080
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: wlp-output
-          mountPath: /opt/ibm/wlp/output
-      volumes:
-      - name: wlp-output
-        emptyDir: {}
-      - name: tmp
-        emptyDir: {}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: reviews-v3
-  labels:
-    app: reviews
-    version: v3
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: reviews
-      version: v3
-  template:
-    metadata:
-      labels:
-        app: reviews
-        version: v3
-    spec:
-      serviceAccountName: bookinfo-reviews
-      containers:
-      - name: reviews
-        image: docker.io/istio/examples-bookinfo-reviews-v3:1.19.1
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: LOG_DIR
-          value: "/tmp/logs"
-        ports:
-        - containerPort: 9080
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: wlp-output
-          mountPath: /opt/ibm/wlp/output
-      volumes:
-      - name: wlp-output
-        emptyDir: {}
-      - name: tmp
-        emptyDir: {}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: bookinfo-productpage
-  labels:
-    account: productpage
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: productpage-v1
-  labels:
-    app: productpage
-    version: v1
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: productpage
-      version: v1
-  template:
-    metadata:
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9080"
-        prometheus.io/path: "/metrics"
-      labels:
-        app: productpage
-        version: v1
-    spec:
-      serviceAccountName: bookinfo-productpage
-      containers:
-      - name: productpage
-        image: docker.io/istio/examples-bookinfo-productpage-v1:1.19.1
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 9080
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-      volumes:
-      - name: tmp
-        emptyDir: {}
-EOF
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $AWS_CLUSTER
+kubectl get pods --namespace cert-manager --context $AWS_CLUSTER
 ```
-
-</p></details>
-
-### Deploy Webhook Sidecar Injector to EKS
-```shell 
-kubectl apply -f sidecar-injection-webhook-spec.yaml --context $AWS_CLUSTER
-```
-### Watch logs from the webhook
+### Deploy Ziti K8S Agent Webhook to EKS
 ```shell
-kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep injector-wh` -n ziti --context  $AWS_CLUSTER -f
+kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $AWS_CLUSTER
+```
+### Watch logs from the Agent Webhook
+```shell
+kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER -f
 ```
 ### Deploy Bookinfo to EKS
 ```shell 
 kubectl create namespace test1 --context $AWS_CLUSTER
 kubectl label namespace test1 openziti/ziti-tunnel=enabled --context $AWS_CLUSTER
-kubectl apply -f bookinfo-app.yaml --context $AWS_CLUSTER -n test1
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1
 ```
 
-### Deploy Webhook Sidecar Injector to GKE
-```shell 
-kubectl apply -f sidecar-injection-webhook-spec.yaml --context $GKE_CLUSTER
-```
-### Watch logs from the webhook
+### Deploy Cert-manager CRDs to GKE
 ```shell
-kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep injector-wh` -n ziti --context  $GKE_CLUSTER -f
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
+kubectl get pods --namespace cert-manager --context $AWS_CLUSTER
+```
+### Deploy Ziti K8S Agent Webhook to GKE
+```shell
+kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $GKE_CLUSTER
+```
+### Watch logs from the Agent Webhook
+```shell
+kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER -f
 ```
 ### Deploy Bookinfo to GKE
 ```shell
 kubectl create namespace test2 --context $GKE_CLUSTER
 kubectl label namespace test2 openziti/ziti-tunnel=enabled --context $GKE_CLUSTER
-kubectl apply -f bookinfo-app.yaml --context $GKE_CLUSTER -n test2
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
 ```
 
 ### Check Identities Status
@@ -3946,8 +3701,8 @@ done
 
 ### Delete App and clean up of identities
 ```shell
-kubectl delete -f bookinfo-app.yaml --context $AWS_CLUSTER -n test1
-kubectl delete -f bookinfo-app.yaml --context $GKE_CLUSTER -n test2
+kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1
+kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
 ```
 ![image](./images/identitiesStatusDelete.png)
 

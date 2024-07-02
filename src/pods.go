@@ -118,17 +118,19 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		}
 
 		// update pod dns config and policy
-		if len(searchDomainList) > 0 {
+		if len(searchDomainList) == 0 {
 			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
 				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
-				Searches:    searchDomainList,
+				Searches:    []string{"cluster.local", fmt.Sprintf("%s.svc", pod.Namespace)},
 			}
 		} else {
 			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
 				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
-				Searches:    []string{"cluster.local", pod.Namespace + ".svc"},
+				Searches:    searchDomainList,
 			}
 		}
+		klog.Infof(fmt.Sprintf("DNS Searches are %s", searchDomainList))
+		klog.Infof(fmt.Sprintf("DNS Config are %s", pod.Spec.DNSConfig))
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
 		if err != nil {
 			klog.Error(err)
@@ -217,7 +219,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		}
 
 		reviewResponse.Patch = patchBytes
-		klog.Infof(fmt.Sprintf("Patch bytes: %s", reviewResponse.Patch))
+		// klog.Infof(fmt.Sprintf("Patch bytes: %s", reviewResponse.Patch))
 		pt := admissionv1.PatchTypeJSONPatch
 		reviewResponse.PatchType = &pt
 
