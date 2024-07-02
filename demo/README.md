@@ -25,7 +25,7 @@ Following binaries to be installed in the environment.
 1. Copy the code directly to the linux terminal to create required files/resources. 
 1. In AWS, the VPC and network will be created part of `eksctl create cluster` command and one needs to have administrator permissions. 
 1. Whereas in GKE, it is expected that VPC and network are already prebuilt. The service account is the part before @ and can be found under IAM-->Permissions, i.e. `{GKE_SERVICE_ACCOUNT}@{GKE_PROJECT_NAME}.iam.gserviceaccount.com`. The subnetwork is the subnet name and must be in the same region as indicated in GKE_REGION. 
-1. If you already have clusters up, then you can skip [Cluster(s) Deployment](#clusters-deployment) section. Go to [Export Cluster Context Names](#export-cluster-context-names), where you need to export your cluster context names as variables. Kubectl commands will utilized them in the subsequent sections. FYI, EKS and GKE are just examples, but this can work in any K8S cluster, whether is private or public.
+1. If you already have clusters up, then you can skip [Cluster(s) Deployment](#clusters-deployment) section. Go to [Export Cluster Context Names](#export-cluster-context-names), where you need to export your cluster context names as variables. Kubectl commands will utilize them in the subsequent sections. FYI, EKS and GKE are just examples, but this can work in any K8S cluster, whether is private or public.
 
 </p></details>
 
@@ -1917,6 +1917,11 @@ If you have the NF Console API credentials file in your test environment, then y
     <details><summary>Steps</summary><p>
 
       ```shell
+      export NF_API_CREDENTIALS_PATH="/path/to/your/netfoundry api credentials file"
+      export NF_NETWORK_NAME="Your Demo Network Name"
+
+      export NF_API_CLIENT_ID=`jq -r .clientId $NF_API_CREDENTIALS_PATH`
+      export NF_API_CLIENT_SECRET=`jq -r .password $NF_API_CREDENTIALS_PATH`
       export RESPONSE=`curl --silent --location --request POST "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token" \
                             --header "Content-Type: application/x-www-form-urlencoded" \
                             --user "$NF_API_CLIENT_ID:$NF_API_CLIENT_SECRET" --data-urlencode "grant_type=client_credentials"`
@@ -3194,7 +3199,7 @@ If you have the NF Console API credentials file in your test environment, then y
 
   <details><summary>Step</summary><p>
 
-  1. Enroll the admin user with th edowloaded jwt in the previous step
+  1. Enroll the admin user with the downloaded jwt in the previous step
   
       ```shell
       ziti edge enroll -j adminUser.jwt -o adminUser.json
@@ -3586,6 +3591,9 @@ EOF
 </p></details>
 
 ### Deploy Cert-manager CRDs to EKS
+
+Note: The cert-manager is to manage the webhook server x.509 Pair, therefore one needs to install the cert-manager CRDs if not already done it.
+
 ```shell
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $AWS_CLUSTER
 kubectl get pods --namespace cert-manager --context $AWS_CLUSTER
@@ -3699,17 +3707,52 @@ done
         <u>reviews-v1-5fd6d4f8f8-92rg4</u>
 ```
 
-### Delete App and clean up of identities
-```shell
-kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1
-kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
-```
-![image](./images/identitiesStatusDelete.png)
+</p></details>
 
-### Delete Clusters
-```shell
-eksctl delete cluster -f ./eks-cluster.yaml --profile $AWS_PROFILE --force --disable-nodegroup-eviction 
-gcloud container --project $GKE_PROJECT_NAME clusters delete $CLUSTER_NAME --region $GKE_REGION
-```
+## Clean up
+
+<details><summary>Details</summary><p>
+
+  ### Delete App and clean up of identities
+  ```shell
+  kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1
+  kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
+  ```
+  ![image](./images/identitiesStatusDelete.png)
+
+  ### Delete Clusters
+  ```shell
+  eksctl delete cluster -f ./eks-cluster.yaml --profile $AWS_PROFILE --force --disable-nodegroup-eviction 
+  gcloud container --project $GKE_PROJECT_NAME clusters delete $CLUSTER_NAME --region $GKE_REGION
+  ```
+
+  ### Delete NF Network - NF API
+
+  <details><summary>Steps</summary><p>
+
+  ```shell
+  if [ -z "$NF_API_CREDENTIALS_PATH" ] || [ -z "$NF_NETWORK_NAME" ]; then
+    echo "Error: Variable 'NF_API_CREDENTIALS_PATH' or 'NF_NETWORK_NAME' is not set!"
+    exit 1
+  fi
+  
+  export NF_API_CLIENT_ID=`jq -r .clientId $NF_API_CREDENTIALS_PATH`
+  export NF_API_CLIENT_SECRET=`jq -r .password $NF_API_CREDENTIALS_PATH`
+  export RESPONSE=`curl --silent --location --request POST "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token" \
+                        --header "Content-Type: application/x-www-form-urlencoded" \
+                        --user "$NF_API_CLIENT_ID:$NF_API_CLIENT_SECRET" --data-urlencode "grant_type=client_credentials"`
+  export token=`echo $RESPONSE |jq -r .access_token`
+  export token_type=`echo $RESPONSE |jq -r .token_type`
+  export network_list=`curl --silent --location --request GET "https://gateway.production.netfoundry.io/core/v3/networks" \
+        --header "Content-Type: application/json" \
+        --header "Authorization: $token_type $token"`
+  export network_id=`echo $network_list | jq -r --arg NF_NETWORK_NAME "$NF_NETWORK_NAME" '._embedded.networkList[] | select(.name==$NF_NETWORK_NAME).id'`
+  export network_status=`curl --silent --location --request DELETE "https://gateway.production.netfoundry.io/core/v3/networks/$network_id" \
+        --header "Content-Type: application/json" \
+        --header "Authorization: $token_type $token"`
+  echo $network_status
+  ```
+
+  </p></details>
 
 </p></details>

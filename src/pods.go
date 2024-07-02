@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	zitiEdge "ziti-k8s-agent/ziti-edge"
+
+	zitiEdge "github.com/ziti-k8s-agent/ziti-edge"
 
 	"github.com/google/uuid"
 	"github.com/openziti/edge-api/rest_management_api_client"
@@ -129,8 +130,6 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 				Searches:    searchDomainList,
 			}
 		}
-		klog.Infof(fmt.Sprintf("DNS Searches are %s", searchDomainList))
-		klog.Infof(fmt.Sprintf("DNS Config are %s", pod.Spec.DNSConfig))
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
 		if err != nil {
 			klog.Error(err)

@@ -1,4 +1,4 @@
-module ziti-k8s-agent
+module github.com/dariuszski/ziti-k8s-agent
 
 go 1.22.3
 

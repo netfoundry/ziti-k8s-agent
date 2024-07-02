@@ -8,11 +8,11 @@ ARG ARTIFACTS_DIR=build
 ARG DOCKER_BUILD_DIR=.
 
 ### Required OpenShift Labels
-LABEL name="openziti/ziti-router" \
+LABEL name="openziti/ziti-cli" \
       maintainer="developers@openziti.org" \
       vendor="NetFoundry" \
-      summary="Run the OpenZiti Router" \
-      description="Run the OpenZiti Router"
+      summary="Run the OpenZiti Cli" \
+      description="Run the OpenZiti CLI"
 
 # set up image as root
 USER root
