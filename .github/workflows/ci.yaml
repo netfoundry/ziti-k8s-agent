@@ -30,4 +30,4 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: elblag91/ziti-k8s-agent:${{ github.run_id }}
+          tags: elblag91/ziti-k8s-agent:${{ github.ref_name }}

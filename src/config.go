@@ -109,8 +109,7 @@ func lookupEnvVars() {
 	}
 	value, ok = os.LookupEnv("CLUSTER_DNS_SVC_IP")
 	if !ok || len(value) == 0 {
-		klog.Infof(fmt.Sprintf("Custom DNS Server IP is not set"))
-		klog.Infof(fmt.Sprintf("DNS Service ClusterIP will be looked up"))
+		klog.Infof(fmt.Sprintf("Custom DNS Server IP is not set, ClusterIP will be used instead"))
 	} else {
 		clusterDnsServiceIP = value
 	}
