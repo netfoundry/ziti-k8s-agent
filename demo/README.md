@@ -3377,7 +3377,7 @@ export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | g
 
 </p></details>
 
-## Ziti K8S Agent Webhook and BookInfo Application Deployment (UC1)
+## Ziti K8S Agent Webhook and BookInfo Application Deployment
 
 <details><summary>Details</summary><p>
 
@@ -3722,6 +3722,8 @@ done
 
 ## Repeat App Test and Verification of Access to Bookinfo Application (UC2)
 
+<details><summary>Details</summary><p>
+
 ### Modify the BookInfo deployment to match UC2
 
 1. Scale down respective microservices deployments to 0
@@ -3749,8 +3751,10 @@ done
     details-v1-cf74bb974-gq7z6    2/2     Running   0          32m
     ratings-v1-7c4bbf97db-wxrdb   2/2     Running   0          32m
     ```
-
+    ***Note!: Only single identity per microservice left on the network.***
     ![image](./images/identitiesStatusUc2.png)
+
+### Execute the test 
 
 1. Re-run the bash script 
 
@@ -3761,7 +3765,39 @@ done
     done
     ```
 
-### Execute the test 
+1. Cli Result
+
+    ```shell
+    for i in $(seq 1 20);
+    do
+        curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews
+    done
+            <u>reviews-v1-5fd6d4f8f8-kxls6</u>
+            <u>reviews-v2-6f9b55c5db-47958</u>
+            <u>reviews-v1-5fd6d4f8f8-kxls6</u>
+            <u>reviews-v3-7d99fd7978-c55lq</u>
+            <u>reviews-v2-6f9b55c5db-47958</u>
+            <u>reviews-v1-5fd6d4f8f8-kxls6</u>
+            <u>reviews-v2-6f9b55c5db-47958</u>
+            <u>reviews-v3-7d99fd7978-c55lq</u>
+            <u>reviews-v2-6f9b55c5db-47958</u>
+            <u>reviews-v3-7d99fd7978-c55lq</u>
+            <u>reviews-v3-7d99fd7978-c55lq</u>
+            <u>reviews-v2-6f9b55c5db-47958</u>
+            <u>reviews-v1-5fd6d4f8f8-kxls6</u>
+            <u>reviews-v3-7d99fd7978-c55lq</u>
+            <u>reviews-v2-6f9b55c5db-47958</u>
+            <u>reviews-v1-5fd6d4f8f8-kxls6</u>
+            <u>reviews-v2-6f9b55c5db-47958</u>
+            <u>reviews-v1-5fd6d4f8f8-kxls6</u>
+            <u>reviews-v3-7d99fd7978-c55lq</u>
+            <u>reviews-v1-5fd6d4f8f8-kxls6</u>
+    ```
+1. Browser View on Windows
+
+    ![image](./images/browserReviewsView.png)
+
+</p></details>
 
 ## Clean up
 
