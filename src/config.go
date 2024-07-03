@@ -51,31 +51,28 @@ func lookupEnvVars() {
 	}
 
 	value, ok = os.LookupEnv("PORT")
-	if !ok || len(value) == 0 {
+	if (!ok || len(value) == 0) && port <= 0 {
 		klog.Error(&MissingEnvVarError{variable: "PORT"})
 	} else {
-		port, err = strconv.Atoi(value)
-		if err != nil {
-			klog.Error(err)
-		}
+		port, _ = strconv.Atoi(value)
 	}
 
 	value, ok = os.LookupEnv("SIDECAR_IMAGE")
-	if !ok || len(value) == 0 {
+	if (!ok || len(value) == 0) && len(sidecarImage) == 0 {
 		klog.Error(&MissingEnvVarError{variable: "SIDECAR_IMAGE"})
 	} else {
 		sidecarImage = value
 	}
 
 	value, ok = os.LookupEnv("SIDECAR_IMAGE_VERSION")
-	if !ok || len(value) == 0 {
+	if (!ok || len(value) == 0) && len(sidecarImageVersion) == 0 {
 		klog.Error(&MissingEnvVarError{variable: "SIDECAR_IMAGE_VERSION"})
 	} else {
 		sidecarImageVersion = value
 	}
 
 	value, ok = os.LookupEnv("SIDECAR_PREFIX")
-	if !ok || len(value) == 0 {
+	if (!ok || len(value) == 0) && len(sidecarPrefix) == 0 {
 		klog.Error(&MissingEnvVarError{variable: "SIDECAR_PREFIX"})
 	} else {
 		sidecarPrefix = value
@@ -129,7 +126,7 @@ func lookupEnvVars() {
 	if ok {
 		searchDomainList = []string(strings.Split(value, " "))
 	} else {
-		klog.Infof(fmt.Sprintf("A list of DNS search domains for host-name lookup is not set"))
+		klog.Infof(fmt.Sprintf("A list of Custom DNS search domains for host-name lookup is not set, will set the Kubernetes default"))
 	}
 
 }

@@ -27,7 +27,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: deployment/Dockerfile
+          file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: elblag91/ziti-k8s-agent:latest
+          tags: elblag91/ziti-k8s-agent:${{ github.run_id }}

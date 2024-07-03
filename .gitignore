@@ -21,7 +21,7 @@
 go.work
 
 # build dir
-build/
+build
 
 #config files
 *.json

@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"strings"
 
-	zitiEdge "github.com/ziti-k8s-agent/ziti-edge"
+	zitiEdge "github.com/dariuszski/ziti-k8s-agent/src/ziti-edge"
 
 	"github.com/google/uuid"
 	"github.com/openziti/edge-api/rest_management_api_client"

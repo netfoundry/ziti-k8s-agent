@@ -1,8 +1,13 @@
-FROM golang:1.22 as builder
+FROM golang:1.22 AS build-stage
 WORKDIR /app
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./ziti-k8s-agent ./src/./...
+COPY src/ .
+RUN go mod init ziti-k8s-agent
+RUN go mod tidy
+RUN go build -o build/ ./...
 
-FROM scratch as final
-COPY --chown=1001:1001 --from=builder /app/ziti-k8s-agent /ziti-k8s-agent
-USER app
-ENTRYPOINT ["/ziti-k8s-agent"]
+FROM cgr.dev/chainguard/wolfi-base:latest AS build-release-stage
+USER root
+COPY --from=build-stage /app/build/ziti-k8s-agent /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/ziti-k8s-agent
+USER nobody
+ENTRYPOINT ["ziti-k8s-agent"]
