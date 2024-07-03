@@ -220,6 +220,7 @@ func webhook(cmd *cobra.Command, args []string) {
 	// load env vars to override the command line vars if any
 	lookupEnvVars()
 
+	klog.Infof("AC WH Server is listening on port %d", port)
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),

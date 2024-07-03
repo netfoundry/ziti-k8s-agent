@@ -6,7 +6,18 @@
 
 Cloud Native Aplications that are distributed over more than one region and are required to enforce granular access controls ensuring that only authorized users/microservices can interact with specific microservices at the pod level.
 
+1. NetFoundry Proxy Sidecar View
+
 ![image](./images/k8s-distributed-app.svg)
+
+
+1. UC - Identical replicas across clusters
+
+![image](./images/bookinfo-identical-replicas-across-clusters.svg)
+
+1. UC - Microservices split across clusters
+
+![image](./images/bookinfo-split-microservices-across-clusters.svg)
 
 ### Prerequisities:
 Following binaries to be installed in the environment. 
@@ -1916,10 +1927,9 @@ If you have the NF Console API credentials file in your test environment, then y
 
     <details><summary>Steps</summary><p>
 
-      ```shell
-      export NF_API_CREDENTIALS_PATH="/path/to/your/netfoundry api credentials file"
-      export NF_NETWORK_NAME="Your Demo Network Name"
+    Copy the code and skip to [Admin and Test User Enrollment](#admin-and-test-user-enrollment)
 
+      ```shell
       export NF_API_CLIENT_ID=`jq -r .clientId $NF_API_CREDENTIALS_PATH`
       export NF_API_CLIENT_SECRET=`jq -r .password $NF_API_CREDENTIALS_PATH`
       export RESPONSE=`curl --silent --location --request POST "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token" \
@@ -3236,10 +3246,11 @@ export AWS_SSO_ACCOUNT_ID="Your actaul Account ID"
 export AWS_SSO_SESSION="Name can be anything"
 export AWS_SSO_START_URL="Your actual SSO start URL"
 export AWS_SSO_REGION="Region where your SSO was set up"
+export AWS_REGION="Region where cluster to be deployed"
 export GKE_PROJECT_NAME="Your actual Project Name"
 export GKE_NETWORK_NAME="The actual Network Name within your Project"
 export GKE_SUBNETWORK_NAME="The actual Subnet Name within the above Network"
-export GKE_SERVICE_ACCOUNT="The service account within the Project"
+export GKE_SERVICE_ACCOUNT="The service account within the Project, i.e. {GKE_SERVICE_ACCOUNT}@"
 export GKE_REGION="The region where the above subnet is configured"
 ```
 
@@ -3255,7 +3266,7 @@ export GKE_REGION="The region where the above subnet is configured"
     cat <<EOF >~/.aws/config
       [sso-session ${AWS_SSO_SESSION}]
       sso_start_url = ${AWS_SSO_START_URL}
-      sso_region = us-east-1
+      sso_region = ${AWS_SSO_REGION}
       sso_registration_scopes = sso:account:access
       [profile ${AWS_PROFILE}]
       sso_session = ${AWS_SSO_SESSION}
@@ -3366,7 +3377,7 @@ export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | g
 
 </p></details>
 
-## Ziti K8S Agent Webhook and Test Application Deployment
+## Ziti K8S Agent Webhook and BookInfo Application Deployment (UC1)
 
 <details><summary>Details</summary><p>
 
@@ -3639,7 +3650,7 @@ Identities should be all green as shown in this screen shot.
 
 </p></details>
 
-## App Test and Verification of Access to Test Application
+## App Test and Verification of Access to Bookinfo Application (UC1)
 
 <details><summary>Details</summary><p>
 
@@ -3708,6 +3719,12 @@ done
 ```
 
 </p></details>
+
+## Repeat App Test and Verification of Access to Bookinfo Application (UC2)
+
+### Modify the BookInfo deployment to match UC2
+
+### Execute the test 
 
 ## Clean up
 
