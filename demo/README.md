@@ -8,16 +8,16 @@ Cloud Native Aplications that are distributed over more than one region and are 
 
 1. NetFoundry Proxy Sidecar View
 
-![image](./images/k8s-distributed-app.svg)
+    ![image](./images/k8s-distributed-app.svg)
 
 
 1. UC - Identical replicas across clusters
 
-![image](./images/bookinfo-identical-replicas-across-clusters.svg)
+    ![image](./images/bookinfo-identical-replicas-across-clusters.svg)
 
 1. UC - Microservices split across clusters
 
-![image](./images/bookinfo-split-microservices-across-clusters.svg)
+    ![image](./images/bookinfo-split-microservices-across-clusters.svg)
 
 ### Prerequisities:
 Following binaries to be installed in the environment. 
@@ -3723,6 +3723,43 @@ done
 ## Repeat App Test and Verification of Access to Bookinfo Application (UC2)
 
 ### Modify the BookInfo deployment to match UC2
+
+1. Scale down respective microservices deployments to 0
+    ```shell
+    kubectl scale deploy details-v1 --replicas=0 -n test1 --context  $AWS_CLUSTER
+    kubectl scale deploy ratings-v1 --replicas=0 -n test1 --context  $AWS_CLUSTER
+    kubectl scale deploy productpage-v1 --replicas=0 -n test2 --context  $GKE_CLUSTER
+    kubectl scale deploy reviews-v1 --replicas=0 -n test2 --context  $GKE_CLUSTER
+    kubectl scale deploy reviews-v2 --replicas=0 -n test2 --context  $GKE_CLUSTER
+    kubectl scale deploy reviews-v3 --replicas=0 -n test2 --context  $GKE_CLUSTER
+    ```
+1. Relist Pods
+
+    ```shell
+    kubectl get pods -n test1 --context  $AWS_CLUSTER
+    kubectl get pods -n test2 --context  $GKE_CLUSTER
+    ```
+    ```shell
+    NAME                             READY   STATUS    RESTARTS   AGE
+    productpage-v1-87d54dd59-zgjgp   2/2     Running   0          35m
+    reviews-v1-5fd6d4f8f8-kxls6      2/2     Running   0          35m
+    reviews-v2-6f9b55c5db-47958      2/2     Running   0          35m
+    reviews-v3-7d99fd7978-c55lq      2/2     Running   0          35m
+    NAME                          READY   STATUS    RESTARTS   AGE
+    details-v1-cf74bb974-gq7z6    2/2     Running   0          32m
+    ratings-v1-7c4bbf97db-wxrdb   2/2     Running   0          32m
+    ```
+
+    ![image](./images/identitiesStatusUc2.png)
+
+1. Re-run the bash script 
+
+    ```shell
+    for i in $(seq 1 20);
+    do
+        curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews
+    done
+    ```
 
 ### Execute the test 
 
