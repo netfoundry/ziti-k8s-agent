@@ -1,4 +1,4 @@
-package zitiEdge
+package zitiedge
 
 import (
 	"context"

@@ -1,11 +1,11 @@
-package main
+package kubernetes
 
 import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
-func kubernetesClient() *kubernetes.Clientset {
+func Client() *kubernetes.Clientset {
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {

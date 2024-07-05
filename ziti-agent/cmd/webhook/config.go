@@ -1,4 +1,4 @@
-package main
+package webhook
 
 import (
 	"crypto/tls"
@@ -9,12 +9,6 @@ import (
 
 	"k8s.io/klog/v2"
 )
-
-// Define sidecar config options
-type SidecarConfig struct {
-	Image string `json:"image"`
-	Name  string `json:"name"`
-}
 
 type MissingEnvVarError struct {
 	variable string
@@ -108,7 +102,7 @@ func lookupEnvVars() {
 	if ok && len(value) > 0 {
 		zitiCtrlMgmtApi = value
 	} else {
-		if key == nil {
+		if len(zitiCtrlMgmtApi) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_MGMT_API"})
 			klog.Error(&MissingCmdLineVarError{variable: "ZITI_CTRL_MGMT_API"})
 		}
@@ -146,7 +140,7 @@ func lookupEnvVars() {
 	if ok && len(value) > 0 {
 		clusterDnsServiceIP = value
 	} else {
-		if len(zitiRoleKey) == 0 {
+		if len(clusterDnsServiceIP) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "CLUSTER_DNS_SVC_IP"})
 			klog.Error(&MissingCmdLineVarError{variable: "CLUSTER_DNS_SVC_IP"})
 			klog.Infof(fmt.Sprintf("Custom DNS Server IP not set, Cluster DNS IP will be used instead"))
@@ -155,12 +149,14 @@ func lookupEnvVars() {
 
 	value, ok = os.LookupEnv("SEARCH_DOMAIN_LIST")
 	if ok && len(value) > 0 {
-		searchDomainList = []string(strings.Split(value, " "))
+		searchDomains = []string(strings.Split(value, " "))
 	} else {
-		if len(zitiRoleKey) == 0 {
+		if len(searchDomainList) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "SEARCH_DOMAIN_LIST"})
 			klog.Error(&MissingCmdLineVarError{variable: "SEARCH_DOMAIN_LIST"})
 			klog.Infof(fmt.Sprintf("Custom DNS search domains not set, Kubernetes default domains will be used instead"))
+		} else {
+			searchDomains = []string(strings.Split(searchDomainList, " "))
 		}
 	}
 
