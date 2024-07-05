@@ -3387,7 +3387,7 @@ export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | g
 
 ```shell
 if [ -z "$NF_ADMIN_IDENTITY_PATH" ]; then
-  echo "Error: Variable 'NF_IDENTITY_PATH' is not set!"
+  echo "Error: Variable 'NF_ADMIN_IDENTITY_PATH' is not set!"
   exit 1
 fi
 
