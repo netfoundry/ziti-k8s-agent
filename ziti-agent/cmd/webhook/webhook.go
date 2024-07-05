@@ -1,4 +1,4 @@
-package main
+package webhook
 
 import (
 	"encoding/json"
@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/dariuszski/ziti-k8s-agent/ziti-agent/cmd/common"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
@@ -15,67 +16,10 @@ import (
 )
 
 var (
-	certFile               string
-	keyFile                string
-	cert                   []byte
-	key                    []byte
-	zitiAdminCert          []byte
-	zitiAdminKey           []byte
-	port                   int
-	sidecarImage           string
-	sidecarImageVersion    string
-	sidecarPrefix          string
-	zitiCtrlMgmtApi        string
-	zitiCtrlClientCertFile string
-	zitiCtrlClientKeyFile  string
-	podSecurityOverride    bool
-	clusterDnsServiceIP    string
-	searchDomainList       []string
-	zitiIdentityRoles      []string
-	zitiRoleKey            string
-	value                  string
-	ok                     bool
-	err                    error
-	runtimeScheme          = runtime.NewScheme()
+	runtimeScheme = runtime.NewScheme()
 )
 
-var CmdWebhook = &cobra.Command{
-	Use:   "webhook",
-	Short: "Starts a HTTP server,  Mutating Admission Webhook for injecting ziti sidecars",
-	Long: `Starts a HTTP server, Mutating Admission Webhook for injecting ziti sidecars.
-After deploying it to Kubernetes cluster, it listens to events related to pods CRUD operations.`,
-	Args: cobra.MaximumNArgs(0),
-	Run:  webhook,
-}
-
 func init() {
-	CmdWebhook.Flags().StringVar(&certFile, "tls-cert-file", "",
-		"File containing the default x509 Certificate for HTTPS.")
-	CmdWebhook.Flags().StringVar(&keyFile, "tls-private-key-file", "",
-		"File containing the default x509 private key matching --tls-cert-file.")
-	CmdWebhook.Flags().IntVar(&port, "port", 9443,
-		"Secure port that the webhook listens on")
-	CmdWebhook.Flags().StringVar(&sidecarImage, "sidecar-image", "openziti/ziti-tunnel",
-		"Image to be used as the injected sidecar")
-	CmdWebhook.Flags().StringVar(&sidecarImageVersion, "sidecar-image-version", "latest",
-		"Image Varsion to be used as the injected sidecar")
-	CmdWebhook.Flags().StringVar(&sidecarPrefix, "sidecar-prefix", "zt",
-		"ContainerName to be used for the injected sidecar")
-	CmdWebhook.Flags().StringVar(&zitiCtrlMgmtApi, "ziti-ctrl-addr", "",
-		"Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1 ")
-	CmdWebhook.Flags().StringVar(&zitiCtrlClientCertFile, "ziti-ctrl-client-cert-file", "",
-		"Ziti Controller Client Certificate")
-	CmdWebhook.Flags().StringVar(&zitiCtrlClientKeyFile, "ziti-ctrl-client-key-file", "",
-		"Ziti Controller Client Private Key")
-	CmdWebhook.Flags().BoolVar(&podSecurityOverride, "pod-sc-override", false,
-		"Override the security context at pod level, i.e. runAsNonRoot: false")
-	CmdWebhook.Flags().StringVar(&clusterDnsServiceIP, "cluster-dns-svc-ip", "",
-		"Cluster DNS Service IP")
-	CmdWebhook.Flags().StringSliceVar(&searchDomainList, "search-domain-list", []string{},
-		"A list of DNS search domains for host-name lookup")
-	CmdWebhook.Flags().StringVar(&zitiRoleKey, "ziti-role-key", "",
-		"Ziti Identity Role Key used in pod annotation")
-
 	/*
 		AdmissionReview is registered for version admission.k8s.io/v1 or admission.k8s.io/v1beta1
 		in scheme "https://github.com/kubernetes/apimachinery/blob/master/pkg/runtime/scheme.go:100"
@@ -189,7 +133,7 @@ func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
 
 func webhook(cmd *cobra.Command, args []string) {
 
-	klog.Infof("Current version is %s", Version)
+	klog.Infof("Current version is %s", common.Version)
 
 	// process certs passed from the file through the command line
 	if certFile != "" && keyFile != "" {
