@@ -77,7 +77,7 @@ spec:
     spec:
       containers:
       - name: ziti-admission-webhook
-        image: docker.io/elblag91/ziti-k8s-agent:latest
+        image: docker.io/netfoundry/ziti-k8s-agent:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 9443
