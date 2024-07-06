@@ -21,6 +21,9 @@ Cloud Native Aplications that are distributed over more than one region and are 
 
     ![image](./images/bookinfo-split-microservices-across-clusters.svg)
 
+
+***Note: You can also watch the video where we talk about this demo to help you follow along and explain some of the details further. [Demo Video](https://youtu.be/X5gAs1nykG8)***
+
 ### Prerequisities:
 Following binaries to be installed in the environment. 
 
