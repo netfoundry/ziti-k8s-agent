@@ -6,18 +6,23 @@
 
 Cloud Native Aplications that are distributed over more than one region and are required to enforce granular access controls ensuring that only authorized users/microservices can interact with specific microservices at the pod level.
 
-1. NetFoundry Proxy Sidecar General View
+1. NetFoundry Proxy Sidecar - Use Case General View
 
     ![image](./images/k8s-distributed-app.svg)
 
 
-1. UC - Identical replicas across clusters
+1. Istio Bookinfo Application Example 
+
+    1. Logical View - Identical replicas across clusters
 
     ![image](./images/bookinfo-identical-replicas-across-clusters.svg)
 
-1. UC - Microservices split across clusters
+    1. Logical View  - Microservices split across clusters
 
     ![image](./images/bookinfo-split-microservices-across-clusters.svg)
+
+
+***Note: You can also watch the video where we talk about this demo to help you follow along and explain some of the details further. [Demo Video](https://youtu.be/X5gAs1nykG8)***
 
 ### Prerequisities:
 Following binaries to be installed in the environment. 
