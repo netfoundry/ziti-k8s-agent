@@ -6,7 +6,7 @@
 
 Cloud Native Aplications that are distributed over more than one region and are required to enforce granular access controls ensuring that only authorized users/microservices can interact with specific microservices at the pod level.
 
-1. NetFoundry Proxy Sidecar View
+1. NetFoundry Proxy Sidecar General View
 
     ![image](./images/k8s-distributed-app.svg)
 
@@ -21,22 +21,172 @@ Cloud Native Aplications that are distributed over more than one region and are 
 
 ### Prerequisities:
 Following binaries to be installed in the environment. 
-1. [ziti cli](https://github.com/openziti/ziti/releases)
+
+If one uses this guide to deploy clusters to AWS and /or Google Cloud
 1. [gcloud cli](https://cloud.google.com/sdk/docs/install)
 1. [gcloud auth plugin](https://cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl#install_plugin)
 1. [eksctl cli](https://eksctl.io/installation/)
 1. [aws cli](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions)
+
+Otherwise only these
 1. [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
+1. [ziti cli](https://github.com/openziti/ziti/releases)
 1. [postman cli](https://learning.postman.com/docs/postman-cli/postman-cli-installation/)
 1. [jq](https://jqlang.github.io/jq/download/)
 
 
-### Notes
+### General Notes
 
 1. Copy the code directly to the linux terminal to create required files/resources. 
+1. One needs to [Export Existing Cluster Context Names](#export-cluster-context-names) as variables if skipping [Cluster(s) Deployment Section](#clusters-deployment). Kubectl commands will utilize them in the subsequent sections. FYI, EKS and GKE are just examples, but this can work in any K8S cluster, whether is private or public.
+
+### Cluster Deployment Notes
 1. In AWS, the VPC and network will be created part of `eksctl create cluster` command and one needs to have administrator permissions. 
 1. Whereas in GKE, it is expected that VPC and network are already prebuilt. The service account is the part before @ and can be found under IAM-->Permissions, i.e. `{GKE_SERVICE_ACCOUNT}@{GKE_PROJECT_NAME}.iam.gserviceaccount.com`. The subnetwork is the subnet name and must be in the same region as indicated in GKE_REGION. 
-1. If you already have clusters up, then you can skip [Cluster(s) Deployment](#clusters-deployment) section. Go to [Export Cluster Context Names](#export-cluster-context-names), where you need to export your cluster context names as variables. Kubectl commands will utilize them in the subsequent sections. FYI, EKS and GKE are just examples, but this can work in any K8S cluster, whether is private or public.
+
+</p></details>
+
+## Cluster(s) Deployment
+
+<details><summary>Details</summary><p>
+
+### Export EKS/GKE Details
+
+```shell
+export CLUSTER_NAME="Name can be anything"
+export AWS_PROFILE="Name can be anything"
+export AWS_SSO_ACCOUNT_ID="Your actaul Account ID"
+export AWS_SSO_SESSION="Name can be anything"
+export AWS_SSO_START_URL="Your actual SSO start URL"
+export AWS_SSO_REGION="Region where your SSO was set up"
+export AWS_REGION="Region where cluster to be deployed"
+export GKE_PROJECT_NAME="Your actual Project Name"
+export GKE_NETWORK_NAME="The actual Network Name within your Project"
+export GKE_SUBNETWORK_NAME="The actual Subnet Name within the above Network"
+export GKE_SERVICE_ACCOUNT="The service account within the Project, i.e. {GKE_SERVICE_ACCOUNT}@"
+export GKE_REGION="The region where the above subnet is configured"
+```
+
+### AWS
+
+1. Create AWS Profiles if not done already
+    
+    ***Note: May have to create ~/.aws folder first.***
+
+    <details><summary>Code</summary><p>
+
+    ```shell
+    cat <<EOF >~/.aws/config
+      [sso-session ${AWS_SSO_SESSION}]
+      sso_start_url = ${AWS_SSO_START_URL}
+      sso_region = ${AWS_SSO_REGION}
+      sso_registration_scopes = sso:account:access
+      [profile ${AWS_PROFILE}]
+      sso_session = ${AWS_SSO_SESSION}
+      sso_account_id = ${AWS_SSO_ACCOUNT_ID}
+      sso_role_name = Administrator
+      region = us-east-2
+      output = json
+      [default]
+      region = us-east-2
+    EOF
+    ```
+
+    </p></details>
+
+1. Login with SSO
+
+    ```shell
+    aws sso login --profile $AWS_PROFILE
+    ```
+    If can not launch browser from terminal
+    ```shell
+    aws sso login --profile $AWS_PROFILE --no-browser
+    ```
+    
+1. Create cluster config template
+
+    <details><summary>Code</summary><p>
+
+    ```shell
+    cat <<EOF >eks-cluster.yaml
+    apiVersion: eksctl.io/v1alpha5
+    kind: ClusterConfig
+    metadata:
+      name: ${CLUSTER_NAME}
+      region: ${AWS_REGION}
+      version: "1.28"
+    managedNodeGroups:
+    - name: ng-1
+      instanceType: t3.medium
+      iam:
+          withAddonPolicies:
+            ebs: true
+            fsx: true
+            efs: true
+      desiredCapacity: 2
+      privateNetworking: true
+      labels:
+        nodegroup-type: workloads
+      tags:
+        nodegroup-role: worker
+    vpc:
+      cidr: 10.10.0.0/16
+      publicAccessCIDRs: []
+      # disable public access to endpoint and only allow private access
+      clusterEndpoints:
+        publicAccess: true
+        privateAccess: true
+    EOF
+    ```
+
+    </p></details>
+
+1. Create cluster
+    ```shell
+    eksctl create cluster -f ./eks-cluster.yaml --profile $AWS_PROFILE
+    ```
+
+### GCLOUD
+1. Login
+    ```shell
+    gcloud auth login
+    ```
+    If can not launch browser from terminal
+    ```shell
+    gcloud auth login --no-browser
+    ````
+1. Create cluster
+    ```shell
+    gcloud container --project $GKE_PROJECT_NAME clusters create $CLUSTER_NAME \
+      --region $GKE_REGION --no-enable-basic-auth \
+      --release-channel "regular" --machine-type "e2-medium" \
+      --image-type "COS_CONTAINERD" --disk-type "pd-balanced" \
+      --disk-size "100" --metadata disable-legacy-endpoints=true \
+      --service-account "$GKE_SERVICE_ACCOUNT@$GKE_PROJECT_NAME.iam.gserviceaccount.com" \
+      --logging=SYSTEM,WORKLOAD --monitoring=SYSTEM --enable-ip-alias \
+      --network "projects/$GKE_PROJECT_NAME/global/networks/$GKE_NETWORK_NAME" \
+      --subnetwork "projects/$GKE_PROJECT_NAME/regions/$GKE_REGION/subnetworks/$GKE_SUBNETWORK_NAME" \
+      --no-enable-intra-node-visibility --cluster-dns=clouddns --cluster-dns-scope=cluster \
+      --default-max-pods-per-node "110" --security-posture=standard \
+      --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks \
+      --addons HorizontalPodAutoscaling,NodeLocalDNS,GcePersistentDiskCsiDriver \
+      --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 \
+      --max-unavailable-upgrade 0 --binauthz-evaluation-mode=DISABLED \
+      --enable-managed-prometheus --enable-shielded-nodes --num-nodes "1"
+    ```
+
+</p></details>
+
+## Export Cluster Context Names
+
+<details><summary>Details</summary><p>
+
+If you have your own clusters, then you need to replace the dynamic cluster name search to actual cluster names, i.e. `export AWS_CLUSTER={your cluster context name}`, etc.
+```shell
+export AWS_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep eksctl`
+export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep gke`
+```
 
 </p></details>
 
@@ -3233,149 +3383,6 @@ If you have the NF Console API credentials file in your test environment, then y
     
 </p></details>
 
-## Cluster(s) Deployment
-
-<details><summary>Details</summary><p>
-
-### Export EKS/GKE Details
-
-```shell
-export CLUSTER_NAME="Name can be anything"
-export AWS_PROFILE="Name can be anything"
-export AWS_SSO_ACCOUNT_ID="Your actaul Account ID"
-export AWS_SSO_SESSION="Name can be anything"
-export AWS_SSO_START_URL="Your actual SSO start URL"
-export AWS_SSO_REGION="Region where your SSO was set up"
-export AWS_REGION="Region where cluster to be deployed"
-export GKE_PROJECT_NAME="Your actual Project Name"
-export GKE_NETWORK_NAME="The actual Network Name within your Project"
-export GKE_SUBNETWORK_NAME="The actual Subnet Name within the above Network"
-export GKE_SERVICE_ACCOUNT="The service account within the Project, i.e. {GKE_SERVICE_ACCOUNT}@"
-export GKE_REGION="The region where the above subnet is configured"
-```
-
-### AWS
-
-1. Create AWS Profiles if not done already
-    
-    ***Note: May have to create ~/.aws folder first.***
-
-    <details><summary>Code</summary><p>
-
-    ```shell
-    cat <<EOF >~/.aws/config
-      [sso-session ${AWS_SSO_SESSION}]
-      sso_start_url = ${AWS_SSO_START_URL}
-      sso_region = ${AWS_SSO_REGION}
-      sso_registration_scopes = sso:account:access
-      [profile ${AWS_PROFILE}]
-      sso_session = ${AWS_SSO_SESSION}
-      sso_account_id = ${AWS_SSO_ACCOUNT_ID}
-      sso_role_name = Administrator
-      region = us-east-2
-      output = json
-      [default]
-      region = us-east-2
-    EOF
-    ```
-
-    </p></details>
-
-1. Login with SSO
-
-    ```shell
-    aws sso login --profile $AWS_PROFILE
-    ```
-    If can not launch browser from terminal
-    ```shell
-    aws sso login --profile $AWS_PROFILE --no-browser
-    ```
-    
-1. Create cluster config template
-
-    <details><summary>Code</summary><p>
-
-    ```shell
-    cat <<EOF >eks-cluster.yaml
-    apiVersion: eksctl.io/v1alpha5
-    kind: ClusterConfig
-    metadata:
-      name: ${CLUSTER_NAME}
-      region: ${AWS_REGION}
-      version: "1.28"
-    managedNodeGroups:
-    - name: ng-1
-      instanceType: t3.medium
-      iam:
-          withAddonPolicies:
-            ebs: true
-            fsx: true
-            efs: true
-      desiredCapacity: 2
-      privateNetworking: true
-      labels:
-        nodegroup-type: workloads
-      tags:
-        nodegroup-role: worker
-    vpc:
-      cidr: 10.10.0.0/16
-      publicAccessCIDRs: []
-      # disable public access to endpoint and only allow private access
-      clusterEndpoints:
-        publicAccess: true
-        privateAccess: true
-    EOF
-    ```
-
-    </p></details>
-
-1. Create cluster
-    ```shell
-    eksctl create cluster -f ./eks-cluster.yaml --profile $AWS_PROFILE
-    ```
-
-### GCLOUD
-1. Login
-    ```shell
-    gcloud auth login
-    ```
-    If can not launch browser from terminal
-    ```shell
-    gcloud auth login --no-browser
-    ````
-1. Create cluster
-    ```shell
-    gcloud container --project $GKE_PROJECT_NAME clusters create $CLUSTER_NAME \
-      --region $GKE_REGION --no-enable-basic-auth \
-      --release-channel "regular" --machine-type "e2-medium" \
-      --image-type "COS_CONTAINERD" --disk-type "pd-balanced" \
-      --disk-size "100" --metadata disable-legacy-endpoints=true \
-      --service-account "$GKE_SERVICE_ACCOUNT@$GKE_PROJECT_NAME.iam.gserviceaccount.com" \
-      --logging=SYSTEM,WORKLOAD --monitoring=SYSTEM --enable-ip-alias \
-      --network "projects/$GKE_PROJECT_NAME/global/networks/$GKE_NETWORK_NAME" \
-      --subnetwork "projects/$GKE_PROJECT_NAME/regions/$GKE_REGION/subnetworks/$GKE_SUBNETWORK_NAME" \
-      --no-enable-intra-node-visibility --cluster-dns=clouddns --cluster-dns-scope=cluster \
-      --default-max-pods-per-node "110" --security-posture=standard \
-      --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks \
-      --addons HorizontalPodAutoscaling,NodeLocalDNS,GcePersistentDiskCsiDriver \
-      --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 \
-      --max-unavailable-upgrade 0 --binauthz-evaluation-mode=DISABLED \
-      --enable-managed-prometheus --enable-shielded-nodes --num-nodes "1"
-    ```
-
-</p></details>
-
-## Export Cluster Context Names
-
-<details><summary>Details</summary><p>
-
-If you have your own clusters, then you need to replace the dynamic cluster name search to actual cluster names, i.e. `export AWS_CLUSTER={your cluster context name}`, etc.
-```shell
-export AWS_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep eksctl`
-export GKE_CLUSTER=`kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep gke`
-```
-
-</p></details>
 
 ## Ziti K8S Agent Webhook and BookInfo Application Deployment
 
