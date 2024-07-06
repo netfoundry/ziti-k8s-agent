@@ -31,10 +31,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
             load: true
-            tags: elblag91/ziti-k8s-agent:test
+            tags: netfoundry/ziti-k8s-agent:test
       - 
         name: Get version from container
-        run: echo "version=`docker run --rm elblag91/ziti-k8s-agent:test version`" >> $GITHUB_OUTPUT
+        run: echo "version=`docker run --rm netfoundry/ziti-k8s-agent:test version`" >> $GITHUB_OUTPUT
         id: version
       -
         name: Build and push
@@ -44,4 +44,4 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: elblag91/ziti-k8s-agent:${{steps.version.outputs.version}},elblag91/ziti-k8s-agent:latest
+          tags: netfoundry/ziti-k8s-agent:${{steps.version.outputs.version}},netfoundry/ziti-k8s-agent:latest
