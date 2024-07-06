@@ -26,14 +26,12 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - 
         name: Build and export to Docker
         uses: docker/build-push-action@v6
         with:
             load: true
             tags: elblag91/ziti-k8s-agent:test
-
       - 
         name: Get version from container
         run: echo "version=`docker run --rm elblag91/ziti-k8s-agent:test version`" >> $GITHUB_OUTPUT
