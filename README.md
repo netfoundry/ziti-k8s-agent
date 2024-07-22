@@ -1,8 +1,8 @@
 # ziti-k8s-agent
 
-To deploy to your cluster for testing:
+The agent automates sidecar injection for microservices within Kubernetes. It manages identity creation and deletion on the NetFoundry Network and in Kubernetes Secrets. It deploys a mutating webhook that interacts with the Kubernetes Admission Controller using pod CRUD (Create, Read, Update, Delete) events.
 
-**Note: All resources in the spec are configured for namespace `ziti`. One can replace it with his/her own namespace by replacing `ziti` with a new one. `metadata: namespace: ziti`. The webhook container was precreated for the testing and it is already configured in the deployment spec `docker.io/elblag91/ziti-agent-wh:{tag}`.**
+# deployment details
 
 Update the secret and config map templates with the ziti controller details and some additional sidecar specific configuration in the webhook spec file.
 ```bash
@@ -19,6 +19,9 @@ data:
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "false"
   SearchDomainList: "$WHITESPACE_SEPERATED_STRING" #Default cluster.local $POD_NAMESPACE.svc
+
+# update webhook namespace
+Replace $WEBHOOK_NAMESPACE with the chosen namespace.
 ```
 
 Run the spec
@@ -69,17 +72,20 @@ env:
         key:  clusterDnsSvcIp
 ```
 
-### Example Ziti Webhook Deployment Template
+# Example Deployment
 
 **Prerequisities:**
 
 [NF Network](https://cloudziti.io/login)
+
 ```shell
-export NF_IDENTITY_PATH="path/to/adminUser.json create on NF Network"
-export $WEBHOOK_NAMESPACE="namespace to deploy the webhook to"
+export NF_IDENTITY_PATH="path/to/adminUser.json created and enrolled on NF Network"
+export WEBHOOK_NAMESPACE="namespace to deploy the webhook to"
+export CLUSTER="cluster context name"
 ```
 Copy the following code to linux terminal
-<details><summary>Code</summary><p>
+
+<details><summary>Webhook Spec Creation</summary><p>
 
 ```shell
 export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_IDENTITY_PATH`)
@@ -302,6 +308,14 @@ data:
   podSecurityContextOverride: "true"
   SearchDomainList:
 EOF
+```
+
+</p></details>
+
+<details><summary>Deployment Spec to Cluster</summary><p>
+
+```shell
+kubectl -f ziti-webhook-spec.yaml --context $CLUSTER
 ```
 
 </p></details>
