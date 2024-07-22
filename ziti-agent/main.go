@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/dariuszski/ziti-k8s-agent/ziti-agent/cmd"
+	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd"
 )
 
 func main() {

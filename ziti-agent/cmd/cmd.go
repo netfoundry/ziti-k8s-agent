@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/dariuszski/ziti-k8s-agent/ziti-agent/cmd/common"
-	"github.com/dariuszski/ziti-k8s-agent/ziti-agent/cmd/webhook"
+	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common"
+	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/webhook"
 	"github.com/spf13/cobra"
 )
 

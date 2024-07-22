@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"strings"
 
-	k "github.com/dariuszski/ziti-k8s-agent/ziti-agent/kubernetes"
-	ze "github.com/dariuszski/ziti-k8s-agent/ziti-agent/ziti-edge"
+	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/kubernetes"
+	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/ziti-edge"
 
 	"github.com/google/uuid"
 	"github.com/openziti/edge-api/rest_management_api_client"
