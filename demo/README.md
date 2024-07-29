@@ -3639,7 +3639,7 @@ kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samp
 ### Deploy Cert-manager CRDs to GKE
 ```shell
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
-kubectl get pods --namespace cert-manager --context $AWS_CLUSTER
+kubectl get pods --namespace cert-manager --context $GKE_CLUSTER
 ```
 ### Deploy Ziti K8S Agent Webhook to GKE
 ```shell
