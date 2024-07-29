@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/dariuszski/ziti-k8s-agent/ziti-agent/cmd/common"
+	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
