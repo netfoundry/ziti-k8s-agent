@@ -685,3 +685,4 @@ jobs:
                 --header "Content-Type: application/json" \
                 --header "Authorization: $token_type $token"`
           echo $network_status | jq -r '.status'
+
