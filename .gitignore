@@ -24,4 +24,4 @@ go.work
 build
 
 #config files
-*.json
+
