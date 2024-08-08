@@ -1,0 +1,688 @@
+name: pr
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+env:
+  CLUSTER_NAME: ziti-k8s-agent-regression 
+  AWS_REGION: us-west-2
+  GKE_REGION: us-central1
+  GKE_NETWORK_NAME: default
+  GKE_SUBNETWORK_NAME: default
+  NF_NETWORK_NAME: ziti-k8s-agent-regression
+
+jobs:
+  build_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      -
+        name: Check Run ID
+        run: echo ${{ github.run_id }}
+      -
+        name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: netfoundry/ziti-k8s-agent:${{ github.run_id }}
+  regression_test:
+    needs: [build_deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write 
+    steps: 
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        name: Check Run ID
+        run: echo ${{ github.run_id }}
+      - 
+        name: Authenticate to AWS Cloud
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role-session-name: GitHubActions
+          audience: sts.amazonaws.com
+      -  
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
+          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
+          audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
+      -
+        name: install-gcloud-cli
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+          install_components: gke-gcloud-auth-plugin
+      -
+        name: install-kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: latest
+      -
+        name: install-aws-cli
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2                         
+          verbose: false                     
+          arch: amd64
+      - 
+        name: install-postman-jq-zet-cli
+        run: |
+          curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
+          sudo apt-get update
+          sudo apt-get --yes install jq 
+          curl -sSLf https://get.openziti.io/tun/scripts/install-ubuntu.bash | bash
+          sudo systemctl enable --now ziti-edge-tunnel.service
+          curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin
+          curl --silent https://api.github.com/repos/openziti/ziti/releases/latest \
+          | grep "browser_download_url.*ziti-linux-amd64*" \
+          | cut -d : -f 2,3 | tr -d \" \
+          | wget -qi -
+          ziti_binary_name=`curl -s https://api.github.com/repos/openziti/ziti/releases/latest \
+          | grep "browser_download_url.*ziti-linux-amd64*" | cut -d / -f 9 | tr -d \"`
+          tar xf $ziti_binary_name
+          rm $ziti_binary_name
+          sudo mv ziti /usr/local/bin
+      - 
+        name: create-eks-cluster
+        run: |
+          cat <<EOF >eks-cluster.yaml
+          apiVersion: eksctl.io/v1alpha5
+          kind: ClusterConfig
+          metadata:
+            name: $CLUSTER_NAME
+            region: $AWS_REGION
+            version: "1.28"
+          managedNodeGroups:
+          - name: ng-1
+            instanceType: t3.medium
+            iam:
+                withAddonPolicies:
+                  ebs: true
+                  fsx: true
+                  efs: true
+            desiredCapacity: 2
+            privateNetworking: true
+            labels:
+              nodegroup-type: workloads
+            tags:
+              nodegroup-role: worker
+          vpc:
+            cidr: 10.10.0.0/16
+            publicAccessCIDRs: []
+            # disable public access to endpoint and only allow private access
+            clusterEndpoints:
+              publicAccess: true
+              privateAccess: true
+          EOF
+          eksctl get clusters  --region $AWS_REGION -o json 
+          STATUS=`eksctl get clusters --region $AWS_REGION -o json | jq -r '.[] | select(.name=="$CLUSTER_NAME").Status'`
+          if [[ ! -z "$STATUS" ]]; then
+            eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
+          fi
+          eksctl create cluster -f ./eks-cluster.yaml
+          echo "AWS_CLUSTER=$(kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep eks)" >> $GITHUB_ENV   
+      -
+        name: create-gke-cluster
+        run: |
+          gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json
+          STATUS=`gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json | jq -r '.[] | select(.name=="$CLUSTER_NAME").status'`
+          if [[ ! -z "$STATUS" ]]; then
+            gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
+          fi
+          gcloud container --project $GCP_PROJECT clusters create $CLUSTER_NAME \
+          --region $GKE_REGION --no-enable-basic-auth \
+          --release-channel "regular" --machine-type "e2-medium" \
+          --disk-size "100" --metadata disable-legacy-endpoints=true \
+          --service-account ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }} \
+          --network "projects/$GCP_PROJECT/global/networks/$GKE_NETWORK_NAME" \
+          --subnetwork "projects/$GCP_PROJECT/regions/$GKE_REGION/subnetworks/$GKE_SUBNETWORK_NAME" \
+          --no-enable-intra-node-visibility --cluster-dns=clouddns --cluster-dns-scope=cluster \
+          --security-posture=standard --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks \
+          --addons HorizontalPodAutoscaling,NodeLocalDNS,GcePersistentDiskCsiDriver --num-nodes "1" \
+          --default-max-pods-per-node "110" --enable-ip-alias
+          echo "GKE_CLUSTER=$(kubectl config get-contexts -o name | grep $CLUSTER_NAME | grep gke)" >> $GITHUB_ENV 
+      -
+        name: test-cluster-pods
+        if: success() || failure()
+        run: |
+          sleep 30
+          kubectl get pods --all-namespaces --context $AWS_CLUSTER
+          kubectl get pods --all-namespaces --context $GKE_CLUSTER
+      - 
+        name: create-nf-network-services
+        run: |
+          export RESPONSE=`curl --silent --location --request POST "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token" \
+              --header "Content-Type: application/x-www-form-urlencoded" \
+              --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" --data-urlencode "grant_type=client_credentials"`
+          export token=`echo $RESPONSE |jq -r .access_token`
+          export token_type=`echo $RESPONSE |jq -r .token_type`
+          export network_list=`curl --silent --location --request GET "https://gateway.production.netfoundry.io/core/v3/networks" \
+              --header "Content-Type: application/json" \
+              --header "Authorization: $token_type $token"`
+          export NF_NETWORK_ID=`echo $network_list | jq -r --arg NF_NETWORK_NAME "$NF_NETWORK_NAME" '._embedded.networkList[] | select(.name==$NF_NETWORK_NAME).id'`
+          if [[ ! -z "$NF_NETWORK_ID" ]]; then
+            export network_status=`curl --silent --location --request DELETE "https://gateway.production.netfoundry.io/core/v3/networks/$NF_NETWORK_ID" \
+                --header "Content-Type: application/json" \
+                --header "Authorization: $token_type $token"`
+            sleep 120
+          fi 
+          cat <<EOF >nf-network-services-create.postman_global.json
+            {
+              "id": "8cbd9872-4829-4670-ae4f-9642416c3b28",
+              "name": "nf-network-services-create",
+              "_postman_variable_scope": "global",
+              "_postman_exported_at": "2024-06-30T14:59:30.311Z",
+              "_postman_exported_using": "Postman/11.6.0",
+              "values": [
+                {
+                  "key": "api",
+                  "value": "https://gateway.production.netfoundry.io/core/v3",
+                  "enabled": true
+                },
+                {
+                  "key": "token",
+                  "value": "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token",
+                  "enabled": true
+                },
+                {
+                  "key": "jwt_token",
+                  "value": "",
+                  "enabled": true
+                },
+                {
+                  "key": "jwt_type",
+                  "value": "Bearer",
+                  "enabled": true
+                },
+                {
+                  "key": "client_id",
+                  "value": "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "client_secret",
+                  "value": "${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "networkName",
+                  "value": "$NF_NETWORK_NAME",
+                  "type": "any",
+                  "enabled": true
+                },
+                {
+                  "key": "networkId",
+                  "value": "",
+                  "type": "any",
+                  "enabled": true
+                },
+                {
+                  "key": "networkStatus",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "api_token",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "controller-api-endpoint",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "edgeRouterId",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "mopEdgeRouterId",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "mopEdgeRouterStatus",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "clientIdentityId",
+                  "value": "",
+                  "type": "any",
+                  "enabled": true
+                },
+                {
+                  "key": "adminIdentityId",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "clientIdentityJwt",
+                  "value": "",
+                  "type": "any",
+                  "enabled": true
+                },
+                {
+                  "key": "adminIdentityJwt",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "hostConfigId1",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "interceptConfigId1",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "hostConfigId2",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "interceptConfigId2",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "hostConfigId3                                                                   ",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "interceptConfigId3",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "hostConfigId4",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                },
+                {
+                  "key": "interceptConfigId4",
+                  "value": "",
+                  "type": "default",
+                  "enabled": true
+                }
+              ]
+            }
+          EOF
+          postman collection run test/nf-network-services-create.postman_collection.json \
+              -g nf-network-services-create.postman_global.json -k
+          export network_list=`curl --silent --location --request GET "https://gateway.production.netfoundry.io/core/v3/networks" \
+              --header "Content-Type: application/json" \
+              --header "Authorization: $token_type $token"`
+          echo "NF_NETWORK_ID=$(echo $network_list | jq -r --arg NF_NETWORK_NAME "$NF_NETWORK_NAME" '._embedded.networkList[] | select(.name==$NF_NETWORK_NAME).id')" >> $GITHUB_ENV
+          export network_id=`echo $network_list | jq -r --arg NF_NETWORK_NAME "$NF_NETWORK_NAME" '._embedded.networkList[] | select(.name==$NF_NETWORK_NAME).id'`
+          export zt_token=`curl  --silent --location --request POST "https://gateway.production.netfoundry.io/core/v3/networks/$network_id/exchange" \
+                --header "Content-Type: application/json" --header "Authorization: $token_type $token" --data "{\"type\": \"session\"}"`
+          export identitiy_list=`curl --silent --location --request GET "$(echo $zt_token | jq -r .networkControllerUrl)/identities" --header "Content-Type: application/json" --header "zt-session: $(echo $zt_token | jq -r .value)" -k`
+          echo $identitiy_list | jq -r '.data[] | select(.name=="adminUser").enrollment.ott.jwt' > adminUser.jwt
+          echo $identitiy_list | jq -r '.data[] | select(.name=="testUser").enrollment.ott.jwt' > testUser.jwt
+          ziti edge enroll -j adminUser.jwt -o adminUser.json
+          echo "NF_ADMIN_IDENTITY_PATH=adminUser.json" >> $GITHUB_ENV
+          sudo ziti-edge-tunnel add --jwt "$(< ./testUser.jwt)" --identity testUser
+      -
+        name: deploy-webhook-2-clusters
+        if: success() || failure()
+        run: |
+          export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_ADMIN_IDENTITY_PATH`)
+          export NF_ADMIN_IDENTITY_CERT_PATH="nf_identity_cert.pem"
+          export NF_ADMIN_IDENTITY_KEY_PATH="nf_identity_key.pem"
+          export NF_ADMIN_IDENTITY_CA_PATH="nf_identity_ca.pem"
+          sed "s/pem://" <<< `jq -r .id.cert $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CERT_PATH
+          sed "s/pem://" <<< `jq -r .id.key $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_KEY_PATH
+          sed "s/pem://" <<< `jq -r .id.ca $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CA_PATH
+          export NF_ADMIN_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_ADMIN_IDENTITY_PATH`)
+          export NF_ADMIN_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_ADMIN_IDENTITY_PATH`)
+          export NF_ADMIN_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_ADMIN_IDENTITY_PATH`)
+          export WEBHOOK_NAMESPACE="ziti"
+          cat <<EOF >ziti-k8s-agent-webhook-spec.yaml
+          ---
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: $WEBHOOK_NAMESPACE
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: Issuer
+          metadata:
+            name: selfsigned-issuer
+            namespace: $WEBHOOK_NAMESPACE
+          spec:
+            selfSigned: {}
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: ziti-admission-cert
+            namespace: $WEBHOOK_NAMESPACE
+          spec:
+            secretName: ziti-webhook-server-cert
+            duration: 2160h # 90d
+            renewBefore: 360h # 15d
+            subject:
+              organizations:
+              - netfoundry
+            commonName: ziti-admission-service.$WEBHOOK_NAMESPACE.svc
+            isCA: false
+            privateKey:
+              algorithm: RSA
+              encoding: PKCS1
+              size: 2048
+              rotationPolicy: Always
+            usages:
+              - server auth
+              - client auth
+            dnsNames:
+            - ziti-admission-service.$WEBHOOK_NAMESPACE.svc.cluster.local
+            - ziti-admission-service.$WEBHOOK_NAMESPACE.svc
+            issuerRef:
+              kind: Issuer
+              name: selfsigned-issuer
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: ziti-admission-service
+            namespace: $WEBHOOK_NAMESPACE
+          spec:
+            selector:
+              app: ziti-admission-webhook
+            ports:
+              - name: https
+                protocol: TCP
+                port: 443
+                targetPort: 9443
+            type: ClusterIP
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: ziti-admission-wh-deployment
+            namespace: $WEBHOOK_NAMESPACE
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: ziti-admission-webhook
+            template:
+              metadata:
+                labels:
+                  app: ziti-admission-webhook
+              spec:
+                containers:
+                - name: ziti-admission-webhook
+                  image: docker.io/netfoundry/ziti-k8s-agent:${{ github.run_id }}
+                  imagePullPolicy: Always
+                  ports:
+                  - containerPort: 9443
+                  args:
+                    - webhook
+                  env:
+                    - name: TLS-CERT
+                      valueFrom:
+                        secretKeyRef:
+                          name: ziti-webhook-server-cert
+                          key: tls.crt
+                    - name: TLS-PRIVATE-KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: ziti-webhook-server-cert
+                          key: tls.key
+                    - name: ZITI_CTRL_MGMT_API
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ziti-ctrl-cfg
+                          key:  zitiMgmtApi
+                    - name: ZITI_CTRL_ADMIN_CERT
+                      valueFrom:
+                        secretKeyRef:
+                          name: ziti-ctrl-tls
+                          key:  tls.crt
+                    - name: ZITI_CTRL_ADMIN_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: ziti-ctrl-tls
+                          key:  tls.key
+                    - name: ZITI_ROLE_KEY
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ziti-ctrl-cfg
+                          key:  zitiRoleKey
+                    - name: POD_SECURITY_CONTEXT_OVERRIDE
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ziti-ctrl-cfg
+                          key:  podSecurityContextOverride
+          ---
+          apiVersion: admissionregistration.k8s.io/v1
+          kind: MutatingWebhookConfiguration
+          metadata:
+            name: ziti-tunnel-sidecar
+            annotations:
+              cert-manager.io/inject-ca-from: $WEBHOOK_NAMESPACE/ziti-admission-cert
+          webhooks:
+            - name: tunnel.ziti.webhook
+              admissionReviewVersions: ["v1"]
+              namespaceSelector:
+                matchLabels:
+                  openziti/ziti-tunnel: enabled
+              rules:
+                - operations: ["CREATE","UPDATE","DELETE"]
+                  apiGroups: [""]
+                  apiVersions: ["v1","v1beta1"]
+                  resources: ["pods"]
+                  scope: "*"
+              clientConfig:
+                service:
+                  name: ziti-admission-service
+                  namespace: $WEBHOOK_NAMESPACE
+                  port: 443
+                  path: "/ziti-tunnel"
+                caBundle: ""
+              sideEffects: None
+              timeoutSeconds: 30
+          ---
+          kind: ClusterRole
+          apiVersion: rbac.authorization.k8s.io/v1
+          metadata:
+            namespace: $WEBHOOK_NAMESPACE
+            name: ziti-agent-wh-roles
+          rules:
+          - apiGroups: [""] # "" indicates the core API group
+            resources: ["secrets"]
+            verbs: ["get", "list", "create", "delete"]
+          - apiGroups: [""]
+            resources: ["services"]
+            verbs: ["get"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: ziti-agent-wh
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: ziti-agent-wh-roles
+          subjects:
+          - kind: ServiceAccount
+            name: default
+            namespace: $WEBHOOK_NAMESPACE
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ziti-ctrl-tls
+            namespace: $WEBHOOK_NAMESPACE
+          type: kubernetes.io/tls
+          stringData:
+            tls.crt: $NF_ADMIN_IDENTITY_CERT
+            tls.key: $NF_ADMIN_IDENTITY_KEY
+            tls.ca:  $NF_ADMIN_IDENTITY_CA
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: ziti-ctrl-cfg
+            namespace: $WEBHOOK_NAMESPACE
+          data:
+            zitiMgmtApi: $CTRL_MGMT_API
+            zitiRoleKey: identity.openziti.io/role-attributes
+            podSecurityContextOverride: "false"
+          EOF
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $AWS_CLUSTER
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
+          sleep 30
+          kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $AWS_CLUSTER
+          kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $GKE_CLUSTER
+          sleep 30
+      -
+        name: check-webhook-status
+        if: success() || failure()
+        run: |
+          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
+          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
+      - 
+        name: deploy-bookinfo-app
+        if: success() || failure()
+        run: |
+          kubectl create namespace test1 --context $AWS_CLUSTER
+          kubectl label namespace test1 openziti/ziti-tunnel=enabled --context $AWS_CLUSTER
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1 
+          kubectl create namespace test2 --context $GKE_CLUSTER
+          kubectl label namespace test2 openziti/ziti-tunnel=enabled --context $GKE_CLUSTER
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
+          sleep 150
+      - 
+        name: run-testcase-01
+        run: |
+          if [ -f "./testcase_pods.log" ]; then
+            rm ./testcase_pods.log
+          fi
+          if [ -f "./testcase_curl_output.log" ]; then
+            rm ./testcase_curl_output.log
+          fi
+          kubectl get pods -n test1 --context  $AWS_CLUSTER >> testcase_pods.log
+          kubectl get pods -n test2 --context  $GKE_CLUSTER >> testcase_pods.log
+          for i in $(seq 1 20);
+          do
+            curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
+          done
+          test/verify_test_results.py
+          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
+          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
+      -
+        name: scaledown-2-testcase-02
+        if: success() || failure()
+        run: |
+          kubectl scale deploy details-v1 --replicas=0 -n test1 --context  $AWS_CLUSTER
+          kubectl scale deploy ratings-v1 --replicas=0 -n test1 --context  $AWS_CLUSTER
+          kubectl scale deploy productpage-v1 --replicas=0 -n test2 --context  $GKE_CLUSTER
+          kubectl scale deploy reviews-v1 --replicas=0 -n test2 --context  $GKE_CLUSTER
+          kubectl scale deploy reviews-v2 --replicas=0 -n test2 --context  $GKE_CLUSTER
+          kubectl scale deploy reviews-v3 --replicas=0 -n test2 --context  $GKE_CLUSTER
+          sleep 150
+      - 
+        name: run-testcase-02
+        if: success() || failure()
+        run: |
+          if [ -f "./testcase_pods.log" ]; then
+            rm ./testcase_pods.log
+          fi
+          if [ -f "./testcase_curl_output.log" ]; then
+            rm ./testcase_curl_output.log
+          fi
+          kubectl get pods -n test1 --context  $AWS_CLUSTER >> testcase_pods.log
+          kubectl get pods -n test2 --context  $GKE_CLUSTER >> testcase_pods.log
+          for i in $(seq 1 20);
+          do
+            curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
+          done
+          test/verify_test_results.py
+          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
+          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
+      -
+        name: delete-bookinfo-app
+        run: |
+          kubectl delete -f test/bookinfo.yaml --context $AWS_CLUSTER -n test1
+          kubectl delete -f test/bookinfo.yaml --context $GKE_CLUSTER -n test2
+          sleep 30
+          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
+          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
+      -
+        name: delete-eks-cluster
+        if: success() || failure()
+        run: |
+          eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction 
+      -
+        name: delete-gke-cluster
+        if: success() || failure()
+        run: |
+          gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
+      - 
+        name: delete-nf-network
+        if: success() || failure()
+        run: |
+          export RESPONSE=`curl --silent --location --request POST "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token" \
+                            --header "Content-Type: application/x-www-form-urlencoded" \
+                            --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" --data-urlencode "grant_type=client_credentials"`
+          export token=`echo $RESPONSE |jq -r .access_token`
+          export token_type=`echo $RESPONSE |jq -r .token_type`
+          export network_list=`curl --silent --location --request GET "https://gateway.production.netfoundry.io/core/v3/networks" \
+                --header "Content-Type: application/json" \
+                --header "Authorization: $token_type $token"`
+          echo "NF_NETWORK_ID=$(echo $network_list | jq -r --arg NF_NETWORK_NAME "$NF_NETWORK_NAME" '._embedded.networkList[] | select(.name==$NF_NETWORK_NAME).id')" >> $GITHUB_ENV
+          export network_status=`curl --silent --location --request DELETE "https://gateway.production.netfoundry.io/core/v3/networks/$NF_NETWORK_ID" \
+                --header "Content-Type: application/json" \
+                --header "Authorization: $token_type $token"`
+          echo $network_status | jq -r '.status'
+

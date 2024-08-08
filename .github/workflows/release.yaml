@@ -1,12 +1,12 @@
 name: release
 
 on:
-    push:
-        branches:
-        - main
+  push:
+    branches:
+    - main
 
 jobs:
-  docker:
+  build_deploy:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
