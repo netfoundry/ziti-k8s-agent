@@ -146,17 +146,26 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		var patch []JsonPatchEntry
 		var rootUser int64 = 0
 		var isNotTrue bool = false
+		var isPrivileged = false
 		var sidecarSecurityContext *corev1.SecurityContext
 
 		sidecarSecurityContext = &corev1.SecurityContext{
-			Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}},
+			Capabilities: &corev1.Capabilities{
+				Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+				Drop: []corev1.Capability{"ALL"},
+			},
+			RunAsUser:  &rootUser,
+			Privileged: &isPrivileged,
 		}
 
 		if pod.Spec.SecurityContext != nil && pod.Spec.SecurityContext.RunAsUser != nil {
-			// run sidecar as root
 			sidecarSecurityContext = &corev1.SecurityContext{
-				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}},
-				RunAsUser:    &rootUser,
+				Capabilities: &corev1.Capabilities{
+					Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+					Drop: []corev1.Capability{"ALL"},
+				},
+				RunAsUser:  &rootUser,
+				Privileged: &isPrivileged,
 			}
 		}
 
