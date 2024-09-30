@@ -164,11 +164,14 @@ func webhook(cmd *cobra.Command, args []string) {
 	// load env vars to override the command line vars if any
 	lookupEnvVars()
 
+	// setup custom mux
+	mux := NewCustomMux()
+	mux.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
 	klog.Infof("AC WH Server is listening on port %d", port)
-	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),
 		TLSConfig: configTLS(cert, key),
+		Handler:   mux,
 	}
 	err := server.ListenAndServeTLS("", "")
 	if err != nil {
