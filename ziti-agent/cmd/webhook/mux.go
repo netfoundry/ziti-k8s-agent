@@ -1,7 +1,9 @@
 package webhook
 
 import (
+	"context"
 	"net/http"
+	"sync"
 
 	"golang.org/x/time/rate"
 )
@@ -13,12 +15,14 @@ var rateLimiter = rate.NewLimiter(rate.Limit(1), 5)
 type customMux struct {
 	*http.ServeMux
 	queue chan *http.Request
+	wg    sync.WaitGroup
 }
 
 func NewCustomMux() *customMux {
 	return &customMux{
 		http.NewServeMux(),
 		make(chan *http.Request, 10),
+		sync.WaitGroup{},
 	}
 }
 
@@ -30,7 +34,25 @@ func (m *customMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.queue <- r
+	m.wg.Add(1)
 
-	// Serve next request
-	m.ServeMux.ServeHTTP(w, r)
+	defer m.wg.Done()
+
+	for {
+		select {
+		case req := <-m.queue:
+			m.ServeMux.ServeHTTP(w, req)
+		case <-context.Background().Done():
+			return
+		}
+	}
+
+	// // Serve next request
+	// m.ServeMux.ServeHTTP(w, r)
+}
+
+func (m *customMux) Shutdown(ctx context.Context) error {
+	close(m.queue)
+	m.wg.Wait()
+	return nil
 }
