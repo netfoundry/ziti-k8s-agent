@@ -20,13 +20,13 @@ func NewCustomMux() *customMux {
 	}
 }
 
-func limit(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rateLimiter.Allow() == false {
-			http.Error(w, http.StatusText(429), http.StatusTooManyRequests)
-			return
-		}
+func (m *customMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Check rate limit
+	if rateLimiter.Allow() == false {
+		http.Error(w, http.StatusText(429), http.StatusTooManyRequests)
+		return
+	}
 
-		next.ServeHTTP(w, r)
-	})
+	// Serve next request
+	m.ServeMux.ServeHTTP(w, r)
 }
