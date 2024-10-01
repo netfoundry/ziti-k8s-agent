@@ -7,7 +7,7 @@ import (
 )
 
 // Rate limit -  1 token to be consumed per second, with a maximum burst size of 3.
-var rateLimiter = rate.NewLimiter(rate.Limit(1), 5)
+var rateLimiter = rate.NewLimiter(rate.Limit(1), 3)
 
 // CustomServeMux implements a custom ServeMux with a rate limiter and channel queue
 type customMux struct {
