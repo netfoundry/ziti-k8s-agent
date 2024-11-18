@@ -2,7 +2,7 @@
 
 The agent automates sidecar injection for microservices within Kubernetes. It manages identity creation and deletion on the NetFoundry Network and in Kubernetes Secrets. It deploys a mutating webhook that interacts with the Kubernetes Admission Controller using pod CRUD (Create, Read, Update, Delete) events.
 
-## deployment details
+## Deployment Details
 
 Update the secret and config map templates with the ziti controller details and some additional sidecar specific configuration in the webhook spec file.
 
@@ -22,7 +22,7 @@ data:
   SearchDomainList: "$WHITESPACE_SEPERATED_STRING" #Default cluster.local $POD_NAMESPACE.svc
 ```
 
-## update webhook namespace
+## Update Webhook Namespace
 
 Replace $WEBHOOK_NAMESPACE with the new namespace you wish to dedicate to the webhook. This will not be the same namespace as the pods that will have sidecars injected, and the webook's dedicated amespace will be deleted if you uninstall the webook like `kubectl delete -f ziti-webhook-spec.yaml --context $CLUSTER`.
 
