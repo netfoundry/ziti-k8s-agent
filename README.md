@@ -20,10 +20,11 @@ data:
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "false"
   SearchDomainList: "$WHITESPACE_SEPERATED_STRING" #Default cluster.local $POD_NAMESPACE.svc
-
-# update webhook namespace
-Replace $WEBHOOK_NAMESPACE with the chosen namespace.
 ```
+
+## update webhook namespace
+
+Replace $WEBHOOK_NAMESPACE with the new namespace you wish to dedicate to the webhook. This will not be the same namespace as the pods that will have sidecars injected, and the webook's dedicated amespace will be deleted if you uninstall the webook like `kubectl delete -f ziti-webhook-spec.yaml --context $CLUSTER`.
 
 Run the spec
 
