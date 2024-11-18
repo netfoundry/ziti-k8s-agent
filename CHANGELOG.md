@@ -9,8 +9,8 @@ All notable changes to this project will be documented in this file. The format 
 
   ```shell
   Capabilities: &corev1.Capabilities{
-	Add:  []corev1.Capability{"NET_ADMIN"},
-	Drop: []corev1.Capability{"ALL"},
+    Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+    Drop: []corev1.Capability{"ALL"},
   },
   RunAsUser:  &rootUser, (deafault = true)
   Privileged: &isPrivileged, (default = false)
