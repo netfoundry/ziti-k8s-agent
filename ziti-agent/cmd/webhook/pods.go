@@ -151,7 +151,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 
 		sidecarSecurityContext = &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{
-				Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+				Add:  []corev1.Capability{"NET_ADMIN"},
 				Drop: []corev1.Capability{"ALL"},
 			},
 			RunAsUser:  &rootUser,
