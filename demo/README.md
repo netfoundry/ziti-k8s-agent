@@ -3269,16 +3269,16 @@ If you have the NF Console API credentials file in your test environment, then y
       <details><summary>Code</summary><p>
 
       ```shell
-      export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_IDENTITY_PATH`)
+      export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_ADMIN_IDENTITY_PATH`)
       export NF_ADMIN_IDENTITY_CERT_PATH="nf_identity_cert.pem"
       export NF_ADMIN_IDENTITY_KEY_PATH="nf_identity_key.pem"
       export NF_ADMIN_IDENTITY_CA_PATH="nf_identity_ca.pem"
-      sed "s/pem://" <<< `jq -r .id.cert $NF_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CERT_PATH
-      sed "s/pem://" <<< `jq -r .id.key $NF_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_KEY_PATH
-      sed "s/pem://" <<< `jq -r .id.ca $NF_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CA_PATH
-      export NF_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_IDENTITY_PATH`)
-      export NF_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_IDENTITY_PATH`)
-      export NF_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_IDENTITY_PATH`)
+      sed "s/pem://" <<< `jq -r .id.cert $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CERT_PATH
+      sed "s/pem://" <<< `jq -r .id.key $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_KEY_PATH
+      sed "s/pem://" <<< `jq -r .id.ca $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CA_PATH
+      export NF_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_ADMIN_IDENTITY_PATH`)
+      export NF_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_ADMIN_IDENTITY_PATH`)
+      export NF_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_ADMIN_IDENTITY_PATH`)
 
       cat <<EOF >nf-services-create.postman_environment.json
         {
