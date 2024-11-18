@@ -26,7 +26,7 @@ Replace $WEBHOOK_NAMESPACE with the chosen namespace.
 
 Run the spec
 ```bash
-kubectl -f sidecar-injection-webhook-spec.yaml --context $CLUSTER
+kubectl create -f ziti-webhook-spec.yaml --context $CLUSTER
 ```
 
 Once the webhook has been deployed successfully, one can enable injection per namespace by adding label `openziti/ziti-tunnel=enabled`
@@ -315,7 +315,7 @@ EOF
 <details><summary>Deployment Spec to Cluster</summary><p>
 
 ```shell
-kubectl -f ziti-webhook-spec.yaml --context $CLUSTER
+kubectl create -f ziti-webhook-spec.yaml --context $CLUSTER
 ```
 
 </p></details>
