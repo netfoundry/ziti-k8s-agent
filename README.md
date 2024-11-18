@@ -43,7 +43,7 @@ if resources are already deployed in this namespace, one can run this to restart
 kubectl rollout restart deployment/{appname} -n {ns name} --context $CLUSTER 
 ```
 
-**Note: The identity role attribute is set to the pod's app name if it lacks a Ziti identity role annotation. Add a Ziti identity role annotation at any time toupdate identity role attributes without restarting pods. If more than one replica is present in the deployment, then the deployment needs to be updated and pods will be restarted. You can avoid the rolling restart by annotating the dedployment's replicas individually.**
+**Note: The identity role attribute is set to the pod's app name if it lacks a Ziti identity role annotation. Add a Ziti identity role annotation at any time to update identity role attributes without restarting pods. If more than one replica is present in the deployment, then the deployment needs to be updated and pods will be restarted. You can avoid the rolling restart by annotating the dedployment's replicas individually.**
 
 Environmental variable to be used for this option that will be read by the webhook.
 
