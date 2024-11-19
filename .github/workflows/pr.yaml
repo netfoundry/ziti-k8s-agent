@@ -617,6 +617,8 @@ jobs:
           do
             curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
           done
+          cat testcase_curl_output.log
+          cat testcase_pods.log
           test/verify_test_results.py
           kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
           kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
@@ -647,6 +649,8 @@ jobs:
           do
             curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
           done
+          cat testcase_curl_output.log
+          cat testcase_pods.log
           test/verify_test_results.py
           kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
           kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
