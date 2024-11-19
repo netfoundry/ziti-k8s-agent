@@ -1,11 +1,12 @@
 # ziti-k8s-agent
 
-The agent automates sidecar injection for microservices within Kubernetes. It manages identity creation and deletion on the NetFoundry Network and in Kubernetes Secrets. It deploys a mutating webhook that interacts with the Kubernetes Admission Controller using pod CRUD (Create, Read, Update, Delete) events.
+The agent automates sidecar injection for microservices within Kubernetes. It manages identity creation and deletion on the NetFoundry Network and in Kubernetes Secrets. It deploys a mutating webhook that interacts with the Kubernetes Admission Controller using pod CRUD (Create, Read, Update, Delete) events. 
 
-# deployment details
+## Deployment Details
 
 Update the secret and config map templates with the ziti controller details and some additional sidecar specific configuration in the webhook spec file.
-```bash
+
+```yaml
 # secret
 type: kubernetes.io/tls
 stringData:
@@ -19,46 +20,54 @@ data:
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "false"
   SearchDomainList: "$WHITESPACE_SEPERATED_STRING" #Default cluster.local $POD_NAMESPACE.svc
-
-# update webhook namespace
-Replace $WEBHOOK_NAMESPACE with the chosen namespace.
 ```
 
+## Update Webhook Namespace
+
+Replace $WEBHOOK_NAMESPACE with the new namespace you wish to dedicate to the webhook. This will not be the same namespace as the pods that will have sidecars injected, and the webook's dedicated amespace will be deleted if you uninstall the webook like `kubectl delete -f ziti-webhook-spec.yaml --context $CLUSTER`.
+
 Run the spec
+
 ```bash
-kubectl -f sidecar-injection-webhook-spec.yaml --context $CLUSTER
+kubectl create -f ziti-webhook-spec.yaml --context $CLUSTER
 ```
 
 Once the webhook has been deployed successfully, one can enable injection per namespace by adding label `openziti/ziti-tunnel=enabled`
+
 ```bash
 kubectl label namespace {ns name} openziti/ziti-tunnel=enabled --context $CLUSTER
 ```
 
 if resources are already deployed in this namespace, one can run this to restart all pods per deployment.
+
 ```bash
 kubectl rollout restart deployment/{appname} -n {ns name} --context $CLUSTER 
 ```
 
-**Note: The Identity Role Attribute is set to the app name. One can add annotation to pods to update attributes without restarting pods. If more than one replica is present in the deployment, then the deployment needs to be updated and pods will be restarted or annotate each pod separately.**
+**Note: The identity role attribute is set to the pod's app name if it lacks a Ziti identity role annotation. Add a Ziti identity role annotation at any time to update identity role attributes without restarting pods. If more than one replica is present in the deployment, then the deployment needs to be updated and pods will be restarted. You can avoid the rolling restart by annotating the dedployment's replicas individually.**
 
 Environmental variable to be used for this option that will be read by the webhook.
-```bash
+
+```yaml
 data:
   zitiRoleKey: identity.openziti.io/role-attributes
 ```
 
 Example of key/value for the annotation. The annotation value must be a string, where roles are separated by comma if more than one needs to be configured
+
 ```bash
 kubectl annotate pod/adservice-86fc68848-dgtdz identity.openziti.io/role-attributes=sales,us-east --context $CLUSTER
 ```
+
 Deployment with immediate rollout restart
+
 ```bash
 kubectl patch deployment/adservice -p '{"spec":{"template":{"metadata":{"annotations":{"identity.openziti.io/role-attributes":"us-east"}}}}}' --context $CLUSTER
 ```
 
-**Note: By default, the DNS Service ClusterIP is looked up. If one wants to configure a custom DNS server IP to overwritte the discovery, it is configurable.**
+**Note: You may configure a custom nameserver or the deployment will use the cluster's default resolver.**
 
-```bash
+```yaml
 # This configmap option must be added
 data:
   clusterDnsSvcIp: 1.1.1.1
@@ -72,32 +81,45 @@ env:
         key:  clusterDnsSvcIp
 ```
 
-# Example Deployment
+## Example Deployment
 
 **Prerequisities:**
 
-[NF Network](https://cloudziti.io/login)
+You must have an OpenZiti self-hosted network or an NF Cloud network.
 
-```shell
-export NF_IDENTITY_PATH="path/to/adminUser.json created and enrolled on NF Network"
+```bash
+export NF_ADMIN_IDENTITY_PATH="path/to/adminUser.json created and enrolled on NF Network"
 export WEBHOOK_NAMESPACE="namespace to deploy the webhook to"
 export CLUSTER="cluster context name"
 ```
-Copy the following code to linux terminal
+
+Save the following bash script in a file, audit, and execute to generate the deployment manifest.
+
+```bash
+cat > ./generate-ziti-webhook-spec.bash
+: paste here and press ctrl+D to send EOF
+bash ./generate-ziti-webhook-spec.bash
+```
 
 <details><summary>Webhook Spec Creation</summary><p>
 
-```shell
-export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_IDENTITY_PATH`)
-export NF_IDENTITY_CERT_PATH="nf_identity_cert.pem"
-export NF_IDENTITY_KEY_PATH="nf_identity_key.pem"
-export NF_IDENTITY_CA_PATH="nf_identity_ca.pem"
-sed "s/pem://" <<< `jq -r .id.cert $NF_IDENTITY_PATH` > $NF_IDENTITY_CERT_PATH
-sed "s/pem://" <<< `jq -r .id.key $NF_IDENTITY_PATH` > $NF_IDENTITY_KEY_PATH
-sed "s/pem://" <<< `jq -r .id.ca $NF_IDENTITY_PATH` > $NF_IDENTITY_CA_PATH
-export NF_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_IDENTITY_PATH`)
-export NF_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_IDENTITY_PATH`)
-export NF_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_IDENTITY_PATH`)
+```bash
+#!/usr/bin/env bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $NF_ADMIN_IDENTITY_PATH`)
+export NF_ADMIN_IDENTITY_CERT_PATH="nf_identity_cert.pem"
+export NF_ADMIN_IDENTITY_KEY_PATH="nf_identity_key.pem"
+export NF_ADMIN_IDENTITY_CA_PATH="nf_identity_ca.pem"
+sed "s/pem://" <<< `jq -r .id.cert $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CERT_PATH
+sed "s/pem://" <<< `jq -r .id.key $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_KEY_PATH
+sed "s/pem://" <<< `jq -r .id.ca $NF_ADMIN_IDENTITY_PATH` > $NF_ADMIN_IDENTITY_CA_PATH
+export NF_ADMIN_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $NF_ADMIN_IDENTITY_PATH`)
+export NF_ADMIN_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $NF_ADMIN_IDENTITY_PATH`)
+export NF_ADMIN_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $NF_ADMIN_IDENTITY_PATH`)
 
 cat <<EOF >ziti-webhook-spec.yaml
 ---
@@ -314,8 +336,8 @@ EOF
 
 <details><summary>Deployment Spec to Cluster</summary><p>
 
-```shell
-kubectl -f ziti-webhook-spec.yaml --context $CLUSTER
+```bash
+kubectl create -f ziti-webhook-spec.yaml --context $CLUSTER
 ```
 
 </p></details>
