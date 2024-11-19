@@ -1,6 +1,6 @@
 # ziti-k8s-agent
 
-The agent automates sidecar injection for microservices within Kubernetes. It manages identity creation and deletion on the NetFoundry Network and in Kubernetes Secrets. It deploys a mutating webhook that interacts with the Kubernetes Admission Controller using pod CRUD (Create, Read, Update, Delete) events.
+The agent automates sidecar injection for microservices within Kubernetes. It manages identity creation and deletion on the NetFoundry Network and in Kubernetes Secrets. It deploys a mutating webhook that interacts with the Kubernetes Admission Controller using pod CRUD (Create, Read, Update, Delete) events. 
 
 ## Deployment Details
 
