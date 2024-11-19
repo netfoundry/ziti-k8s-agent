@@ -92,7 +92,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
 
-		klog.Infof(fmt.Sprintf("Admission Response v1: %s", responseObj))
+		klog.Infof(fmt.Sprintf("Admission Response UID: %s", responseAdmissionReview.Response.UID))
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)

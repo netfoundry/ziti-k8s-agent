@@ -12,12 +12,12 @@ import (
 	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/kubernetes"
 	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/ziti-edge"
 
-	"github.com/google/uuid"
 	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/openziti/sdk-golang/ziti"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 )
 
@@ -71,7 +71,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			return failureResponse(reviewResponse, err)
 		}
 
-		identityCfg, sidecarIdentityName, err := createAndEnrollIdentity(pod.Labels["app"], roles, zec)
+		identityCfg, sidecarIdentityName, err := createAndEnrollIdentity(pod.Labels["app"], ar.Request.UID, roles, zec)
 		if identityCfg == nil {
 			return failureResponse(reviewResponse, err)
 		}
@@ -146,17 +146,26 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		var patch []JsonPatchEntry
 		var rootUser int64 = 0
 		var isNotTrue bool = false
+		var isPrivileged = false
 		var sidecarSecurityContext *corev1.SecurityContext
 
 		sidecarSecurityContext = &corev1.SecurityContext{
-			Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}},
+			Capabilities: &corev1.Capabilities{
+				Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+				Drop: []corev1.Capability{"ALL"},
+			},
+			RunAsUser:  &rootUser,
+			Privileged: &isPrivileged,
 		}
 
 		if pod.Spec.SecurityContext != nil && pod.Spec.SecurityContext.RunAsUser != nil {
-			// run sidecar as root
 			sidecarSecurityContext = &corev1.SecurityContext{
-				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}},
-				RunAsUser:    &rootUser,
+				Capabilities: &corev1.Capabilities{
+					Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+					Drop: []corev1.Capability{"ALL"},
+				},
+				RunAsUser:  &rootUser,
+				Privileged: &isPrivileged,
 			}
 		}
 
@@ -328,13 +337,9 @@ func hasContainer(containers []corev1.Container, containerName string) (string, 
 	return "", false
 }
 
-func createSidecarIdentityName(appName string) string {
-	id, _ := uuid.NewV7()
-	return fmt.Sprintf("%s-%s%s", trimString(appName), sidecarPrefix, id)
-}
+func createAndEnrollIdentity(name string, uid types.UID, roles []string, zec *rest_management_api_client.ZitiEdgeManagement) (*ziti.Config, string, error) {
 
-func createAndEnrollIdentity(name string, roles []string, zec *rest_management_api_client.ZitiEdgeManagement) (*ziti.Config, string, error) {
-	identityName := createSidecarIdentityName(name)
+	identityName := fmt.Sprintf("%s-%s%s", trimString(name), sidecarPrefix, uid)
 
 	identityDetails, err := ze.CreateIdentity(identityName, roles, "Device", zec)
 	if err != nil {
