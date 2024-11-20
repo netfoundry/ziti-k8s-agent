@@ -5,12 +5,12 @@ on:
     types: [opened, synchronize]
 
 env:
-  CLUSTER_NAME: ziti-k8s-agent-regression 
+  CLUSTER_NAME: ziti-k8s-agent-regression-${{ github.run_id }}
   AWS_REGION: us-west-2
   GKE_REGION: us-central1
   GKE_NETWORK_NAME: default
   GKE_SUBNETWORK_NAME: default
-  NF_NETWORK_NAME: ziti-k8s-agent-regression
+  NF_NETWORK_NAME: ziti-k8s-agent-regression-${{ github.run_id }}
 
 jobs:
   build_deploy:
