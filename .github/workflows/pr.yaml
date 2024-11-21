@@ -117,7 +117,7 @@ jobs:
           metadata:
             name: $CLUSTER_NAME
             region: $AWS_REGION
-            version: "1.28"
+            version: "1.30"
           managedNodeGroups:
           - name: ng-1
             instanceType: t3.medium
