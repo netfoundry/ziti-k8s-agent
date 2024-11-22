@@ -21,28 +21,54 @@ data:
   podSecurityContextOverride: "false"
   SearchDomainList: "$WHITESPACE_SEPERATED_STRING" #Default cluster.local $POD_NAMESPACE.svc
 ```
+There are two options to enable ziti tunnel proxy injection. Snippets of mutating webhook configs in [the spec](./deployment/ziti-webhook-spec.yaml) 
+
+  1. Per Namespace
+
+      ```shell
+      namespaceSelector:
+        matchLabels:
+          openziti/ziti-tunnel: namespace
+      ```
+
+  1. Per Pod
+
+      ```shell
+      objectSelector:
+        matchLabels:
+          openziti/ziti-tunnel: pod
+      ```
 
 ## Update Webhook Namespace
 
 Replace $WEBHOOK_NAMESPACE with the new namespace you wish to dedicate to the webhook. This will not be the same namespace as the pods that will have sidecars injected, and the webook's dedicated amespace will be deleted if you uninstall the webook like `kubectl delete -f ziti-webhook-spec.yaml --context $CLUSTER`.
 
-Run the spec
+Run the spec.  
 
 ```bash
 kubectl create -f ziti-webhook-spec.yaml --context $CLUSTER
 ```
 
-Once the webhook has been deployed successfully, one can enable injection per namespace by adding label `openziti/ziti-tunnel=enabled`
+Once the webhook has been deployed successfully, label the namespace or pods
 
-```bash
-kubectl label namespace {ns name} openziti/ziti-tunnel=enabled --context $CLUSTER
-```
+1. Per namespace by adding label `openziti/ziti-tunnel=namespace`
 
-if resources are already deployed in this namespace, one can run this to restart all pods per deployment.
+    ```bash
+    kubectl label namespace {ns name} openziti/ziti-tunnel=namespace --context $CLUSTER
+    ```
+    if resources are already deployed for the namespace injection, one can run this to restart all pods per deployment.
 
-```bash
-kubectl rollout restart deployment/{appname} -n {ns name} --context $CLUSTER 
-```
+    ```bash
+    kubectl rollout restart deployment/{appname} -n {ns name} --context $CLUSTER 
+    ```
+
+1. Per Pod by adding label `openziti/ziti-tunnel=pod`
+
+    ```bash
+    kubectl patch deployment/example-app -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' -n $NAMESPACE --context $CLUSTER
+    ```
+
+
 
 **Note: The identity role attribute is set to the pod's app name if it lacks a Ziti identity role annotation. Add a Ziti identity role annotation at any time to update identity role attributes without restarting pods. If more than one replica is present in the deployment, then the deployment needs to be updated and pods will be restarted. You can avoid the rolling restart by annotating the dedployment's replicas individually.**
 
