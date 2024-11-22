@@ -65,7 +65,7 @@ Once the webhook has been deployed successfully, label the namespace or pods
 1. Per Pod by adding label `openziti/ziti-tunnel=pod`
 
     ```bash
-    kubectl patch deployment/example-app -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' -n $NAMESPACE --context $AWS_CLUSTER
+    kubectl patch deployment/example-app -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' -n $NAMESPACE --context $CLUSTER
     ```
 
 
