@@ -120,7 +120,7 @@ export GKE_REGION="The region where the above subnet is configured"
     metadata:
       name: ${CLUSTER_NAME}
       region: ${AWS_REGION}
-      version: "1.28"
+      version: "1.30"
     managedNodeGroups:
     - name: ng-1
       instanceType: t3.medium
@@ -3545,7 +3545,7 @@ webhooks:
     admissionReviewVersions: ["v1"]
     namespaceSelector:
       matchLabels:
-        openziti/ziti-tunnel: enabled
+        openziti/ziti-tunnel: namespace
     rules:
       - operations: ["CREATE","UPDATE","DELETE"]
         apiGroups: [""]
@@ -3632,7 +3632,7 @@ kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep zi
 ### Deploy Bookinfo to EKS
 ```shell 
 kubectl create namespace test1 --context $AWS_CLUSTER
-kubectl label namespace test1 openziti/ziti-tunnel=enabled --context $AWS_CLUSTER
+kubectl label namespace test1 openziti/ziti-tunnel=namespace --context $AWS_CLUSTER
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1
 ```
 
@@ -3652,7 +3652,7 @@ kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep zi
 ### Deploy Bookinfo to GKE
 ```shell
 kubectl create namespace test2 --context $GKE_CLUSTER
-kubectl label namespace test2 openziti/ziti-tunnel=enabled --context $GKE_CLUSTER
+kubectl label namespace test2 openziti/ziti-tunnel=namespace --context $GKE_CLUSTER
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
 ```
 

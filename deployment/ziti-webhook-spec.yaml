@@ -137,7 +137,10 @@ webhooks:
     admissionReviewVersions: ["v1"]
     namespaceSelector:
       matchLabels:
-        openziti/ziti-tunnel: enabled
+        openziti/ziti-tunnel: namespace
+    # objectSelector:
+    #   matchLabels:
+    #     openziti/ziti-tunnel: pod
     rules:
       - operations: ["CREATE","UPDATE","DELETE"]
         apiGroups: [""]

@@ -515,7 +515,7 @@ jobs:
               admissionReviewVersions: ["v1"]
               namespaceSelector:
                 matchLabels:
-                  openziti/ziti-tunnel: enabled
+                  openziti/ziti-tunnel: namespace
               rules:
                 - operations: ["CREATE","UPDATE","DELETE"]
                   apiGroups: [""]
@@ -583,6 +583,8 @@ jobs:
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
           sleep 30
           kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $AWS_CLUSTER
+          sed -i -e 's/namespaceSelector/objectSelector/g' ziti-k8s-agent-webhook-spec.yaml
+          sed -i -e 's/ziti-tunnel: namespace/ziti-tunnel: pod/g' ziti-k8s-agent-webhook-spec.yaml
           kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $GKE_CLUSTER
           sleep 30
       -
@@ -596,12 +598,18 @@ jobs:
         if: success() || failure()
         run: |
           kubectl create namespace test1 --context $AWS_CLUSTER
-          kubectl label namespace test1 openziti/ziti-tunnel=enabled --context $AWS_CLUSTER
+          kubectl label namespace test1 openziti/ziti-tunnel=namespace --context $AWS_CLUSTER
           kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1 
           kubectl create namespace test2 --context $GKE_CLUSTER
-          kubectl label namespace test2 openziti/ziti-tunnel=enabled --context $GKE_CLUSTER
           kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
-          sleep 150
+          sleep 30
+          kubectl patch deployment/ratings-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/productpage-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/details-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/reviews-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/reviews-v2 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/reviews-v3 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
+          sleep 120
       - 
         name: run-testcase-01
         run: |
