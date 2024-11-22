@@ -613,7 +613,7 @@ jobs:
           fi
           kubectl get pods -n test1 --context  $AWS_CLUSTER >> testcase_pods.log
           kubectl get pods -n test2 --context  $GKE_CLUSTER >> testcase_pods.log
-          for i in $(seq 1 20);
+          for i in $(seq 1 40);
           do
             curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
           done
@@ -645,7 +645,7 @@ jobs:
           fi
           kubectl get pods -n test1 --context  $AWS_CLUSTER >> testcase_pods.log
           kubectl get pods -n test2 --context  $GKE_CLUSTER >> testcase_pods.log
-          for i in $(seq 1 20);
+          for i in $(seq 1 40);
           do
             curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
           done
