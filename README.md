@@ -19,8 +19,10 @@ data:
   zitiMgmtApi: $NF_MGMT_API # https://{FQDN}:{PORT}/edge/management/v1                
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "false"
-  SearchDomainList: "$WHITESPACE_SEPERATED_STRING" #Default cluster.local $POD_NAMESPACE.svc
+  # space-separated DNS suffixes to add to the pod spec (default: "$CLUSTER_DNS_ZONE {pod namespace}.svc.$CLUSTER_DNS_ZONE")
+  SearchDomainList: $SEARCH_DOMAINS
 ```
+
 There are two options to enable ziti tunnel proxy injection. Snippets of mutating webhook configs in [the spec](./deployment/ziti-webhook-spec.yaml) 
 
   1. Per Namespace
@@ -41,12 +43,12 @@ There are two options to enable ziti tunnel proxy injection. Snippets of mutatin
 
 ## Update Webhook Namespace
 
-Replace $WEBHOOK_NAMESPACE with the new namespace you wish to dedicate to the webhook. This will not be the same namespace as the pods that will have sidecars injected, and the webook's dedicated amespace will be deleted if you uninstall the webook like `kubectl delete -f ziti-webhook-spec.yaml --context $CLUSTER`.
+Replace $WEBHOOK_NAMESPACE with the new namespace you wish to dedicate to the webhook. This will not be the same namespace as the pods that will have sidecars injected, and the webook's dedicated amespace will be deleted if you uninstall the webook like `kubectl delete -f ziti-webhook-spec.yaml --context $KUBECONFIG_CONTEXT`.
 
 Run the spec.  
 
 ```bash
-kubectl create -f ziti-webhook-spec.yaml --context $CLUSTER
+kubectl create -f ziti-webhook-spec.yaml --context $KUBECONFIG_CONTEXT
 ```
 
 Once the webhook has been deployed successfully, label the namespace or pods
@@ -54,19 +56,19 @@ Once the webhook has been deployed successfully, label the namespace or pods
 1. Per namespace by adding label `openziti/ziti-tunnel=namespace`
 
     ```bash
-    kubectl label namespace {ns name} openziti/ziti-tunnel=namespace --context $CLUSTER
+    kubectl label namespace {ns name} openziti/ziti-tunnel=namespace --context $KUBECONFIG_CONTEXT
     ```
 
     if resources are already deployed for the namespace injection, one can run this to restart all pods per deployment.
 
     ```bash
-    kubectl rollout restart deployment/{appname} -n {ns name} --context $CLUSTER 
+    kubectl rollout restart deployment/{appname} -n {ns name} --context $KUBECONFIG_CONTEXT 
     ```
 
 1. Per Pod by adding label `openziti/ziti-tunnel=pod`
 
     ```bash
-    kubectl patch deployment/example-app -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' -n $NAMESPACE --context $CLUSTER
+    kubectl patch deployment/example-app -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' -n $NAMESPACE --context $KUBECONFIG_CONTEXT
     ```
 
 **Note: The identity role attribute is set to the pod's app name if it lacks a Ziti identity role annotation. Add a Ziti identity role annotation at any time to update identity role attributes without restarting pods. If more than one replica is present in the deployment, then the deployment needs to be updated and pods will be restarted. You can avoid the rolling restart by annotating the dedployment's replicas individually.**
@@ -81,13 +83,13 @@ data:
 Example of key/value for the annotation. The annotation value must be a string, where roles are separated by comma if more than one needs to be configured
 
 ```bash
-kubectl annotate pod/adservice-86fc68848-dgtdz identity.openziti.io/role-attributes=sales,us-east --context $CLUSTER
+kubectl annotate pod/adservice-86fc68848-dgtdz identity.openziti.io/role-attributes=sales,us-east --context $KUBECONFIG_CONTEXT
 ```
 
 Deployment with immediate rollout restart
 
 ```bash
-kubectl patch deployment/adservice -p '{"spec":{"template":{"metadata":{"annotations":{"identity.openziti.io/role-attributes":"us-east"}}}}}' --context $CLUSTER
+kubectl patch deployment/adservice -p '{"spec":{"template":{"metadata":{"annotations":{"identity.openziti.io/role-attributes":"us-east"}}}}}' --context $KUBECONFIG_CONTEXT
 ```
 
 **Note: You may configure a custom nameserver or the deployment will use the cluster's default resolver.**
@@ -115,7 +117,9 @@ You must have an OpenZiti self-hosted network or an NF Cloud network.
 ```bash
 export NF_ADMIN_IDENTITY_PATH="path/to/adminUser.json created and enrolled on NF Network"
 export WEBHOOK_NAMESPACE="namespace to deploy the webhook to"
-export CLUSTER="cluster context name"
+export KUBECONFIG_CONTEXT="cluster context name"
+export CLUSTER_DNS_ZONE="cluster.local"
+export SEARCH_DOMAINS="space-separated list of DNS suffixes to add to the pod spec (default: '$CLUSTER_DNS_ZONE {pod namespace}.svc.$CLUSTER_DNS_ZONE')"
 ```
 
 Save the following bash script in a file, audit, and execute to generate the deployment manifest.
@@ -175,7 +179,7 @@ spec:
   subject:
     organizations:
     - netfoundry
-  commonName: ziti-admission-service.$WEBHOOK_NAMESPACE.svc
+  commonName: ziti-admission-service.$WEBHOOK_NAMESPACE.svc.$CLUSTER_DNS_ZONE
   isCA: false
   privateKey:
     algorithm: RSA
@@ -186,8 +190,8 @@ spec:
     - server auth
     - client auth
   dnsNames:
-  - ziti-admission-service.$WEBHOOK_NAMESPACE.svc.cluster.local
-  - ziti-admission-service.$WEBHOOK_NAMESPACE.svc
+  - ziti-admission-service.$WEBHOOK_NAMESPACE.svc.$CLUSTER_DNS_ZONE
+  - ziti-admission-service.$WEBHOOK_NAMESPACE.svc.$CLUSTER_DNS_ZONE
   issuerRef:
     kind: Issuer
     name: selfsigned-issuer
@@ -353,7 +357,7 @@ data:
   zitiMgmtApi: $CTRL_MGMT_API
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "true"
-  SearchDomainList:
+  SearchDomainList: $SEARCH_DOMAINS
 EOF
 ```
 
@@ -362,7 +366,7 @@ EOF
 <details><summary>Deployment Spec to Cluster</summary><p>
 
 ```bash
-kubectl create -f ziti-webhook-spec.yaml --context $CLUSTER
+kubectl create -f ziti-webhook-spec.yaml --context $KUBECONFIG_CONTEXT
 ```
 
 </p></details>
