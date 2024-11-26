@@ -56,6 +56,7 @@ Once the webhook has been deployed successfully, label the namespace or pods
     ```bash
     kubectl label namespace {ns name} openziti/ziti-tunnel=namespace --context $CLUSTER
     ```
+
     if resources are already deployed for the namespace injection, one can run this to restart all pods per deployment.
 
     ```bash
@@ -67,8 +68,6 @@ Once the webhook has been deployed successfully, label the namespace or pods
     ```bash
     kubectl patch deployment/example-app -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' -n $NAMESPACE --context $CLUSTER
     ```
-
-
 
 **Note: The identity role attribute is set to the pod's app name if it lacks a Ziti identity role annotation. Add a Ziti identity role annotation at any time to update identity role attributes without restarting pods. If more than one replica is present in the deployment, then the deployment needs to be updated and pods will be restarted. You can avoid the rolling restart by annotating the dedployment's replicas individually.**
 
@@ -351,7 +350,7 @@ metadata:
   name: ziti-ctrl-cfg
   namespace: $WEBHOOK_NAMESPACE
 data:
-  zitiMgmtAPI: $CTRL_MGMT_API
+  zitiMgmtApi: $CTRL_MGMT_API
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "true"
   SearchDomainList:
