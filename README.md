@@ -117,7 +117,7 @@ You must have an OpenZiti self-hosted network or an NF Cloud network.
 ```bash
 export NF_ADMIN_IDENTITY_PATH="path/to/adminUser.json created and enrolled on NF Network"
 export WEBHOOK_NAMESPACE="namespace to deploy the webhook to"
-export KUBECONFIG_CONTEXT="cluster context name"
+export KUBECONFIG_CONTEXT="default"
 export CLUSTER_DNS_ZONE="cluster.local"
 export SEARCH_DOMAINS="space-separated list of DNS suffixes to add to the pod spec (default: '$CLUSTER_DNS_ZONE {pod namespace}.svc.$CLUSTER_DNS_ZONE')"
 ```
