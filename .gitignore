@@ -18,10 +18,12 @@
 # vendor/
 
 # Go workspace file
-go.work
+/go.work
 
 # build dir
-build
+/build
 
 #config files
 
+/nf_identity_*.pem
+/ziti-agent.yaml
