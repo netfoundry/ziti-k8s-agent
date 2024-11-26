@@ -37,6 +37,22 @@ func (e *MissingCmdLineVarError) Error() string {
 }
 
 func lookupEnvVars() {
+	// Declare variables
+	var value string
+	var ok bool
+	var cert []byte
+	var key []byte
+	var port int
+	var sidecarImage string
+	var sidecarImageVersion string
+	var sidecarPrefix string
+	var zitiCtrlMgmtApi string
+	var zitiAdminCert []byte
+	var zitiAdminKey []byte
+	var clusterDnsServiceIP string
+	var searchDomains []string
+	var zitiRoleKey string
+
 	// Environmental Variables to override the commandline inputs
 	value, ok = os.LookupEnv("TLS-CERT")
 	if ok && len(value) > 0 {
@@ -143,7 +159,7 @@ func lookupEnvVars() {
 		if len(clusterDnsServiceIP) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "CLUSTER_DNS_SVC_IP"})
 			klog.Error(&MissingCmdLineVarError{variable: "CLUSTER_DNS_SVC_IP"})
-			klog.Infof(fmt.Sprintf("Custom DNS Server IP not set, Cluster DNS IP will be used instead"))
+			klog.Infof("Custom DNS Server IP not set, Cluster DNS IP will be used instead")
 		}
 	}
 
@@ -151,12 +167,10 @@ func lookupEnvVars() {
 	if ok && len(value) > 0 {
 		searchDomains = []string(strings.Split(value, " "))
 	} else {
-		if len(searchDomainList) == 0 {
+		if len(searchDomains) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "SEARCH_DOMAIN_LIST"})
 			klog.Error(&MissingCmdLineVarError{variable: "SEARCH_DOMAIN_LIST"})
-			klog.Infof(fmt.Sprintf("Custom DNS search domains not set, Kubernetes default domains will be used instead"))
-		} else {
-			searchDomains = []string(strings.Split(searchDomainList, " "))
+			klog.Infof("Custom DNS search domains not set, Kubernetes default domains will be used instead")
 		}
 	}
 
