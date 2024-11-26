@@ -204,7 +204,7 @@ metadata:
   name: ziti-ctrl-cfg
   namespace: $WEBHOOK_NAMESPACE
 data:
-  zitiMgmtAPI: $CTRL_MGMT_API
+  zitiMgmtApi: $CTRL_MGMT_API
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "true"
   SearchDomainList:
