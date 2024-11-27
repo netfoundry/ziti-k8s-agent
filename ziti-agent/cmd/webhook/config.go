@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"crypto/tls"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -21,7 +22,7 @@ type MissingCmdLineVarError struct {
 func configTLS(cert, key []byte) *tls.Config {
 	sCert, err := tls.X509KeyPair(cert, key)
 	if err != nil {
-		klog.Fatalf("Failed to load the 509x certs %v", err)
+		klog.Fatalf("Failed to load the webhook server's x509 cert %v", err)
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{sCert},
@@ -37,150 +38,136 @@ func (e *MissingCmdLineVarError) Error() string {
 }
 
 func lookupEnvVars() {
-	// Declare variables
-	var value string
-	var ok bool
-	var cert []byte
-	var key []byte
-	var port int
-	var sidecarImage string
-	var sidecarImageVersion string
-	var sidecarPrefix string
-	var zitiCtrlMgmtApi string
-	var zitiAdminCert []byte
-	var zitiAdminKey []byte
-	var clusterDnsServiceIP string
-	var searchDomains []string
-	var zitiRoleKey string
-
 	// Environmental Variables to override the commandline inputs
-	value, ok = os.LookupEnv("TLS-CERT")
+
+	value, ok := os.LookupEnv("ZITI_AGENT_LOG_LEVEL")
 	if ok && len(value) > 0 {
-		cert = []byte(value)
-	} else {
-		if cert == nil {
-			klog.Error(&MissingEnvVarError{variable: "TLS-CERT"})
-			klog.Error(&MissingCmdLineVarError{variable: "TLS-CERT"})
+		switch value {
+		case "debug", "verbose":
+			verbose = true
 		}
 	}
 
-	value, ok = os.LookupEnv("TLS-PRIVATE-KEY")
+	// Increase log level to DEBUG if verbose mode is enabled
+	if verbose {
+		_ = flag.Set("v", "4")
+	}
+
+	value, ok = os.LookupEnv("TLS_CERT")
+	if ok && len(value) > 0 {
+		cert = []byte(value)
+	}
+	if len(cert) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "TLS_CERT"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "TLS_CERT"})
+	}
+
+	value, ok = os.LookupEnv("TLS_PRIVATE_KEY")
 	if ok && len(value) > 0 {
 		key = []byte(value)
-	} else {
-		if key == nil {
-			klog.Error(&MissingEnvVarError{variable: "TLS-PRIVATE-KEY"})
-			klog.Error(&MissingCmdLineVarError{variable: "TLS-PRIVATE-KEY"})
-		}
+	}
+	if len(key) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "TLS_PRIVATE_KEY"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "TLS_PRIVATE_KEY"})
 	}
 
 	value, ok = os.LookupEnv("PORT")
 	if ok && len(value) > 0 {
-		port, _ = strconv.Atoi(value)
-	} else {
-		if port <= 0 {
-			klog.Error(&MissingEnvVarError{variable: "PORT"})
-			klog.Error(&MissingCmdLineVarError{variable: "PORT"})
+		var err error
+		port, err = strconv.Atoi(value)
+		if err != nil {
+			klog.Fatal(err)
 		}
+	}
+	if port == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "PORT"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "PORT"})
 	}
 
 	value, ok = os.LookupEnv("SIDECAR_IMAGE")
 	if ok && len(value) > 0 {
 		sidecarImage = value
-	} else {
-		if len(sidecarImage) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "SIDECAR_IMAGE"})
-			klog.Error(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE"})
-		}
+	}
+	if len(sidecarImage) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE"})
 	}
 
 	value, ok = os.LookupEnv("SIDECAR_IMAGE_VERSION")
 	if ok && len(value) > 0 {
 		sidecarImageVersion = value
-	} else {
-		if len(sidecarImageVersion) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "SIDECAR_IMAGE_VERSION"})
-			klog.Error(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_VERSION"})
-		}
+	}
+	if len(sidecarImageVersion) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE_VERSION"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_VERSION"})
 	}
 
 	value, ok = os.LookupEnv("SIDECAR_PREFIX")
 	if ok && len(value) > 0 {
 		sidecarPrefix = value
+	}
+	if len(sidecarPrefix) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_PREFIX"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_PREFIX"})
+		klog.Fatal("sidecarPrefix cannot be empty")
 	} else {
-		if len(sidecarPrefix) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "SIDECAR_PREFIX"})
-			klog.Error(&MissingCmdLineVarError{variable: "SIDECAR_PREFIX"})
-		}
+		klog.V(4).Infof("sidecarPrefix: %s", sidecarPrefix)
 	}
 
-	value, ok = os.LookupEnv("ZITI_CTRL_MGMT_API")
+	value, ok = os.LookupEnv("ZITI_MGMT_API")
 	if ok && len(value) > 0 {
 		zitiCtrlMgmtApi = value
-	} else {
-		if len(zitiCtrlMgmtApi) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_MGMT_API"})
-			klog.Error(&MissingCmdLineVarError{variable: "ZITI_CTRL_MGMT_API"})
-		}
+	}
+	if len(zitiCtrlMgmtApi) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_MGMT_API"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_MGMT_API"})
 	}
 
-	value, ok = os.LookupEnv("ZITI_CTRL_ADMIN_CERT")
+	value, ok = os.LookupEnv("ZITI_ADMIN_CERT")
 	if ok && len(value) > 0 {
 		zitiAdminCert = []byte(value)
-	} else {
-		if zitiAdminCert == nil {
-			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_ADMIN_CERT"})
-			klog.Error(&MissingCmdLineVarError{variable: "ZITI_CTRL_ADMIN_CERT"})
-		}
+	}
+	if zitiAdminCert == nil {
+		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ADMIN_CERT"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ADMIN_CERT"})
 	}
 
-	value, ok = os.LookupEnv("ZITI_CTRL_ADMIN_KEY")
+	value, ok = os.LookupEnv("ZITI_ADMIN_KEY")
 	if ok && len(value) > 0 {
 		zitiAdminKey = []byte(value)
-	} else {
-		if zitiAdminKey == nil {
-			klog.Error(&MissingEnvVarError{variable: "ZITI_CTRL_ADMIN_KEY"})
-			klog.Error(&MissingCmdLineVarError{variable: "ZITI_CTRL_ADMIN_KEY"})
-		}
+	}
+	if zitiAdminKey == nil {
+		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ADMIN_KEY"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ADMIN_KEY"})
 	}
 
 	value, ok = os.LookupEnv("POD_SECURITY_CONTEXT_OVERRIDE")
 	if ok && len(value) > 0 {
+		var err error
 		podSecurityOverride, err = strconv.ParseBool(value)
 		if err != nil {
 			klog.Info(err)
 		}
 	}
 
-	value, ok = os.LookupEnv("CLUSTER_DNS_SVC_IP")
+	value, ok = os.LookupEnv("SEARCH_DOMAINS")
 	if ok && len(value) > 0 {
-		clusterDnsServiceIP = value
-	} else {
-		if len(clusterDnsServiceIP) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "CLUSTER_DNS_SVC_IP"})
-			klog.Error(&MissingCmdLineVarError{variable: "CLUSTER_DNS_SVC_IP"})
-			klog.Infof("Custom DNS Server IP not set, Cluster DNS IP will be used instead")
-		}
+		searchDomains = strings.Split(value, ",")
 	}
-
-	value, ok = os.LookupEnv("SEARCH_DOMAIN_LIST")
-	if ok && len(value) > 0 {
-		searchDomains = []string(strings.Split(value, " "))
+	if len(searchDomains) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "SEARCH_DOMAINS"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "SEARCH_DOMAINS"})
+		klog.Infof("Custom DNS search domains not set, using Kubernetes defaults")
 	} else {
-		if len(searchDomains) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "SEARCH_DOMAIN_LIST"})
-			klog.Error(&MissingCmdLineVarError{variable: "SEARCH_DOMAIN_LIST"})
-			klog.Infof("Custom DNS search domains not set, Kubernetes default domains will be used instead")
-		}
+		klog.Infof("Custom DNS search domains: %s", searchDomains)
 	}
 
 	value, ok = os.LookupEnv("ZITI_ROLE_KEY")
 	if ok && len(value) > 0 {
 		zitiRoleKey = value
-	} else {
-		if len(zitiRoleKey) == 0 {
-			klog.Error(&MissingEnvVarError{variable: "ZITI_ROLE_KEY"})
-			klog.Error(&MissingCmdLineVarError{variable: "ZITI_ROLE_KEY"})
-		}
+	}
+	if len(zitiRoleKey) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ROLE_KEY"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ROLE_KEY"})
 	}
 }

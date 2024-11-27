@@ -25,3 +25,4 @@
 
 # local temp files
 /ziti-agent.yaml
+/ziti-client.yaml

@@ -25,8 +25,7 @@ var (
 	searchDomainList       string
 	searchDomains          []string
 	zitiRoleKey            string
-	value                  string
-	ok                     bool
+	verbose                bool
 	err                    error
 )
 
@@ -63,6 +62,8 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"Override the security context at pod level, i.e. runAsNonRoot: false")
 	webhookCmd.Flags().StringVar(&clusterDnsServiceIP, "cluster-dns-svc-ip", "",
 		"Cluster DNS Service IP")
+	webhookCmd.Flags().BoolVarP(&verbose, "verbose", "v", false,
+		"Enable verbose (DEBUG level) logging")
 	webhookCmd.Flags().StringVar(&searchDomainList, "search-domain-list", "",
 		"A list of DNS search domains as space seperated string i.e. 'value1 value2'")
 	webhookCmd.Flags().StringVar(&zitiRoleKey, "ziti-role-key", "",
