@@ -24,7 +24,6 @@ var (
 	clusterDnsServiceIP    string
 	searchDomainList       string
 	searchDomains          []string
-	zitiIdentityRoles      []string
 	zitiRoleKey            string
 	value                  string
 	ok                     bool
