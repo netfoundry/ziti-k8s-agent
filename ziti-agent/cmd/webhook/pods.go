@@ -77,18 +77,18 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			return failureResponse(reviewResponse, err)
 		}
 
-		secretBytes, err := json.Marshal(identityCfg)
+		secretJson, err := json.Marshal(identityCfg)
 		if err != nil {
 			klog.Error(err)
 			return failureResponse(reviewResponse, err)
 		}
-		secretData := []byte(base64.StdEncoding.EncodeToString(secretBytes))
+		secretBase64:= []byte(base64.StdEncoding.EncodeToString(secretJson))
 
 		// kubernetes client
 		kc := k.Client()
 
 		//Create secret in the same namespace
-		_, err = kc.CoreV1().Secrets(pod.Namespace).Create(context.TODO(), &corev1.Secret{Data: map[string][]byte{sidecarIdentityName: secretData}, Type: "Opaque", ObjectMeta: metav1.ObjectMeta{Name: sidecarIdentityName}}, metav1.CreateOptions{})
+		_, err = kc.CoreV1().Secrets(pod.Namespace).Create(context.TODO(), &corev1.Secret{Data: map[string][]byte{sidecarIdentityName: secretBase64}, Type: "Opaque", ObjectMeta: metav1.ObjectMeta{Name: sidecarIdentityName}}, metav1.CreateOptions{})
 		if err != nil {
 			klog.Error(err)
 		}
@@ -276,9 +276,9 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		}
 
 	case "UPDATE":
-		klog.Infof(fmt.Sprintf("%s", ar.Request.Operation))
-		klog.Infof(fmt.Sprintf("Object: %s", ar.Request.Object.Raw))
-		klog.Infof(fmt.Sprintf("OldObject: %s", ar.Request.OldObject.Raw))
+		klog.Info(ar.Request.Operation)
+		klog.Infof("Object: %s", ar.Request.Object.Raw)
+		klog.Infof("OldObject: %s", ar.Request.OldObject.Raw)
 		if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, &pod); err != nil {
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
@@ -314,7 +314,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 				if err != nil {
 					return failureResponse(reviewResponse, err)
 				}
-				zId, ok, err := findIdentity(zName, zec)
+				zId, ok, _ := findIdentity(zName, zec)
 				if ok {
 					identityDetails, err := ze.PatchIdentity(zId, roles, zec)
 					if err != nil {
