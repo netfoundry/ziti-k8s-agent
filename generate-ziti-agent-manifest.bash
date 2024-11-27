@@ -24,7 +24,7 @@ IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 
 IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
 IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
 
-cat <<YAML > ziti-agent.yaml
+cat <<YAML >| ziti-agent.yaml
 
 ---
 apiVersion: cert-manager.io/v1
@@ -103,18 +103,19 @@ spec:
       containers:
         - name: ziti-admission-webhook
           image: ${ZITI_AGENT_IMAGE:-docker.io/netfoundry/ziti-k8s-agent}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: ${ZITI_AGENT_IMAGE_PULL_POLICY:-IfNotPresent}
           ports:
             - containerPort: 9443
-          args:
-            - webhook
+          args: [ "webhook" ]
           env:
-            - name: TLS-CERT
+            - name: ZITI_AGENT_LOG_LEVEL
+              value: ${ZITI_AGENT_LOG_LEVEL:-info}
+            - name: TLS_CERT
               valueFrom:
                 secretKeyRef:
                   name: ziti-webhook-server-cert
                   key: tls.crt
-            - name: TLS-PRIVATE-KEY
+            - name: TLS_PRIVATE_KEY
               valueFrom:
                 secretKeyRef:
                   name: ziti-webhook-server-cert
@@ -124,12 +125,12 @@ spec:
                 configMapKeyRef:
                   name: ziti-ctrl-cfg
                   key:  zitiMgmtApi
-            - name: ZITI_AGENT_CERT
+            - name: ZITI_ADMIN_CERT
               valueFrom:
                 secretKeyRef:
                   name: ziti-agent-identity
                   key:  tls.crt
-            - name: ZITI_AGENT_KEY
+            - name: ZITI_ADMIN_KEY
               valueFrom:
                 secretKeyRef:
                   name: ziti-agent-identity

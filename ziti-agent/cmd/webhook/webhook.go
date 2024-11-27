@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,10 +14,6 @@ import (
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
-)
-
-var (
-	runtimeScheme = runtime.NewScheme()
 )
 
 func init() {
@@ -92,7 +89,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
 
-		klog.Infof(fmt.Sprintf("Admission Response UID: %s", responseAdmissionReview.Response.UID))
+		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)
@@ -106,7 +103,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
 
-		klog.Infof(fmt.Sprintf("Admission Response UID: %s", responseAdmissionReview.Response.UID))
+		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
@@ -132,6 +129,13 @@ func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
 }
 
 func webhook(cmd *cobra.Command, args []string) {
+	// Initialize logging first
+	klog.InitFlags(nil)
+	_ = flag.Set("v", "2") // Set to INFO level by default
+	flag.Parse()
+
+	// load env vars to override the command line vars if any
+	lookupEnvVars()
 
 	klog.Infof("Current version is %s", common.Version)
 
@@ -147,6 +151,9 @@ func webhook(cmd *cobra.Command, args []string) {
 			klog.Info(err)
 		}
 	}
+	if cert == nil || key == nil {
+		klog.Fatal("Cert and key required, but one or both are missing")
+	}
 
 	// process ziti admin user certs passed from the file through the command line
 	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" {
@@ -161,10 +168,10 @@ func webhook(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// load env vars to override the command line vars if any
-	lookupEnvVars()
+	if zitiAdminCert == nil || zitiAdminKey == nil {
+		klog.Fatal("ziti admin cert and key required, but one or both are missing")
+	}
 
-	klog.Infof("AC WH Server is listening on port %d", port)
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),
@@ -172,6 +179,7 @@ func webhook(cmd *cobra.Command, args []string) {
 	}
 	err := server.ListenAndServeTLS("", "")
 	if err != nil {
-		panic(err)
+		klog.Fatal(err)
 	}
+	klog.Infof("ziti agent webhook server is listening on port %d", port)
 }
