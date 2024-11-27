@@ -23,7 +23,5 @@
 # build dir
 /build
 
-#config files
-
-/nf_identity_*.pem
+# local temp files
 /ziti-agent.yaml
