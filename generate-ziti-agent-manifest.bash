@@ -9,27 +9,28 @@ set -o nounset
 
 checkCommand() {
     if ! command -v "$1" &>/dev/null; then
-        logError "this script requires command '$1'. Please install on the search PATH and try again."
+        logError "this script requires command '$1'. Please install on PATH and try again."
         # attempting to run the non-existent command will trigger an error exit like "command not found"
         $1
     fi
 }
 
-for BIN in sed jq; do
+for BIN in sed awk jq base64; do
     checkCommand "$BIN"
 done
 
-ZITI_MGMT_API=$(jq -r .ztAPI "$IDENTITY_FILE" | sed 's/client/management/')
-IDENTITY_CERT=$(jq -r .id.cert "$IDENTITY_FILE" | sed 's/pem://')
-IDENTITY_KEY=$(jq -r .id.key "$IDENTITY_FILE" | sed 's/pem://')
-IDENTITY_CA=$(jq -r .id.ca "$IDENTITY_FILE" | sed 's/pem://')
+ZITI_MGMT_API=$(jq -r '.ztAPI' "$IDENTITY_FILE" | sed -E 's|/edge/client/v1|/edge/management/v1|')
+IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
+IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
+IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
 
-cat <<EOF >ziti-agent.yaml
+cat <<YAML > ziti-agent.yaml
+
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: selfsigned-issuer
+  name: ziti-k8s-agent-selfsigned-ca-issuer
   namespace: $ZITI_AGENT_NAMESPACE
 spec:
   selfSigned: {}
@@ -46,7 +47,7 @@ spec:
   renewBefore: 360h # 15d
   subject:
     organizations:
-    - netfoundry
+      - netfoundry
   commonName: ziti-admission-service.$ZITI_AGENT_NAMESPACE.svc.$CLUSTER_DNS_ZONE
   isCA: false
   privateKey:
@@ -55,14 +56,17 @@ spec:
     size: 2048
     rotationPolicy: Always
   usages:
+    - digital signature
+    - key encipherment
     - server auth
-    - client auth
   dnsNames:
-  - ziti-admission-service.$ZITI_AGENT_NAMESPACE.svc.$CLUSTER_DNS_ZONE
-  - ziti-admission-service.$ZITI_AGENT_NAMESPACE.svc.$CLUSTER_DNS_ZONE
+    - ziti-admission-service
+    - ziti-admission-service.$ZITI_AGENT_NAMESPACE
+    - ziti-admission-service.$ZITI_AGENT_NAMESPACE.svc
+    - ziti-admission-service.$ZITI_AGENT_NAMESPACE.svc.$CLUSTER_DNS_ZONE
   issuerRef:
     kind: Issuer
-    name: selfsigned-issuer
+    name: ziti-k8s-agent-selfsigned-ca-issuer
 
 ---
 apiVersion: v1
@@ -97,54 +101,61 @@ spec:
         app: ziti-admission-webhook
     spec:
       containers:
-      - name: ziti-admission-webhook
-        image: ${ZITI_AGENT_IMAGE:-docker.io/netfoundry/ziti-k8s-agent}
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 9443
-        args:
-          - webhook
-        env:
-          - name: TLS-CERT
-            valueFrom:
-              secretKeyRef:
-                name: ziti-webhook-server-cert
-                key: tls.crt
-          - name: TLS-PRIVATE-KEY
-            valueFrom:
-              secretKeyRef:
-                name: ziti-webhook-server-cert
-                key: tls.key
-          - name: ZITI_MGMT_API
-            valueFrom:
-              configMapKeyRef:
-                name: ziti-ctrl-cfg
-                key:  zitiMgmtApi
-          - name: ZITI_CTRL_CERT
-            valueFrom:
-              secretKeyRef:
-                name: ziti-ctrl-tls
-                key:  tls.crt
-          - name: ZITI_CTRL_KEY
-            valueFrom:
-              secretKeyRef:
-                name: ziti-ctrl-tls
-                key:  tls.key
-          - name: ZITI_ROLE_KEY
-            valueFrom:
-              configMapKeyRef:
-                name: ziti-ctrl-cfg
-                key:  zitiRoleKey
-          - name: POD_SECURITY_CONTEXT_OVERRIDE
-            valueFrom:
-              configMapKeyRef:
-                name: ziti-ctrl-cfg
-                key:  podSecurityContextOverride
-          - name: SEARCH_DOMAIN_LIST
-            valueFrom:
-              configMapKeyRef:
-                name: ziti-ctrl-cfg
-                key:  SearchDomainList
+        - name: ziti-admission-webhook
+          image: ${ZITI_AGENT_IMAGE:-docker.io/netfoundry/ziti-k8s-agent}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9443
+          args:
+            - webhook
+          env:
+            - name: TLS-CERT
+              valueFrom:
+                secretKeyRef:
+                  name: ziti-webhook-server-cert
+                  key: tls.crt
+            - name: TLS-PRIVATE-KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ziti-webhook-server-cert
+                  key: tls.key
+            - name: ZITI_MGMT_API
+              valueFrom:
+                configMapKeyRef:
+                  name: ziti-ctrl-cfg
+                  key:  zitiMgmtApi
+            - name: ZITI_AGENT_CERT
+              valueFrom:
+                secretKeyRef:
+                  name: ziti-agent-identity
+                  key:  tls.crt
+            - name: ZITI_AGENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ziti-agent-identity
+                  key:  tls.key
+            - name: ZITI_ROLE_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: ziti-ctrl-cfg
+                  key:  zitiRoleKey
+            - name: POD_SECURITY_CONTEXT_OVERRIDE
+              valueFrom:
+                configMapKeyRef:
+                  name: ziti-ctrl-cfg
+                  key:  podSecurityContextOverride
+            - name: SEARCH_DOMAIN_LIST
+              valueFrom:
+                configMapKeyRef:
+                  name: ziti-ctrl-cfg
+                  key:  SearchDomainList
+          resources:
+            requests:
+              cpu: ${ZITI_AGENT_CPU:-100m}
+              memory: ${ZITI_AGENT_MEMORY:-128Mi}
+            limits:
+              cpu: ${ZITI_AGENT_CPU_LIMIT:-500m}
+              memory: ${ZITI_AGENT_MEMORY_LIMIT:-512Mi}
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -156,23 +167,27 @@ metadata:
 webhooks:
   - name: tunnel.ziti.webhook
     admissionReviewVersions: ["v1"]
-    $(
-    if [[ $SIDECAR_SELECTOR == "namespace" ]]
-      then
-        cat <<SELECTOR
+$(
+IFS=',' read -ra SELECTORS <<< "$SIDECAR_SELECTORS"
+for SELECTOR in "${SELECTORS[@]}"; do
+  if [[ "$SELECTOR" =~ namespace ]]; then
+    cat <<SEL
     namespaceSelector:
-        matchLabels:
-          openziti/ziti-tunnel: namespace
-SELECTOR
-    elif [[ $SIDECAR_SELECTOR == "pod" ]]
-      then
-        cat <<SELECTOR
-      objectSelector:
-        matchLabels:
-          openziti/ziti-tunnel: pod
-SELECTOR
-    fi
-    )
+      matchLabels:
+        openziti/tunnel-enabled: "true"
+SEL
+  elif [[ "$SELECTOR" =~ pod ]]; then
+    cat <<SEL
+    objectSelector:
+      matchLabels:
+        openziti/tunnel-enabled: "true"
+SEL
+  else
+    echo "ERROR: Unknown value in SIDECAR_SELECTORS: $SIDECAR_SELECTORS" >&2
+    exit 1
+  fi
+done
+)
     rules:
       - operations: ["CREATE","UPDATE","DELETE"]
         apiGroups: [""]
@@ -182,7 +197,7 @@ SELECTOR
     clientConfig:
       service:
         name: ziti-admission-service
-        namespace: $SIDECAR_SELECTOR
+        namespace: $ZITI_AGENT_NAMESPACE
         port: 443
         path: "/ziti-tunnel"
       caBundle: ""
@@ -196,12 +211,13 @@ metadata:
   namespace: $ZITI_AGENT_NAMESPACE
   name: ziti-agent-wh-roles
 rules:
-- apiGroups: [""] # "" indicates the core API group
-  resources: ["secrets"]
-  verbs: ["get", "list", "create", "delete"]
-- apiGroups: [""]
-  resources: ["services"]
-  verbs: ["get"]
+  # "" indicates the core API group
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -213,18 +229,18 @@ roleRef:
   kind: ClusterRole
   name: ziti-agent-wh-roles
 subjects:
-- kind: ServiceAccount
-  name: default
-  namespace: $ZITI_AGENT_NAMESPACE
+  - kind: ServiceAccount
+    name: default
+    namespace: $ZITI_AGENT_NAMESPACE
 
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ziti-ctrl-tls
+  name: ziti-agent-identity
   namespace: $ZITI_AGENT_NAMESPACE
 type: kubernetes.io/tls
-stringData:
+data:
   tls.crt: $IDENTITY_CERT
   tls.key: $IDENTITY_KEY
   tls.ca:  $IDENTITY_CA
@@ -240,4 +256,4 @@ data:
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "true"
   SearchDomainList: ${SEARCH_DOMAINS:-\"\"}
-EOF
+YAML

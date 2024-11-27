@@ -8,32 +8,61 @@ A namespace will not be created. The agent may be installed in any existing name
 
 ## Select Pods for Sidecar Injection
 
-Choose a method to select the pods.
+Choose a method to select the pods: namespace, pod, or both.
 
 ### Select by Namespace
 
-Select all pods in namespaces labeled `openziti/ziti-tunnel=namespace`.
+Select all pods in namespaces labeled `openziti/tunnel-enabled="true"`.
 
 ```bash
-export SIDECAR_SELECTOR="namespace"
-kubectl label namespace {name} openziti/ziti-tunnel=namespace
+kubectl label namespace {name} openziti/tunnel-enabled="true"
+```
+
+The agent manifest must reflect your choice to select by namespace. Setting `SIDECAR_SELECTORS="namespace"` in the script's environment before generating the manifest will configure the mutating webhook with a `namespaceSelector`.
+
+```yaml
+    namespaceSelector:
+      matchLabels:
+        openziti/tunnel-enabled: "true"
 ```
 
 ### Select by Pod
 
-Select pods labeled `openziti/ziti-tunnel=pod` in any namespace.
+Select pods labeled `openziti/tunnel-enabled="true"` in any namespace.
 
 ```bash
-export SIDECAR_SELECTOR="pod"
-kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}'
+kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"openziti/tunnel-enabled":"true"}}}}}'
+```
+
+The agent manifest must reflect your choice to select by pod. Setting `SIDECAR_SELECTORS="pod"` in the script's environment before generating the manifest will configure the mutating webhook with an `objectSelector`.
+
+```yaml
+    objectSelector:
+      matchLabels:
+        openziti/tunnel-enabled: "true"
+```
+
+### Select by Namespace and Pod
+
+Select pods labeled `openziti/tunnel-enabled="true"` only in namespaces labeled `openziti/tunnel-enabled="true"`.
+
+The agent manifest must reflect your choice to select by pod. Setting `SIDECAR_SELECTORS="namespace,pod"` in the script's environment before generating the manifest will configure the mutating webhook with both `namespaceSelector` and `objectSelector`. Both selectors must match for a pod to be selected.
+
+```yaml
+    namespaceSelector:
+      matchLabels:
+        openziti/tunnel-enabled: "true"
+    objectSelector:
+      matchLabels:
+        openziti/tunnel-enabled: "true"
 ```
 
 ## Specify Ziti roles for Pod Identities
 
-The Ziti agent will generate a default role name based on the pods' app labels unless you annotate the pods selected above with a comma-separated list of Ziti identity roles.
+The Ziti agent will generate a default Ziti identity role based on the app label unless you annotate it with a comma-separated list of roles. This example adds the role `acme-api-clients` to the Ziti identity shared by all replicas of the deployment.
 
 ```bash
-kubectl patch deployment/example-app -p '{"spec":{"template":{"metadata":{"annotations":{"identity.openziti.io/role-attributes":"acme-api-clients"}}}}}'
+kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"annotations":{"identity.openziti.io/role-attributes":"acme-api-clients"}}}}}'
 ```
 
 ## Create and Authorize Ziti Services
@@ -52,13 +81,7 @@ Pods authorized to bind a Ziti service require that service to have a host addre
 1. A JSON identity configuration file for an OpenZiti identity with the admin privilege
 1. A K8S namespace in which to deploy the agent
 
-### Set Environment Variables
-
-These variable must be set.
-
-```bash
-export NF_ADMIN_IDENTITY_PATH="ziti-k8s-agent.json"
-```
+### Set Optional Environment Variables
 
 These optional variables will override defaults.
 
@@ -67,13 +90,18 @@ export ZITI_AGENT_NAMESPACE="default"
 export CLUSTER_DNS_ZONE="cluster.local"
 ```
 
+You may replace the cluster's default DNS search domains for selected pods by exporting `SEARCH_DOMAINS` as a space separated list of domain name suffixes. This may be useful if the selected pods never need to resolve the names of cluster services, but do need to resolve short names in a DNS zone that you control outside of the cluster, e.g., `ziti.internal ziti.example.com`.
+
 ### Generate a Manifest
 
-Run the provided script with the above variables exported to generate a K8S manifest.
+- `IDENTITY_FILE` is the path to the JSON file from the enrollment step.
+- `SIDECAR_SELECTORS` is a comma-separated list of methods by which pods are selected for sidecar injection: `namespace`, `pod`, or both (see [Select Pods for Sidecar Injection](#select-pods-for-sidecar-injection) above).
 
 ```bash
-./generate-ziti-agent-manifest.bash
+IDENTITY_FILE="ziti-k8s-agent.json" SIDECAR_SELECTORS="namespace,pod" ./generate-ziti-agent-manifest.bash
 ```
+
+The script produces `ziti-agent.yaml` in the current directory.
 
 ### Apply the Manifest
 
