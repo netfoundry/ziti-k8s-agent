@@ -170,22 +170,26 @@ webhooks:
 $(
 IFS=',' read -ra SELECTORS <<< "$SIDECAR_SELECTORS"
 for SELECTOR in "${SELECTORS[@]}"; do
-  if [[ "$SELECTOR" =~ namespace ]]; then
-    cat <<SEL
+  case "$SELECTOR" in
+    namespace)
+      cat <<SEL
     namespaceSelector:
       matchLabels:
         openziti/tunnel-enabled: "true"
 SEL
-  elif [[ "$SELECTOR" =~ pod ]]; then
-    cat <<SEL
+    ;;
+    pod)
+      cat <<SEL
     objectSelector:
       matchLabels:
         openziti/tunnel-enabled: "true"
 SEL
-  else
-    echo "ERROR: Unknown value in SIDECAR_SELECTORS: $SIDECAR_SELECTORS" >&2
-    exit 1
-  fi
+    ;;
+    *)
+      echo "ERROR: Unknown value in SIDECAR_SELECTORS: $SIDECAR_SELECTORS" >&2
+      exit 1
+    ;;
+  esac
 done
 )
     rules:
