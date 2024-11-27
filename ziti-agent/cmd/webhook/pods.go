@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -76,10 +77,12 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			return failureResponse(reviewResponse, err)
 		}
 
-		secretData, err := json.Marshal(identityCfg)
+		secretBytes, err := json.Marshal(identityCfg)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
+		secretData := []byte(base64.StdEncoding.EncodeToString(secretBytes))
 
 		// kubernetes client
 		kc := k.Client()
@@ -97,7 +100,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			}
 			if len(dnsService.Spec.ClusterIP) != 0 {
 				clusterDnsServiceIP = dnsService.Spec.ClusterIP
-				klog.Infof(fmt.Sprintf("Looked up DNS SVC ClusterIP and is %s", dnsService.Spec.ClusterIP))
+				klog.Infof(fmt.Sprintf("Looked up DNS SVC ClusterIP: %s", dnsService.Spec.ClusterIP))
 			} else {
 				klog.Info("Looked up DNS SVC ClusterIP and is not found")
 			}
@@ -128,14 +131,13 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		} else {
 			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
 				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
-				Searches:    searchDomains,
-			}
+					Searches:    searchDomains,
+				}
 		}
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
 		if err != nil {
 			klog.Error(err)
 		}
-
 		pod.Spec.DNSPolicy = "None"
 		dnsPolicyBytes, err := json.Marshal(&pod.Spec.DNSPolicy)
 		if err != nil {
