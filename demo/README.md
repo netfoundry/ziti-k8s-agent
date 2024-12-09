@@ -3498,12 +3498,12 @@ spec:
         args:
           - webhook
         env:
-          - name: TLS-CERT
+          - name: TLS_CERT
             valueFrom:
               secretKeyRef:
                 name: ziti-webhook-server-cert
                 key: tls.crt
-          - name: TLS-PRIVATE-KEY
+          - name: TLS_PRIVATE_KEY
             valueFrom:
               secretKeyRef:
                 name: ziti-webhook-server-cert

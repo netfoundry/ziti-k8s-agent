@@ -51,9 +51,9 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	switch ar.Request.Operation {
 
 	case "CREATE":
-		klog.Infof(fmt.Sprintf("%s", ar.Request.Operation))
-		klog.Infof(fmt.Sprintf("Object: %s", ar.Request.Object.Raw))
-		klog.Infof(fmt.Sprintf("OldObject: %s", ar.Request.OldObject.Raw))
+		klog.Info(ar.Request.Operation)
+		klog.Infof("Object: %s", ar.Request.Object.Raw)
+		klog.Infof("OldObject: %s", ar.Request.OldObject.Raw)
 		if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, &pod); err != nil {
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
