@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"crypto/tls"
-	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -40,20 +39,7 @@ func (e *MissingCmdLineVarError) Error() string {
 func lookupEnvVars() {
 	// Environmental Variables to override the commandline inputs
 
-	value, ok := os.LookupEnv("ZITI_AGENT_LOG_LEVEL")
-	if ok && len(value) > 0 {
-		switch value {
-		case "debug", "verbose":
-			verbose = true
-		}
-	}
-
-	// Increase log level to DEBUG if verbose mode is enabled
-	if verbose {
-		_ = flag.Set("v", "4")
-	}
-
-	value, ok = os.LookupEnv("TLS_CERT")
+	value, ok := os.LookupEnv("TLS_CERT")
 	if ok && len(value) > 0 {
 		cert = []byte(value)
 	}
@@ -157,7 +143,7 @@ func lookupEnvVars() {
 	if len(searchDomains) == 0 {
 		klog.V(4).Info(&MissingEnvVarError{variable: "SEARCH_DOMAINS"})
 		klog.V(4).Info(&MissingCmdLineVarError{variable: "SEARCH_DOMAINS"})
-		klog.Infof("Custom DNS search domains not set, using Kubernetes defaults")
+		klog.Info("Custom DNS search domains not set, using Kubernetes defaults")
 	} else {
 		klog.Infof("Custom DNS search domains: %s", searchDomains)
 	}

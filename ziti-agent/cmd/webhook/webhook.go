@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,7 +87,6 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response = admit.admissionv1beta1(*requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
-
 		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
@@ -102,7 +100,6 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response = admit.admissionv1(*requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
-
 		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	default:
@@ -112,6 +109,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		return
 	}
 
+	klog.V(5).Infof("Admission Response: %s", responseObj)
 	respBytes, err := json.Marshal(responseObj)
 	if err != nil {
 		klog.Error(err)
@@ -129,15 +127,11 @@ func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
 }
 
 func webhook(cmd *cobra.Command, args []string) {
-	// Initialize logging first
-	klog.InitFlags(nil)
-	_ = flag.Set("v", "2") // Set to INFO level by default
-	flag.Parse()
 
 	// load env vars to override the command line vars if any
 	lookupEnvVars()
 
-	klog.Infof("Current version is %s", common.Version)
+	klog.Infof("Running version is %s", common.Version)
 
 	// process certs passed from the file through the command line
 	if certFile != "" && keyFile != "" {

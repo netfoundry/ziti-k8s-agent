@@ -8,7 +8,7 @@ A namespace will not be created. The agent may be installed in any existing name
 
 ## Select Pods for Sidecar Injection
 
-Choose a method to select the pods: namespace, pod, or both.
+Choose a method to select the pods: namespace, pod, or both. The sidecar is injected only on pod creation.
 
 ### Select by Namespace
 
@@ -59,7 +59,7 @@ The agent manifest must reflect your choice to select by pod. Setting `SIDECAR_S
 
 ## Specify Ziti roles for Pod Identities
 
-The Ziti agent will generate a default Ziti identity role based on the app label unless you annotate it with a comma-separated list of roles. This example adds the role `acme-api-clients` to the Ziti identity shared by all replicas of the deployment.
+The Ziti agent will generate a default Ziti identity role based on the app label unless you annotate it with a comma-separated list of roles. This example adds the role `acme-api-clients` to the Ziti identity shared by all replicas of the deployment. Updating the running pod's annotation will update the Ziti identity role.
 
 ```bash
 kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"annotations":{"identity.openziti.io/role-attributes":"acme-api-clients"}}}}}'
