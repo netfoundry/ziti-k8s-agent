@@ -3497,6 +3497,7 @@ spec:
         - containerPort: 9443
         args:
           - webhook
+          - --v=5
         env:
           - name: TLS_CERT
             valueFrom:
