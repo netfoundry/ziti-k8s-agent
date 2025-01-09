@@ -24,7 +24,7 @@ IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 
 IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
 IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
 
-cat <<YAML >| ziti-agent.yaml
+cat <<YAML
 
 ---
 apiVersion: cert-manager.io/v1

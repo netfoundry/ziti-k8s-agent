@@ -414,223 +414,25 @@ jobs:
           echo "IDENTITY_FILE=adminUser.json" | tee -a $GITHUB_ENV
           sudo ziti-edge-tunnel add --jwt "$(< ./testClient.jwt)" --identity testClient
 
-      - name: deploy-webhook-2-clusters
+      - name: Deploy Webhook to Clusters
         if: success() || failure()
         shell: bash
+        env:
+          ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
         run: |
-          export CTRL_MGMT_API=$(sed "s/client/management/" <<< `jq -r .ztAPI $IDENTITY_FILE`)
-          export NF_ADMIN_IDENTITY_CERT_PATH="nf_identity_cert.pem"
-          export NF_ADMIN_IDENTITY_KEY_PATH="nf_identity_key.pem"
-          export NF_ADMIN_IDENTITY_CA_PATH="nf_identity_ca.pem"
-          sed "s/pem://" <<< `jq -r .id.cert $IDENTITY_FILE` > $NF_ADMIN_IDENTITY_CERT_PATH
-          sed "s/pem://" <<< `jq -r .id.key $IDENTITY_FILE` > $NF_ADMIN_IDENTITY_KEY_PATH
-          sed "s/pem://" <<< `jq -r .id.ca $IDENTITY_FILE` > $NF_ADMIN_IDENTITY_CA_PATH
-          export NF_ADMIN_IDENTITY_CERT=$(sed "s/pem://" <<< `jq .id.cert $IDENTITY_FILE`)
-          export NF_ADMIN_IDENTITY_KEY=$(sed "s/pem://" <<< `jq .id.key $IDENTITY_FILE`)
-          export NF_ADMIN_IDENTITY_CA=$(sed "s/pem://" <<< `jq .id.ca $IDENTITY_FILE`)
-          export WEBHOOK_NAMESPACE="ziti"
-          cat <<EOF >ziti-k8s-agent-webhook-spec.yaml
-          ---
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: $WEBHOOK_NAMESPACE
-          ---
-          apiVersion: cert-manager.io/v1
-          kind: Issuer
-          metadata:
-            name: selfsigned-issuer
-            namespace: $WEBHOOK_NAMESPACE
-          spec:
-            selfSigned: {}
-          ---
-          apiVersion: cert-manager.io/v1
-          kind: Certificate
-          metadata:
-            name: ziti-admission-cert
-            namespace: $WEBHOOK_NAMESPACE
-          spec:
-            secretName: ziti-webhook-server-cert
-            duration: 2160h # 90d
-            renewBefore: 360h # 15d
-            subject:
-              organizations:
-              - netfoundry
-            commonName: ziti-admission-service.$WEBHOOK_NAMESPACE.svc
-            isCA: false
-            privateKey:
-              algorithm: RSA
-              encoding: PKCS1
-              size: 2048
-              rotationPolicy: Always
-            usages:
-              - server auth
-              - client auth
-            dnsNames:
-            - ziti-admission-service.$WEBHOOK_NAMESPACE.svc.cluster.local
-            - ziti-admission-service.$WEBHOOK_NAMESPACE.svc
-            issuerRef:
-              kind: Issuer
-              name: selfsigned-issuer
-          ---
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: ziti-admission-service
-            namespace: $WEBHOOK_NAMESPACE
-          spec:
-            selector:
-              app: ziti-admission-webhook
-            ports:
-              - name: https
-                protocol: TCP
-                port: 443
-                targetPort: 9443
-            type: ClusterIP
-          ---
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: ziti-admission-wh-deployment
-            namespace: $WEBHOOK_NAMESPACE
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: ziti-admission-webhook
-            template:
-              metadata:
-                labels:
-                  app: ziti-admission-webhook
-              spec:
-                containers:
-                - name: ziti-admission-webhook
-                  image: docker.io/netfoundry/ziti-k8s-agent:${{ github.run_id }}
-                  imagePullPolicy: Always
-                  ports:
-                  - containerPort: 9443
-                  args:
-                    - webhook
-                    - --v=5
-                  env:
-                    - name: TLS_CERT
-                      valueFrom:
-                        secretKeyRef:
-                          name: ziti-webhook-server-cert
-                          key: tls.crt
-                    - name: TLS_PRIVATE_KEY
-                      valueFrom:
-                        secretKeyRef:
-                          name: ziti-webhook-server-cert
-                          key: tls.key
-                    - name: ZITI_MGMT_API
-                      valueFrom:
-                        configMapKeyRef:
-                          name: ziti-ctrl-cfg
-                          key:  zitiMgmtApi
-                    - name: ZITI_CTRL_ADMIN_CERT
-                      valueFrom:
-                        secretKeyRef:
-                          name: ziti-ctrl-tls
-                          key:  tls.crt
-                    - name: ZITI_CTRL_ADMIN_KEY
-                      valueFrom:
-                        secretKeyRef:
-                          name: ziti-ctrl-tls
-                          key:  tls.key
-                    - name: ZITI_ROLE_KEY
-                      valueFrom:
-                        configMapKeyRef:
-                          name: ziti-ctrl-cfg
-                          key:  zitiRoleKey
-                    - name: POD_SECURITY_CONTEXT_OVERRIDE
-                      valueFrom:
-                        configMapKeyRef:
-                          name: ziti-ctrl-cfg
-                          key:  podSecurityContextOverride
-          ---
-          apiVersion: admissionregistration.k8s.io/v1
-          kind: MutatingWebhookConfiguration
-          metadata:
-            name: ziti-tunnel-sidecar
-            annotations:
-              cert-manager.io/inject-ca-from: $WEBHOOK_NAMESPACE/ziti-admission-cert
-          webhooks:
-            - name: tunnel.ziti.webhook
-              admissionReviewVersions: ["v1"]
-              namespaceSelector:
-                matchLabels:
-                  openziti/ziti-tunnel: namespace
-              rules:
-                - operations: ["CREATE","UPDATE","DELETE"]
-                  apiGroups: [""]
-                  apiVersions: ["v1","v1beta1"]
-                  resources: ["pods"]
-                  scope: "*"
-              clientConfig:
-                service:
-                  name: ziti-admission-service
-                  namespace: $WEBHOOK_NAMESPACE
-                  port: 443
-                  path: "/ziti-tunnel"
-                caBundle: ""
-              sideEffects: None
-              timeoutSeconds: 30
-          ---
-          kind: ClusterRole
-          apiVersion: rbac.authorization.k8s.io/v1
-          metadata:
-            namespace: $WEBHOOK_NAMESPACE
-            name: ziti-agent-wh-roles
-          rules:
-          - apiGroups: [""] # "" indicates the core API group
-            resources: ["secrets"]
-            verbs: ["get", "list", "create", "delete"]
-          - apiGroups: [""]
-            resources: ["services"]
-            verbs: ["get"]
-          ---
-          apiVersion: rbac.authorization.k8s.io/v1
-          kind: ClusterRoleBinding
-          metadata:
-            name: ziti-agent-wh
-          roleRef:
-            apiGroup: rbac.authorization.k8s.io
-            kind: ClusterRole
-            name: ziti-agent-wh-roles
-          subjects:
-          - kind: ServiceAccount
-            name: default
-            namespace: $WEBHOOK_NAMESPACE
-          ---
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: ziti-ctrl-tls
-            namespace: $WEBHOOK_NAMESPACE
-          type: kubernetes.io/tls
-          stringData:
-            tls.crt: $NF_ADMIN_IDENTITY_CERT
-            tls.key: $NF_ADMIN_IDENTITY_KEY
-            tls.ca:  $NF_ADMIN_IDENTITY_CA
-          ---
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: ziti-ctrl-cfg
-            namespace: $WEBHOOK_NAMESPACE
-          data:
-            zitiMgmtApi: $CTRL_MGMT_API
-            zitiRoleKey: identity.openziti.io/role-attributes
-            podSecurityContextOverride: "false"
-          EOF
+
+          # IDENTITY_FILE exported in prior step create-nf-network-services
+          SIDECAR_SELECTORS=namespace \
+          ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-namespace-selector.yaml
+          SIDECAR_SELECTORS=pod \
+          ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-pod-selector.yaml
+
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $AWS_CLUSTER
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
           sleep 30
-          kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $AWS_CLUSTER
-          sed -i -e 's/namespaceSelector/objectSelector/g' ziti-k8s-agent-webhook-spec.yaml
-          sed -i -e 's/ziti-tunnel: namespace/ziti-tunnel: pod/g' ziti-k8s-agent-webhook-spec.yaml
-          kubectl apply -f ziti-k8s-agent-webhook-spec.yaml --context $GKE_CLUSTER
+
+          kubectl apply -f ziti-k8s-agent-namespace-selector.yaml --context $AWS_CLUSTER
+          kubectl apply -f ziti-k8s-agent-namespace-pod.yaml --context $GKE_CLUSTER
           sleep 30
 
       - name: check-webhook-status
