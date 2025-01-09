@@ -106,10 +106,10 @@ spec:
           imagePullPolicy: ${ZITI_AGENT_IMAGE_PULL_POLICY:-IfNotPresent}
           ports:
             - containerPort: 9443
-          args: [ "webhook" ]
+          args:
+            - webhook
+            - --v=2
           env:
-            - name: ZITI_AGENT_LOG_LEVEL
-              value: ${ZITI_AGENT_LOG_LEVEL:-info}
             - name: TLS_CERT
               valueFrom:
                 secretKeyRef:
