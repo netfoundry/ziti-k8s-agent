@@ -199,58 +199,56 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          export RESPONSE="$(curl --silent --fail --location --request POST \
+          OAUTH_RESP="$(curl --silent --fail --location --request POST \
               https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
               --header 'Content-Type: application/x-www-form-urlencoded' \
               --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" \
               --data-urlencode 'grant_type=client_credentials')"
-          if [[ -z "$RESPONSE" ]]; then
-              echo "ERROR: RESPONSE is empty" >&2
+          if [[ -z "$OAUTH_RESP" ]]; then
+              echo "ERROR: OAUTH_RESP is empty" >&2
               exit 1
           fi
-          export token="$(echo "$RESPONSE" | jq -r .access_token)"
-          if [[ -z "$token" ]]; then
-              echo "ERROR: token is empty" >&2
+          ACCESS_TOKEN="$(echo "$OAUTH_RESP" | jq -r .access_token)"
+          if [[ -z "$ACCESS_TOKEN" ]]; then
+              echo "ERROR: ACCESS_TOKEN is empty" >&2
               exit 1
           fi
-          export token_type="$(echo "$RESPONSE" | jq -r .token_type)"
-          if [[ -z "$token_type" ]]; then
-              echo "ERROR: token_type is empty" >&2
+          ACCESS_TOKEN_TYPE="$(echo "$OAUTH_RESP" | jq -r .token_type)"
+          if [[ -z "$ACCESS_TOKEN_TYPE" ]]; then
+              echo "ERROR: ACCESS_TOKEN_TYPE is empty" >&2
               exit 1
           fi
-          export network_list="$(curl --silent --fail --location --request GET \
+          NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
               https://gateway.production.netfoundry.io/core/v3/networks \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $token_type $token")"
-          if [[ -z "$network_list" ]]; then
-              echo "ERROR: network_list is empty" >&2
+              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN")"
+          if [[ -z "$NF_NETWORK_LIST" ]]; then
+              echo "ERROR: NF_NETWORK_LIST is empty" >&2
               exit 1
           fi
-          export NF_NETWORK_ID="$(
-            echo "$network_list" | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
+          NF_NETWORK_ID="$(
+            echo "$NF_NETWORK_LIST" | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
               '._embedded.networkList[] | select(.name==$nf_network_name).id'
           )"
+          # delete old network if exists, which shouldn't happen because NF_NETWORK_NAME is unique to the workflow run ID
           if [[ -n "$NF_NETWORK_ID" ]]; then
-            export network_status="$(curl --silent --fail --location --request DELETE \
+            NF_NETWORK_STATUS="$(curl --silent --fail --location --request DELETE \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $token_type $token")"
+              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN")"
+            if [[ -z "$NF_NETWORK_STATUS" ]]; then
+                echo "ERROR: NF_NETWORK_STATUS for DELETE operation is empty" >&2
+                exit 1
+            fi
             sleep 120
-          else
-              echo "ERROR: NF_NETWORK_ID is empty" >&2
-              exit 1
           fi
-          if [[ -z "$network_status" ]]; then
-              echo "ERROR: network_status is empty" >&2
-              exit 1
-          fi
+
+          # compose a Postman global variable file for creating the NF network for this workflow run ID
           cat <<JSON | jq . | tee nf-network-services-create.postman_global.json
             {
-              "id": "8cbd9872-4829-4670-ae4f-9642416c3b28",
+              "id": "$(uuidgen)",
               "name": "nf-network-services-create",
               "_postman_variable_scope": "global",
-              "_postman_exported_at": "2024-06-30T14:59:30.311Z",
-              "_postman_exported_using": "Postman/11.6.0",
               "values": [
                 {
                   "key": "api",
@@ -410,34 +408,75 @@ jobs:
           postman collection run \
             test/nf-network-services-create.postman_collection.json \
             -g nf-network-services-create.postman_global.json \
-            -k export network_list="$(curl --silent --fail --location --request GET \
+            -k
+          NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
               https://gateway.production.netfoundry.io/core/v3/networks \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $token_type $token")"
-          export network_id="$(
-            echo "$network_list" \
+              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN")"
+          if [[ -z "$NF_NETWORK_LIST" ]]; then
+              echo "ERROR: NF_NETWORK_LIST is empty" >&2
+              exit 1
+          fi
+          NF_NETWORK_ID="$(
+            echo "$NF_NETWORK_LIST" \
             | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
               '._embedded.networkList[]
               | select(.name==$nf_network_name).id'
           )"
-          echo NF_NETWORK_ID="$network_id" | tee -a $GITHUB_ENV
-          export zt_token="$(
+          if [[ -z "$NF_NETWORK_ID" ]]; then
+              echo "ERROR: NF_NETWORK_ID is empty" >&2
+              exit 1
+          fi
+          echo NF_NETWORK_ID="$NF_NETWORK_ID" | tee -a $GITHUB_ENV
+          ZITI_SESSION_OBJ="$(
             curl  --silent --fail --location --request POST \
-              https://gateway.production.netfoundry.io/core/v3/networks/"$network_id"/exchange \
+              https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID"/exchange \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $token_type $token" \
+              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN" \
               --data '{"type": "session"}'
           )"
-          export identitiy_list="$(
+          if [[ -z "$ZITI_SESSION_OBJ" ]]; then
+              echo "ERROR: ZITI_SESSION_OBJ is empty" >&2
+              exit 1
+          fi
+          ZITI_SESSION_TOKEN=$(echo "$ZITI_SESSION_OBJ" | jq -r .value)
+          if [[ -z "$ZITI_SESSION_TOKEN" ]]; then
+              echo "ERROR: ZITI_SESSION_TOKEN is empty" >&2
+              exit 1
+          fi
+          NF_IDENTITY_LIST="$(
             curl --insecure --silent --fail --location --request GET \
-            "$(echo "$zt_token" | jq -r .networkControllerUrl)"/identities \
+            "$(echo "$ZITI_SESSION_OBJ" | jq -r .networkControllerUrl)"/identities \
             --header 'Content-Type: application/json' \
-            --header "zt-session: $(echo "$zt_token" | jq -r .value)"
+            --header "zt-session: $ZITI_SESSION_TOKEN"
           )"
-          echo "$identitiy_list" | jq -r '.data[] | select(.name=="adminUser").enrollment.ott.jwt' | tee adminUser.jwt
-          echo "$identitiy_list" | jq -r '.data[] | select(.name=="testClient").enrollment.ott.jwt' | tee testClient.jwt
+          if [[ -z "$NF_IDENTITY_LIST" ]]; then
+              echo "ERROR: NF_IDENTITY_LIST is empty" >&2
+              exit 1
+          fi
+
+          # enroll adminUser
+          echo "$NF_IDENTITY_LIST" | jq -r '.data[] | select(.name=="adminUser").enrollment.ott.jwt' | tee adminUser.jwt
+          if [[ ! -s adminUser.jwt ]]; then
+                echo "ERROR: adminUser.jwt is empty" >&2
+                exit 1
+          fi
           ziti edge enroll -j adminUser.jwt -o adminUser.json
-          echo "IDENTITY_FILE=adminUser.json" | tee -a $GITHUB_ENV
+          if [[ ! -s adminUser.json ]]; then
+                echo "ERROR: adminUser.json is empty" >&2
+                exit 1
+          elif ! jq -e . < adminUser.json >/dev/null; then
+                echo "ERROR: adminUser.json is not valid json" >&2
+                exit 1
+          fi
+          echo "_FILE=adminUser.json" | tee -a $GITHUB_ENV
+
+          # enroll testClient
+          echo "$NF_IDENTITY_LIST" | jq -r '.data[] | select(.name=="testClient").enrollment.ott.jwt' | tee testClient.jwt
+          if [[ ! -s testClient.jwt ]]; then
+                echo "ERROR: testClient.jwt is empty" >&2
+                exit 1
+          fi
           sudo ziti-edge-tunnel add --jwt "$(< ./testClient.jwt)" --identity testClient
 
       - name: Deploy Webhook to Clusters
@@ -569,46 +608,51 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          export RESPONSE="$(
+          OAUTH_RESP="$(
             curl --silent --fail --location --request POST \
               https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
               --header 'Content-Type: application/x-www-form-urlencoded' \
               --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" \
               --data-urlencode 'grant_type=client_credentials'
           )"
-          if [[ -z "$RESPONSE" ]]; then
-            echo "ERROR: RESPONSE is empty" >&2
+          if [[ -z "$OAUTH_RESP" ]]; then
+            echo "ERROR: OAUTH_RESP is empty" >&2
             exit 1
           fi
-          export token="$(echo $RESPONSE | jq -r .access_token)"
-          if [[ -z "$token" ]]; then
-            echo "ERROR: token is empty" >&2
+          ACCESS_TOKEN="$(echo $OAUTH_RESP | jq -r .access_token)"
+          if [[ -z "$ACCESS_TOKEN" ]]; then
+            echo "ERROR: ACCESS_TOKEN is empty" >&2
             exit 1
           fi
-          export token_type="$(echo $RESPONSE | jq -r .token_type)"
-          export network_list="$(
+          ACCESS_TOKEN_TYPE="$(echo $OAUTH_RESP | jq -r .token_type)"
+          NF_NETWORK_LIST="$(
             curl --silent --fail --location --request GET 
               https://gateway.production.netfoundry.io/core/v3/networks" \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $token_type $token"
+              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN"
           )"
-          if [[ -z "$network_list" ]]; then
-            echo "ERROR: network_list is empty" >&2
+          if [[ -z "$NF_NETWORK_LIST" ]]; then
+            echo "ERROR: NF_NETWORK_LIST is empty" >&2
             exit 1
           fi
-          echo NF_NETWORK_ID="$(
-            echo $network_list | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
+          NF_NETWORK_ID="$(
+            echo $NF_NETWORK_LIST | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
               '._embedded.networkList[] 
               | select(.name==$nf_network_name).id'
-          )" | tee -a $GITHUB_ENV
+          )"
           if [[ -z "$NF_NETWORK_ID" ]]; then
             echo "ERROR: NF_NETWORK_ID is empty" >&2
             exit 1
           fi
-          export network_status="$(
+          echo NF_NETWORK_ID="$NF_NETWORK_ID" | tee -a $GITHUB_ENV
+          NF_NETWORK_STATUS="$(
             curl --silent --fail --location --request DELETE \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $token_type $token"
-            )"
-          printf "INFO: network_status=%s\n" "$(jq -r '.status' <<< "$network_status")"
+              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN"
+          )"
+          if [[ -z "$NF_NETWORK_STATUS" ]]; then
+            echo "ERROR: NF_NETWORK_STATUS is empty" >&2
+            exit 1
+          fi
+          printf "INFO: NF_NETWORK_STATUS=%s\n" "$(jq -r '.status' <<< "$NF_NETWORK_STATUS")"
