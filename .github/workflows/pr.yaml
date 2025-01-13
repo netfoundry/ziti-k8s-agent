@@ -602,12 +602,12 @@ jobs:
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
           
           : "Waiting for cert-manager pods to be ready in AWS cluster..."
-          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=120s --context $AWS_CLUSTER
-          kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=240s --context $AWS_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=240s --context $AWS_CLUSTER
           
           : "Waiting for cert-manager pods to be ready in GKE cluster..."
-          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=120s --context $GKE_CLUSTER
-          kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s --context $GKE_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=240s --context $GKE_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=240s --context $GKE_CLUSTER
 
           kubectl apply -f ziti-k8s-agent-namespace-selector.yaml --context $AWS_CLUSTER
           kubectl apply -f ziti-k8s-agent-pod-selector.yaml --context $GKE_CLUSTER
