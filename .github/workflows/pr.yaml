@@ -819,7 +819,7 @@ jobs:
             exit 1
           fi
           NF_NETWORK_STATUS="$(
-            echo $NF_NETWORK_STATUS_RESP | jq -r '.status'
+            echo "$NF_NETWORK_STATUS_RESP" | jq -r '.status'
           )"
           if [[ -n "$NF_NETWORK_STATUS" ]]; then
             echo "INFO: NF_NETWORK_STATUS: $NF_NETWORK_STATUS"
