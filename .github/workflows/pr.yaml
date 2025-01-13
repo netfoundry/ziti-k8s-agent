@@ -504,7 +504,7 @@ jobs:
           sleep 30
 
           kubectl apply -f ziti-k8s-agent-namespace-selector.yaml --context $AWS_CLUSTER
-          kubectl apply -f ziti-k8s-agent-namespace-pod.yaml --context $GKE_CLUSTER
+          kubectl apply -f ziti-k8s-agent-pod-selector.yaml --context $GKE_CLUSTER
           sleep 30
 
       - name: check-webhook-status
