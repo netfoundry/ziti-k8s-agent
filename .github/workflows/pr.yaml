@@ -47,10 +47,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Authenticate to AWS Cloud
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role-session-name: GitHubActions
+          audience: sts.amazonaws.com
+
+      - name: install aws eksctl
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+
+          # get the cli for aws eks
+          curl --silent --show-error --fail --location \
+            https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz \
+          | tar xz -C /tmp
+          sudo install /tmp/eksctl /usr/local/bin/
+
       - name: create-eks-cluster
         shell: bash
         run: |
-          cat <<EOF >eks-cluster.yaml
+          set -o pipefail
+          set -o xtrace
+
+          cat <<YAML >eks-cluster.yaml
           apiVersion: eksctl.io/v1alpha5
           kind: ClusterConfig
           metadata:
@@ -78,8 +101,10 @@ jobs:
             clusterEndpoints:
               publicAccess: true
               privateAccess: true
-          EOF
-          eksctl get clusters  --region "$AWS_REGION" -o json
+          YAML
+
+          # delete the cluster if it already exists, which shouldn't happen because CLUSTER_NAME is unique to the
+          # workflow run ID
           STATUS="$(eksctl get clusters --region "$AWS_REGION" -o json \
             | jq -r --arg cluster_name "$CLUSTER_NAME" \
               '.[] | select(.name==$cluster_name).Status'
@@ -87,11 +112,17 @@ jobs:
           if [[ -n "$STATUS" ]]; then
             eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
           fi
+
+          # create the cluster
           eksctl create cluster -f ./eks-cluster.yaml
 
       - id: set-context
+        shell: bash
         run: |
-          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep eks)" >> $GITHUB_OUTPUT
+          set -o pipefail
+          set -o xtrace
+
+          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep eks)" | tee -a $GITHUB_OUTPUT
 
   create-gke:
     runs-on: ubuntu-latest
@@ -100,10 +131,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
+          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
+          audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
+
+      - name: install-gcloud-cli
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+          install_components: gke-gcloud-auth-plugin
+
       - name: create-gke-cluster
         shell: bash
         run: |
-          gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json
+          set -o pipefail
+          set -o xtrace
+
+          # delete the cluster if it already exists, which shouldn't happen because CLUSTER_NAME is unique to the
+          # workflow run ID
           STATUS="$(
             gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json \
             | jq -r --arg cluster_name "$CLUSTER_NAME" '.[] | select(.name==$cluster_name).status'
@@ -111,6 +159,8 @@ jobs:
           if [[ -n "$STATUS" ]]; then
             gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
           fi
+
+          # create the cluster
           gcloud container --project $GCP_PROJECT clusters create-auto $CLUSTER_NAME \
             --region $GKE_REGION \
             --release-channel "regular" \
@@ -121,7 +171,10 @@ jobs:
 
       - id: set-context
         run: |
-          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep gke)" >> $GITHUB_OUTPUT
+          set -o pipefail
+          set -o xtrace
+
+          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep gke)" | tee -a $GITHUB_OUTPUT
 
   regression_test:
     needs: [build_deploy, create-eks, create-gke]
@@ -138,27 +191,6 @@ jobs:
 
       - name: Check Run ID
         run: echo ${{ github.run_id }}
-
-      - name: Authenticate to AWS Cloud
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
-          role-session-name: GitHubActions
-          audience: sts.amazonaws.com
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
-          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
-          audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
-
-      - name: install-gcloud-cli
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          version: latest
-          install_components: gke-gcloud-auth-plugin
 
       - name: install-kubectl
         uses: azure/setup-kubectl@v3
@@ -245,7 +277,9 @@ jobs:
             echo "$NF_NETWORK_LIST" | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
               '._embedded.networkList[] | select(.name==$nf_network_name).id'
           )"
-          # delete old network if exists, which shouldn't happen because NF_NETWORK_NAME is unique to the workflow run ID
+
+          # delete old network if exists, which shouldn't happen because NF_NETWORK_NAME is unique to the workflow run
+          # ID
           if [[ -n "$NF_NETWORK_ID" ]]; then
             NF_NETWORK_STATUS="$(curl --silent --fail --location --request DELETE \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
@@ -616,11 +650,26 @@ jobs:
           kubectl delete -f test/bookinfo.yaml --context $GKE_CLUSTER -n test2
           sleep 30
 
+      - name: Authenticate to AWS Cloud
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role-session-name: GitHubActions
+          audience: sts.amazonaws.com
+
       - name: delete-eks-cluster
         if: success() || failure()
         shell: bash
         run: |
           eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
+          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
+          audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
 
       - name: delete-gke-cluster
         if: success() || failure()
