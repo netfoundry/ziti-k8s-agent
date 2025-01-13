@@ -33,5 +33,5 @@ export ZITI_AGENT_IMAGE_PULL_POLICY=Never
 ## Regenerate the Manifest
 
 ```bash
-./generate-ziti-webhook-spec.bash
+./generate-ziti-agent-manifest.bash
 ```
