@@ -40,13 +40,98 @@ jobs:
           push: true
           tags: netfoundry/ziti-k8s-agent:${{ github.run_id }}
 
+  create-eks:
+    runs-on: ubuntu-latest
+    outputs:
+      cluster_context: ${{ steps.set-context.outputs.context }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: create-eks-cluster
+        shell: bash
+        run: |
+          cat <<EOF >eks-cluster.yaml
+          apiVersion: eksctl.io/v1alpha5
+          kind: ClusterConfig
+          metadata:
+            name: $CLUSTER_NAME
+            region: $AWS_REGION
+            version: "1.30"
+          managedNodeGroups:
+          - name: ng-1
+            instanceType: t3.medium
+            iam:
+                withAddonPolicies:
+                  ebs: true
+                  fsx: true
+                  efs: true
+            desiredCapacity: 2
+            privateNetworking: true
+            labels:
+              nodegroup-type: workloads
+            tags:
+              nodegroup-role: worker
+          vpc:
+            cidr: 10.10.0.0/16
+            publicAccessCIDRs: []
+            # disable public access to endpoint and only allow private access
+            clusterEndpoints:
+              publicAccess: true
+              privateAccess: true
+          EOF
+          eksctl get clusters  --region "$AWS_REGION" -o json
+          STATUS="$(eksctl get clusters --region "$AWS_REGION" -o json \
+            | jq -r --arg cluster_name "$CLUSTER_NAME" \
+              '.[] | select(.name==$cluster_name).Status'
+          )"
+          if [[ -n "$STATUS" ]]; then
+            eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
+          fi
+          eksctl create cluster -f ./eks-cluster.yaml
+
+      - id: set-context
+        run: |
+          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep eks)" >> $GITHUB_OUTPUT
+
+  create-gke:
+    runs-on: ubuntu-latest
+    outputs:
+      cluster_context: ${{ steps.set-context.outputs.context }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: create-gke-cluster
+        shell: bash
+        run: |
+          gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json
+          STATUS="$(
+            gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json \
+            | jq -r --arg cluster_name "$CLUSTER_NAME" '.[] | select(.name==$cluster_name).status'
+          )"
+          if [[ -n "$STATUS" ]]; then
+            gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
+          fi
+          gcloud container --project $GCP_PROJECT clusters create-auto $CLUSTER_NAME \
+            --region $GKE_REGION \
+            --release-channel "regular" \
+            --network "projects/$GCP_PROJECT/global/networks/default" \
+            --subnetwork "projects/$GCP_PROJECT/regions/$GKE_REGION/subnetworks/default" \
+            --cluster-ipv4-cidr "/17" \
+            --services-ipv4-cidr "/22"
+
+      - id: set-context
+        run: |
+          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep gke)" >> $GITHUB_OUTPUT
 
   regression_test:
-    needs: [build_deploy]
+    needs: [build_deploy, create-eks, create-gke]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
+    env:
+      AWS_CLUSTER: ${{ needs.create-eks.outputs.cluster_context }}
+      GKE_CLUSTER: ${{ needs.create-gke.outputs.cluster_context }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -105,76 +190,6 @@ jobs:
 
           # get ziti
           curl --silent --fail --location https://get.openziti.io/install.bash | sudo bash -s openziti
-
-      - name: create-eks-cluster
-        shell: bash
-        run: |
-          cat <<EOF >eks-cluster.yaml
-          apiVersion: eksctl.io/v1alpha5
-          kind: ClusterConfig
-          metadata:
-            name: $CLUSTER_NAME
-            region: $AWS_REGION
-            version: "1.30"
-          managedNodeGroups:
-          - name: ng-1
-            instanceType: t3.medium
-            iam:
-                withAddonPolicies:
-                  ebs: true
-                  fsx: true
-                  efs: true
-            desiredCapacity: 2
-            privateNetworking: true
-            labels:
-              nodegroup-type: workloads
-            tags:
-              nodegroup-role: worker
-          vpc:
-            cidr: 10.10.0.0/16
-            publicAccessCIDRs: []
-            # disable public access to endpoint and only allow private access
-            clusterEndpoints:
-              publicAccess: true
-              privateAccess: true
-          EOF
-          eksctl get clusters  --region "$AWS_REGION" -o json
-          STATUS="$(eksctl get clusters --region "$AWS_REGION" -o json \
-            | jq -r --arg cluster_name "$CLUSTER_NAME" \
-              '.[] | select(.name==$cluster_name).Status'
-          )"
-          if [[ -n "$STATUS" ]]; then
-            eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
-          fi
-          eksctl create cluster -f ./eks-cluster.yaml
-          echo AWS_CLUSTER="$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep eks)" \
-          | tee -a $GITHUB_ENV
-
-      - name: create-gke-cluster
-        shell: bash
-        run: |
-          gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json
-          STATUS="$(
-            gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json \
-            | jq -r --arg cluster_name "$CLUSTER_NAME" '.[] | select(.name==$cluster_name).status'
-          )"
-          if [[ -n "$STATUS" ]]; then
-            gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
-          fi
-          gcloud container --project $GCP_PROJECT clusters create "$CLUSTER_NAME" \
-          --region "$GKE_REGION" --no-enable-basic-auth \
-          --release-channel "regular" --machine-type "e2-medium" \
-          --disk-size "100" --metadata disable-legacy-endpoints=true \
-          --service-account "${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}" \
-          --network "projects/$GCP_PROJECT/global/networks/$GKE_NETWORK_NAME" \
-          --subnetwork "projects/$GCP_PROJECT/regions/$GKE_REGION/subnetworks/$GKE_SUBNETWORK_NAME" \
-          --no-enable-intra-node-visibility --cluster-dns=clouddns --cluster-dns-scope=cluster \
-          --security-posture=standard --workload-vulnerability-scanning=disabled \
-          --no-enable-master-authorized-networks \
-          --addons HorizontalPodAutoscaling,NodeLocalDNS,GcePersistentDiskCsiDriver --num-nodes "1" \
-          --default-max-pods-per-node "110" --enable-ip-alias
-          echo GKE_CLUSTER="$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep gke)" \
-          | tee -a $GITHUB_ENV
 
       - name: test-cluster-pods
         if: success() || failure()
@@ -492,6 +507,8 @@ jobs:
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
         run: |
+          set -o pipefail
+          set -o xtrace
 
           # IDENTITY_FILE exported in prior step create-nf-network-services
           SIDECAR_SELECTORS=namespace \
@@ -511,30 +528,39 @@ jobs:
         if: success() || failure()
         shell: bash
         run: |
-          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
-          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
+          set -o pipefail
+          set -o xtrace
+
+          kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+          kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
 
       - name: deploy-bookinfo-app
         if: success() || failure()
         shell: bash
         run: |
+          set -o pipefail
+          set -o xtrace
+
           kubectl create namespace test1 --context $AWS_CLUSTER
-          kubectl label namespace test1 openziti/ziti-tunnel=namespace --context $AWS_CLUSTER
+          kubectl label namespace test1 openziti/ziti-tunnel=enabled --context $AWS_CLUSTER
           kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1
           kubectl create namespace test2 --context $GKE_CLUSTER
           kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
           sleep 30
-          kubectl patch deployment/ratings-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/productpage-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/details-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/reviews-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/reviews-v2 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/reviews-v3 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"pod"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/ratings-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/productpage-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/details-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/reviews-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/reviews-v2 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          kubectl patch deployment/reviews-v3 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
           sleep 120
 
       - name: run-testcase-01
         shell: bash
         run: |
+          set -o pipefail
+          set -o xtrace
+
           if [ -f "./testcase_pods.log" ]; then
             rm ./testcase_pods.log
           fi
@@ -550,8 +576,6 @@ jobs:
           cat testcase_curl_output.log
           cat testcase_pods.log
           test/verify_test_results.py
-          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
-          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
 
       - name: scaledown-2-testcase-02
         if: success() || failure()
@@ -584,8 +608,6 @@ jobs:
           cat testcase_curl_output.log
           cat testcase_pods.log
           test/verify_test_results.py
-          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
-          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
 
       - name: delete-bookinfo-app
         shell: bash
@@ -593,8 +615,6 @@ jobs:
           kubectl delete -f test/bookinfo.yaml --context $AWS_CLUSTER -n test1
           kubectl delete -f test/bookinfo.yaml --context $GKE_CLUSTER -n test2
           sleep 30
-          kubectl logs `kubectl get pods -n ziti --context  $AWS_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $AWS_CLUSTER
-          kubectl logs `kubectl get pods -n ziti --context  $GKE_CLUSTER -o name | grep ziti-admission-wh` -n ziti --context  $GKE_CLUSTER
 
       - name: delete-eks-cluster
         if: success() || failure()
@@ -613,8 +633,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          set -o xtrace
 
+          # mask the oauth access token
           OAUTH_RESP="$(
             curl --silent --fail --location --request POST \
               https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
@@ -631,7 +651,10 @@ jobs:
             echo "ERROR: ACCESS_TOKEN is empty" >&2
             exit 1
           fi
+          echo "::add-mask::$ACCESS_TOKEN"
           ACCESS_TOKEN_TYPE="$(echo $OAUTH_RESP | jq -r .token_type)"
+          set -o xtrace
+
           NF_NETWORK_LIST="$(
             curl --silent --fail --location --request GET 
               https://gateway.production.netfoundry.io/core/v3/networks" \
@@ -663,3 +686,13 @@ jobs:
             exit 1
           fi
           printf "INFO: NF_NETWORK_STATUS=%s\n" "$(jq -r '.status' <<< "$NF_NETWORK_STATUS")"
+
+      - name: print agent logs
+        if: failure()
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+
+          kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+          kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
