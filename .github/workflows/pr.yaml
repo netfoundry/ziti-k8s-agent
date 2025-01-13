@@ -119,7 +119,8 @@ jobs:
           # create the cluster
           eksctl create cluster -f ./eks-cluster.yaml
 
-      - id: set-context
+      - name: set-context-name
+        id: set-context
         shell: bash
         run: |
           set -o pipefail
@@ -181,7 +182,8 @@ jobs:
             --cluster-ipv4-cidr "/17" \
             --services-ipv4-cidr "/22"
 
-      - id: set-context
+      - name: set-context-name
+        id: set-context
         shell: bash
         run: |
           set -o pipefail
@@ -585,6 +587,7 @@ jobs:
         shell: bash
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
+          ZITI_AGENT_NAMESPACE: ziti
         run: |
           set -o pipefail
           set -o xtrace
@@ -597,11 +600,23 @@ jobs:
 
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $AWS_CLUSTER
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
-          sleep 30
+          
+          : "Waiting for cert-manager pods to be ready in AWS cluster..."
+          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s --context $AWS_CLUSTER
+          
+          : "Waiting for cert-manager pods to be ready in GKE cluster..."
+          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=120s --context $GKE_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s --context $GKE_CLUSTER
 
           kubectl apply -f ziti-k8s-agent-namespace-selector.yaml --context $AWS_CLUSTER
           kubectl apply -f ziti-k8s-agent-pod-selector.yaml --context $GKE_CLUSTER
-          sleep 30
+          
+          : "Waiting for ziti-admission-webhook pods to be ready in AWS cluster..."
+          kubectl wait --for=condition=ready pod -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
+          
+          : "Waiting for ziti-admission-webhook pods to be ready in GKE cluster..."
+          kubectl wait --for=condition=ready pod -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
 
       - name: check-webhook-status
         if: success() || failure()
