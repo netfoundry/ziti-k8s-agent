@@ -42,6 +42,9 @@ jobs:
 
   create-eks:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       cluster_context: ${{ steps.set-context.outputs.context }}
     steps:
@@ -122,10 +125,19 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep eks)" | tee -a $GITHUB_OUTPUT
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+          if [[ -z "$AWS_ACCOUNT_ID" ]]; then
+            echo "ERROR: AWS_ACCOUNT_ID is empty" >&2
+            exit 1
+          fi
+          CONTEXT_NAME="arn:aws:eks:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${CLUSTER_NAME}"
+          echo "context=$CONTEXT_NAME" | tee -a $GITHUB_OUTPUT
 
   create-gke:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       cluster_context: ${{ steps.set-context.outputs.context }}
     steps:
@@ -170,11 +182,13 @@ jobs:
             --services-ipv4-cidr "/22"
 
       - id: set-context
+        shell: bash
         run: |
           set -o pipefail
           set -o xtrace
 
-          echo "context=$(kubectl config get-contexts -o name | grep "$CLUSTER_NAME" | grep gke)" | tee -a $GITHUB_OUTPUT
+          CONTEXT_NAME="gke_${GCP_PROJECT}_${GKE_REGION}_${CLUSTER_NAME}"
+          echo "context=$CONTEXT_NAME" | tee -a $GITHUB_OUTPUT
 
   regression_test:
     needs: [build_deploy, create-eks, create-gke]
@@ -204,17 +218,11 @@ jobs:
           verbose: false
           arch: amd64
 
-      - name: install postman, aws eks, ziti-edge-tunnel, and ziti
+      - name: install postman, ziti-edge-tunnel, and ziti
         shell: bash
         run: |
           # get postman
           curl -o- --silent --fail --location https://dl-cli.pstmn.io/install/linux64.sh | bash
-
-          # get the cli for aws eks
-          curl --silent --show-error --fail --location \
-            https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz \
-          | tar xz -C /tmp
-          sudo install /tmp/eksctl /usr/local/bin/
 
           # get ziti-edge-tunnel
           curl --silent --fail --location  https://get.openziti.io/tun/scripts/install-ubuntu.bash | bash
@@ -222,6 +230,37 @@ jobs:
 
           # get ziti
           curl --silent --fail --location https://get.openziti.io/install.bash | sudo bash -s openziti
+
+      - name: Authenticate to AWS Cloud
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role-session-name: GitHubActions
+          audience: sts.amazonaws.com
+
+      - name: configure-eks-context
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+          
+          aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
+          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
+          audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
+
+      - name: configure-gke-context
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+          
+          gcloud container clusters get-credentials "$CLUSTER_NAME" --region "$GKE_REGION" --project "$GCP_PROJECT"
 
       - name: test-cluster-pods
         if: success() || failure()
@@ -650,26 +689,11 @@ jobs:
           kubectl delete -f test/bookinfo.yaml --context $GKE_CLUSTER -n test2
           sleep 30
 
-      - name: Authenticate to AWS Cloud
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
-          role-session-name: GitHubActions
-          audience: sts.amazonaws.com
-
       - name: delete-eks-cluster
         if: success() || failure()
         shell: bash
         run: |
           eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
-          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
-          audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
 
       - name: delete-gke-cluster
         if: success() || failure()
@@ -716,7 +740,7 @@ jobs:
           fi
           NF_NETWORK_ID="$(
             echo $NF_NETWORK_LIST | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
-              '._embedded.networkList[] 
+              '._embedded.networkList[]
               | select(.name==$nf_network_name).id'
           )"
           if [[ -z "$NF_NETWORK_ID" ]]; then
