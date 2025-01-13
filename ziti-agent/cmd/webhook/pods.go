@@ -180,8 +180,8 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		} else {
 			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
 				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
-					Searches:    searchDomains,
-				}
+				Searches:    searchDomains,
+			}
 		}
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
 		if err != nil {

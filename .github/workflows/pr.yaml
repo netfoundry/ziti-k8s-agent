@@ -141,7 +141,7 @@ jobs:
           eksctl get clusters  --region "$AWS_REGION" -o json
           STATUS="$(eksctl get clusters --region "$AWS_REGION" -o json \
             | jq -r --arg cluster_name "$CLUSTER_NAME" \
-              '.[] | select(.name=="$cluster_name").Status'
+              '.[] | select(.name==$cluster_name).Status'
           )"
           if [[ -n "$STATUS" ]]; then
             eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
@@ -156,7 +156,7 @@ jobs:
           gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json
           STATUS="$(
             gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json \
-            | jq -r --arg cluster_name "$CLUSTER_NAME" '.[] | select(.name=="$cluster_name").status'
+            | jq -r --arg cluster_name "$CLUSTER_NAME" '.[] | select(.name==$cluster_name).status'
           )"
           if [[ -n "$STATUS" ]]; then
             gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
@@ -228,7 +228,7 @@ jobs:
           fi
           export NF_NETWORK_ID="$(
             echo "$network_list" | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
-              '._embedded.networkList[] | select(.name=="$nf_network_name").id'
+              '._embedded.networkList[] | select(.name==$nf_network_name).id'
           )"
           if [[ -n "$NF_NETWORK_ID" ]]; then
             export network_status="$(curl --silent --fail --location --request DELETE \
@@ -418,7 +418,7 @@ jobs:
             echo "$network_list" \
             | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
               '._embedded.networkList[]
-              | select(.name=="$nf_network_name").id'
+              | select(.name==$nf_network_name).id'
           )"
           echo NF_NETWORK_ID="$network_id" | tee -a $GITHUB_ENV
           export zt_token="$(
@@ -566,6 +566,9 @@ jobs:
         if: success() || failure()
         shell: bash
         run: |
+          set -o pipefail
+          set -o xtrace
+
           export RESPONSE="$(
             curl --silent --fail --location --request POST \
               https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
@@ -573,7 +576,15 @@ jobs:
               --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" \
               --data-urlencode 'grant_type=client_credentials'
           )"
+          if [[ -z "$RESPONSE" ]]; then
+            echo "ERROR: RESPONSE is empty" >&2
+            exit 1
+          fi
           export token="$(echo $RESPONSE | jq -r .access_token)"
+          if [[ -z "$token" ]]; then
+            echo "ERROR: token is empty" >&2
+            exit 1
+          fi
           export token_type="$(echo $RESPONSE | jq -r .token_type)"
           export network_list="$(
             curl --silent --fail --location --request GET 
@@ -581,11 +592,19 @@ jobs:
               --header 'Content-Type: application/json' \
               --header "Authorization: $token_type $token"
           )"
+          if [[ -z "$network_list" ]]; then
+            echo "ERROR: network_list is empty" >&2
+            exit 1
+          fi
           echo NF_NETWORK_ID="$(
             echo $network_list | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
               '._embedded.networkList[] 
-              | select(.name=="$nf_network_name").id'
+              | select(.name==$nf_network_name).id'
           )" | tee -a $GITHUB_ENV
+          if [[ -z "$NF_NETWORK_ID" ]]; then
+            echo "ERROR: NF_NETWORK_ID is empty" >&2
+            exit 1
+          fi
           export network_status="$(
             curl --silent --fail --location --request DELETE \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
