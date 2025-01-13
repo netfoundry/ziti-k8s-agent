@@ -228,7 +228,13 @@ jobs:
 
           # get ziti-edge-tunnel
           curl --silent --fail --location  https://get.openziti.io/tun/scripts/install-ubuntu.bash | bash
-          sudo systemctl start --wait ziti-edge-tunnel.service
+          sudo systemctl start ziti-edge-tunnel.service
+          for i in {1..30}; do
+            if sudo systemctl is-active --quiet ziti-edge-tunnel.service; then
+              break
+            fi
+            sleep 1
+          done
           sudo systemctl is-active --quiet ziti-edge-tunnel.service
           sudo ziti-edge-tunnel set_log_level --loglevel DEBUG
 
@@ -341,170 +347,180 @@ jobs:
           fi
 
           # compose a Postman global variable file for creating the NF network for this workflow run ID
-          cat <<JSON | jq . | tee nf-network-services-create.postman_global.json
-            {
-              "id": "$(uuidgen)",
-              "name": "nf-network-services-create",
-              "_postman_variable_scope": "global",
-              "values": [
-                {
-                  "key": "api",
-                  "value": "https://gateway.production.netfoundry.io/core/v3",
-                  "enabled": true
-                },
-                {
-                  "key": "token",
-                  "value": "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token",
-                  "enabled": true
-                },
-                {
-                  "key": "jwt_token",
-                  "value": "",
-                  "enabled": true
-                },
-                {
-                  "key": "jwt_type",
-                  "value": "Bearer",
-                  "enabled": true
-                },
-                {
-                  "key": "client_id",
-                  "value": "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "client_secret",
-                  "value": "${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "networkName",
-                  "value": "$NF_NETWORK_NAME",
-                  "type": "any",
-                  "enabled": true
-                },
-                {
-                  "key": "networkId",
-                  "value": "",
-                  "type": "any",
-                  "enabled": true
-                },
-                {
-                  "key": "networkStatus",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "api_token",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "controller-api-endpoint",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "edgeRouterId",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "mopEdgeRouterId",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "mopEdgeRouterStatus",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "clientIdentityId",
-                  "value": "",
-                  "type": "any",
-                  "enabled": true
-                },
-                {
-                  "key": "adminIdentityId",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "clientIdentityJwt",
-                  "value": "",
-                  "type": "any",
-                  "enabled": true
-                },
-                {
-                  "key": "adminIdentityJwt",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "hostConfigId1",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "interceptConfigId1",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "hostConfigId2",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "interceptConfigId2",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "hostConfigId3",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "interceptConfigId3",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "hostConfigId4",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                },
-                {
-                  "key": "interceptConfigId4",
-                  "value": "",
-                  "type": "default",
-                  "enabled": true
-                }
-              ]
-            }
+          cat <<JSON | tee nf-network-services-create.postman_global.json
+          {
+            "id": "$(uuidgen)",
+            "name": "nf-network-services-create",
+            "_postman_variable_scope": "global",
+            "values": [
+              {
+                "key": "api",
+                "value": "https://gateway.production.netfoundry.io/core/v3",
+                "enabled": true
+              },
+              {
+                "key": "token",
+                "value": "https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token",
+                "enabled": true
+              },
+              {
+                "key": "jwt_token",
+                "value": "",
+                "enabled": true
+              },
+              {
+                "key": "jwt_type",
+                "value": "Bearer",
+                "enabled": true
+              },
+              {
+                "key": "client_id",
+                "value": "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "client_secret",
+                "value": "${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "networkName",
+                "value": "$NF_NETWORK_NAME",
+                "type": "any",
+                "enabled": true
+              },
+              {
+                "key": "networkId",
+                "value": "",
+                "type": "any",
+                "enabled": true
+              },
+              {
+                "key": "networkStatus",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "api_token",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "controller-api-endpoint",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "edgeRouterId",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "mopEdgeRouterId",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "mopEdgeRouterStatus",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "clientIdentityId",
+                "value": "",
+                "type": "any",
+                "enabled": true
+              },
+              {
+                "key": "adminIdentityId",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "clientIdentityJwt",
+                "value": "",
+                "type": "any",
+                "enabled": true
+              },
+              {
+                "key": "adminIdentityJwt",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "hostConfigId1",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "interceptConfigId1",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "hostConfigId2",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "interceptConfigId2",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "hostConfigId3",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "interceptConfigId3",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "hostConfigId4",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "interceptConfigId4",
+                "value": "",
+                "type": "default",
+                "enabled": true
+              }
+            ]
+          }
           JSON
+
+          # validate the Postman global variable file
+          if [[ ! -s nf-network-services-create.postman_global.json ]]; then
+              echo "ERROR: nf-network-services-create.postman_global.json is empty" >&2
+              exit 1
+          elif ! jq -e . < nf-network-services-create.postman_global.json >/dev/null; then
+              echo "ERROR: nf-network-services-create.postman_global.json is not valid json" >&2
+              exit 1
+          fi
+
           postman collection run \
-            test/nf-network-services-create.postman_collection.json \
-            -g nf-network-services-create.postman_global.json \
+              test/nf-network-services-create.postman_collection.json \
+              -g nf-network-services-create.postman_global.json \
             -k
           NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
               https://gateway.production.netfoundry.io/core/v3/networks \
@@ -514,20 +530,16 @@ jobs:
               echo "ERROR: NF_NETWORK_LIST is empty" >&2
               exit 1
           fi
-          NF_NETWORK_ID="$(
-            echo "$NF_NETWORK_LIST" \
-            | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
-              '._embedded.networkList[]
-              | select(.name==$nf_network_name).id'
-          )"
+          NF_NETWORK_ID="$(echo "$NF_NETWORK_LIST" | \
+              jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
+              '._embedded.networkList[] | select(.name==$nf_network_name).id')"
           if [[ -z "$NF_NETWORK_ID" ]]; then
               echo "ERROR: NF_NETWORK_ID is empty" >&2
               exit 1
           fi
           echo NF_NETWORK_ID="$NF_NETWORK_ID" | tee -a $GITHUB_ENV
 
-          # mask the Ziti session token
-          set +o xtrace
+          set +o xtrace  # mask the oauth access token
           ZITI_SESSION_OBJ="$(
             curl  --silent --fail --location --request POST \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID"/exchange \
