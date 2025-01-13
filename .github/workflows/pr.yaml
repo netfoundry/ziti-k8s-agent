@@ -740,7 +740,10 @@ jobs:
       - name: delete-eks-cluster
         shell: bash
         run: |
-          eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
+          set -o pipefail
+          set -o xtrace
+          
+          eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --force --disable-nodegroup-eviction
 
       - name: Configure GCP Credentials
         uses: google-github-actions/auth@v2
@@ -754,6 +757,9 @@ jobs:
       - name: delete-gke-cluster
         shell: bash
         run: |
+          set -o pipefail
+          set -o xtrace
+
           gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
 
       - name: delete-nf-network
@@ -761,7 +767,7 @@ jobs:
         run: |
           set -o pipefail
 
-          # mask the oauth access token
+          set +o xtrace  # mask the oauth access token
           OAUTH_RESP="$(
             curl --silent --fail --location --request POST \
               https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
