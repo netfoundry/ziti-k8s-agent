@@ -228,7 +228,9 @@ jobs:
 
           # get ziti-edge-tunnel
           curl --silent --fail --location  https://get.openziti.io/tun/scripts/install-ubuntu.bash | bash
-          sudo systemctl enable --now ziti-edge-tunnel.service
+          sudo systemctl start --wait ziti-edge-tunnel.service
+          sudo systemctl is-active --quiet ziti-edge-tunnel.service
+          sudo ziti-edge-tunnel set_log_level --loglevel DEBUG
 
           # get ziti
           curl --silent --fail --location https://get.openziti.io/install.bash | sudo bash -s openziti
@@ -270,8 +272,7 @@ jobs:
           
           gcloud container clusters get-credentials "$CLUSTER_NAME" --region "$GKE_REGION" --project "$GCP_PROJECT"
 
-      - name: test-cluster-pods
-        if: success() || failure()
+      - name: get-cluster-info-and-all-pods
         shell: bash
         run: |
           ATTEMPTS=30
@@ -325,8 +326,8 @@ jobs:
               '._embedded.networkList[] | select(.name==$nf_network_name).id'
           )"
 
-          # delete old network if exists, which shouldn't happen because NF_NETWORK_NAME is unique to the workflow run
-          # ID
+          # delete old network if exists, which shouldn't happen because NF_NETWORK_NAME is unique to the
+          # workflow run ID
           if [[ -n "$NF_NETWORK_ID" ]]; then
             NF_NETWORK_STATUS="$(curl --silent --fail --location --request DELETE \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
@@ -583,7 +584,6 @@ jobs:
           sudo ziti-edge-tunnel add --jwt "$(< ./testUser.jwt)" --identity testUser
 
       - name: Deploy Webhook to Clusters
-        if: success() || failure()
         shell: bash
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
@@ -618,18 +618,7 @@ jobs:
           : "Waiting for ziti-admission-webhook pods to be ready in GKE cluster..."
           kubectl wait --for=condition=ready pod -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
 
-      - name: check-webhook-status
-        if: success() || failure()
-        shell: bash
-        run: |
-          set -o pipefail
-          set -o xtrace
-
-          kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
-          kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
-
       - name: deploy-bookinfo-app
-        if: success() || failure()
         shell: bash
         run: |
           set -o pipefail
@@ -672,7 +661,6 @@ jobs:
           test/verify_test_results.py
 
       - name: scaledown-2-testcase-02
-        if: success() || failure()
         shell: bash
         run: |
           kubectl scale deploy details-v1 --replicas=0 -n test1 --context  $AWS_CLUSTER
@@ -684,7 +672,6 @@ jobs:
           sleep 150
 
       - name: run-testcase-02
-        if: success() || failure()
         shell: bash
         run: |
           if [ -f "./testcase_pods.log" ]; then
@@ -710,8 +697,35 @@ jobs:
           kubectl delete -f test/bookinfo.yaml --context $GKE_CLUSTER -n test2
           sleep 30
 
+      - name: print logs
+        if: failure()
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+
+          kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+          kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+          journalctl -lu ziti-edge-tunnel.service
+
+  cleanup:
+    if: always()
+    needs: [regression_test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: install aws eksctl
-        if: success() || failure()
         shell: bash
         run: |
           set -o pipefail
@@ -724,19 +738,25 @@ jobs:
           sudo install /tmp/eksctl /usr/local/bin/
 
       - name: delete-eks-cluster
-        if: success() || failure()
         shell: bash
         run: |
           eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
 
+      - name: Configure GCP Credentials
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
       - name: delete-gke-cluster
-        if: success() || failure()
         shell: bash
         run: |
           gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
 
       - name: delete-nf-network
-        if: success() || failure()
         shell: bash
         run: |
           set -o pipefail
@@ -763,8 +783,8 @@ jobs:
           set -o xtrace
 
           NF_NETWORK_LIST="$(
-            curl --silent --fail --location --request GET 
-              https://gateway.production.netfoundry.io/core/v3/networks" \
+            curl --silent --fail --location --request GET \
+              https://gateway.production.netfoundry.io/core/v3/networks \
               --header 'Content-Type: application/json' \
               --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN"
           )"
@@ -782,24 +802,22 @@ jobs:
             exit 1
           fi
           echo NF_NETWORK_ID="$NF_NETWORK_ID" | tee -a $GITHUB_ENV
-          NF_NETWORK_STATUS="$(
+          NF_NETWORK_STATUS_RESP="$(
             curl --silent --fail --location --request DELETE \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
               --header 'Content-Type: application/json' \
               --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN"
           )"
-          if [[ -z "$NF_NETWORK_STATUS" ]]; then
+          if [[ -z "$NF_NETWORK_STATUS_RESP" ]]; then
+            echo "ERROR: NF_NETWORK_STATUS_RESP is empty" >&2
+            exit 1
+          fi
+          NF_NETWORK_STATUS="$(
+            echo $NF_NETWORK_STATUS_RESP | jq -r '.status'
+          )"
+          if [[ -n "$NF_NETWORK_STATUS" ]]; then
+            echo "INFO: NF_NETWORK_STATUS: $NF_NETWORK_STATUS"
+          else
             echo "ERROR: NF_NETWORK_STATUS is empty" >&2
             exit 1
           fi
-          printf "INFO: NF_NETWORK_STATUS=%s\n" "$(jq -r '.status' <<< "$NF_NETWORK_STATUS")"
-
-      - name: print agent logs
-        if: failure()
-        shell: bash
-        run: |
-          set -o pipefail
-          set -o xtrace
-
-          kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
-          kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
