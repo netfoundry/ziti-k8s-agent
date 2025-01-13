@@ -711,6 +711,7 @@ jobs:
           sleep 30
 
       - name: install aws eksctl
+        if: success() || failure()
         shell: bash
         run: |
           set -o pipefail
