@@ -758,7 +758,12 @@ jobs:
           set -o pipefail
           set -o xtrace
           
-          eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --force --disable-nodegroup-eviction
+          # Check if cluster exists before attempting deletion
+          if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --force --disable-nodegroup-eviction
+          else
+            echo "Cluster $CLUSTER_NAME does not exist in region $AWS_REGION, skipping deletion"
+          fi
 
       - name: Configure GCP Credentials
         uses: google-github-actions/auth@v2
