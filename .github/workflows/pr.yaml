@@ -196,17 +196,36 @@ jobs:
       - name: create-nf-network-services
         shell: bash
         run: |
+          set -o pipefail
+          set -o xtrace
+
           export RESPONSE="$(curl --silent --fail --location --request POST \
               https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
               --header 'Content-Type: application/x-www-form-urlencoded' \
               --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" \
               --data-urlencode 'grant_type=client_credentials')"
+          if [[ -z "$RESPONSE" ]]; then
+              echo "ERROR: RESPONSE is empty" >&2
+              exit 1
+          fi
           export token="$(echo "$RESPONSE" | jq -r .access_token)"
+          if [[ -z "$token" ]]; then
+              echo "ERROR: token is empty" >&2
+              exit 1
+          fi
           export token_type="$(echo "$RESPONSE" | jq -r .token_type)"
+          if [[ -z "$token_type" ]]; then
+              echo "ERROR: token_type is empty" >&2
+              exit 1
+          fi
           export network_list="$(curl --silent --fail --location --request GET \
               https://gateway.production.netfoundry.io/core/v3/networks \
               --header 'Content-Type: application/json' \
               --header "Authorization: $token_type $token")"
+          if [[ -z "$network_list" ]]; then
+              echo "ERROR: network_list is empty" >&2
+              exit 1
+          fi
           export NF_NETWORK_ID="$(
             echo "$network_list" | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
               '._embedded.networkList[] | select(.name=="$nf_network_name").id'
@@ -217,6 +236,13 @@ jobs:
               --header 'Content-Type: application/json' \
               --header "Authorization: $token_type $token")"
             sleep 120
+          else
+              echo "ERROR: NF_NETWORK_ID is empty" >&2
+              exit 1
+          fi
+          if [[ -z "$network_status" ]]; then
+              echo "ERROR: network_status is empty" >&2
+              exit 1
           fi
           cat <<JSON | jq . | tee nf-network-services-create.postman_global.json
             {
