@@ -412,7 +412,7 @@ jobs:
             -g nf-network-services-create.postman_global.json \
             -k export network_list="$(curl --silent --fail --location --request GET \
               https://gateway.production.netfoundry.io/core/v3/networks \
-              --header 'Content-Type: application/json" \
+              --header 'Content-Type: application/json' \
               --header "Authorization: $token_type $token")"
           export network_id="$(
             echo "$network_list" \
