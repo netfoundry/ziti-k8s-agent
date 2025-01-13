@@ -98,13 +98,11 @@ You may replace the cluster's default DNS search domains for selected pods by ex
 - `SIDECAR_SELECTORS` is a comma-separated list of methods by which pods are selected for sidecar injection: `namespace`, `pod`, or both (see [Select Pods for Sidecar Injection](#select-pods-for-sidecar-injection) above).
 
 ```bash
-IDENTITY_FILE="ziti-k8s-agent.json" SIDECAR_SELECTORS="namespace,pod" ./generate-ziti-agent-manifest.bash
+IDENTITY_FILE="ziti-k8s-agent.json" SIDECAR_SELECTORS="namespace,pod" ./generate-ziti-agent-manifest.bash > ./ziti-agent.yaml
 ```
-
-The script produces `ziti-agent.yaml` in the current directory.
 
 ### Apply the Manifest
 
 ```bash
-kubectl create -f ziti-agent.yaml
+kubectl create -f ./ziti-agent.yaml
 ```
