@@ -428,6 +428,9 @@ jobs:
               exit 1
           fi
           echo NF_NETWORK_ID="$NF_NETWORK_ID" | tee -a $GITHUB_ENV
+
+          # mask the Ziti session token
+          set +o xtrace
           ZITI_SESSION_OBJ="$(
             curl  --silent --fail --location --request POST \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID"/exchange \
@@ -440,10 +443,14 @@ jobs:
               exit 1
           fi
           ZITI_SESSION_TOKEN=$(echo "$ZITI_SESSION_OBJ" | jq -r .value)
+          echo "::add-mask::$ZITI_SESSION_TOKEN"
+          set -o xtrace
           if [[ -z "$ZITI_SESSION_TOKEN" ]]; then
               echo "ERROR: ZITI_SESSION_TOKEN is empty" >&2
               exit 1
           fi
+
+          # call the Ziti controller with the session token to get the list of identities
           NF_IDENTITY_LIST="$(
             curl --insecure --silent --fail --location --request GET \
             "$(echo "$ZITI_SESSION_OBJ" | jq -r .networkControllerUrl)"/identities \
@@ -469,15 +476,15 @@ jobs:
                 echo "ERROR: adminUser.json is not valid json" >&2
                 exit 1
           fi
-          echo "_FILE=adminUser.json" | tee -a $GITHUB_ENV
+          echo "IDENTITY_FILE=adminUser.json" | tee -a $GITHUB_ENV
 
-          # enroll testClient
-          echo "$NF_IDENTITY_LIST" | jq -r '.data[] | select(.name=="testClient").enrollment.ott.jwt' | tee testClient.jwt
-          if [[ ! -s testClient.jwt ]]; then
-                echo "ERROR: testClient.jwt is empty" >&2
+          # enroll testUser
+          echo "$NF_IDENTITY_LIST" | jq -r '.data[] | select(.name=="testUser").enrollment.ott.jwt' | tee testUser.jwt
+          if [[ ! -s testUser.jwt ]]; then
+                echo "ERROR: testUser.jwt is empty" >&2
                 exit 1
           fi
-          sudo ziti-edge-tunnel add --jwt "$(< ./testClient.jwt)" --identity testClient
+          sudo ziti-edge-tunnel add --jwt "$(< ./testUser.jwt)" --identity testUser
 
       - name: Deploy Webhook to Clusters
         if: success() || failure()
