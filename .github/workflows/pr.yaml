@@ -254,6 +254,12 @@ jobs:
           service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
           audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
 
+      - name: install-gcloud-cli
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: latest
+          install_components: gke-gcloud-auth-plugin
+
       - name: configure-gke-context
         shell: bash
         run: |
@@ -688,6 +694,18 @@ jobs:
           kubectl delete -f test/bookinfo.yaml --context $AWS_CLUSTER -n test1
           kubectl delete -f test/bookinfo.yaml --context $GKE_CLUSTER -n test2
           sleep 30
+
+      - name: install aws eksctl
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+
+          # get the cli for aws eks
+          curl --silent --show-error --fail --location \
+            https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz \
+          | tar xz -C /tmp
+          sudo install /tmp/eksctl /usr/local/bin/
 
       - name: delete-eks-cluster
         if: success() || failure()
