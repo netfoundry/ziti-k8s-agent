@@ -606,6 +606,9 @@ jobs:
           # wait for pods to be ready after patch
           kubectl wait --for=condition=ready deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=60s --context $GKE_CLUSTER
 
+      # this verifies that Ziti's non-default terminatorStrategy: random (configured in
+      # test/nf-network-services-create.postman_collection.json) is evenly distributing requests to all reviews pods
+      # across both clusters
       - name: run-testcase-01
         shell: bash
         run: |
@@ -630,17 +633,25 @@ jobs:
           cat ./testcase_pods.log
           python ./test/verify_test_results.py ./testcase_pods.log ./testcase_curl_output.log
 
-      - name: scaledown-2-testcase-02
+      # this changes the stack topology for the next test so that GKE test2 cluster hosts only frontend pods, e.g.,
+      # providing the productpage.ziti service, and the EKS test1 cluster hosts only backend pods, e.g., the reviews
+      # pods that log the requests that are counted by the Python verification script
+      - name: split frontend and backend between the clusters
         shell: bash
         run: |
-          kubectl scale deploy details-v1 --replicas=0 -n test1 --context  $AWS_CLUSTER
-          kubectl scale deploy ratings-v1 --replicas=0 -n test1 --context  $AWS_CLUSTER
-          kubectl scale deploy productpage-v1 --replicas=0 -n test2 --context  $GKE_CLUSTER
-          kubectl scale deploy reviews-v1 --replicas=0 -n test2 --context  $GKE_CLUSTER
-          kubectl scale deploy reviews-v2 --replicas=0 -n test2 --context  $GKE_CLUSTER
-          kubectl scale deploy reviews-v3 --replicas=0 -n test2 --context  $GKE_CLUSTER
-          sleep 150
+          set -o pipefail
+          set -o xtrace
 
+          # in the EKS test1 cluster, scale the backend deployments to 0
+          kubectl scale deployment -l 'app in (details,ratings)' --replicas=0 -n test1 --context $AWS_CLUSTER
+          kubectl wait --for=condition=deleted pods -l 'app in (details,ratings)' -n test1 --timeout=120s --context $AWS_CLUSTER
+
+          # in the GKE test2 cluster, scale the frontend deployments to 0
+          kubectl scale deployment -l 'app in (productpage,reviews)' --replicas=0 -n test2 --context $GKE_CLUSTER
+          kubectl wait --for=condition=deleted pods -l 'app in (productpage,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
+
+      # this verifies the result has not changed since the last test, despite a radical change of stack topology,
+      # relying on Ziti to adapt to the loss of frontend and backend pods
       - name: run-testcase-02
         shell: bash
         run: |
@@ -661,13 +672,6 @@ jobs:
           cat ./testcase_curl_output.log
           cat ./testcase_pods.log
           python ./test/verify_test_results.py ./testcase_pods.log ./testcase_curl_output.log
-
-      - name: delete-bookinfo-app
-        shell: bash
-        run: |
-          kubectl delete -f test/bookinfo.yaml --context $AWS_CLUSTER -n test1
-          kubectl delete -f test/bookinfo.yaml --context $GKE_CLUSTER -n test2
-          sleep 30
 
       - name: print logs
         if: failure()
