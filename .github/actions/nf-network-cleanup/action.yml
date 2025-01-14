@@ -1,0 +1,48 @@
+name: 'NetFoundry Network Cleanup'
+description: 'Delete a NetFoundry network'
+inputs:
+  network-name:
+    description: 'Name of the network to delete'
+    required: true
+  access-token:
+    description: 'NetFoundry access token'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: delete-nf-network
+      shell: bash
+      run: |
+        set -o pipefail
+        set -o xtrace
+
+        # get network ID
+        NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
+            https://gateway.production.netfoundry.io/core/v3/networks \
+            --header 'Content-Type: application/json' \
+            --header "Authorization: Bearer ${{ inputs.access-token }}"
+        )"
+        if [[ -z "$NF_NETWORK_LIST" ]]; then
+            echo "ERROR: NF_NETWORK_LIST is empty" >&2
+            exit 1
+        fi
+        NF_NETWORK_ID="$(echo "$NF_NETWORK_LIST" | jq -r \
+            --arg nf_network_name "${{ inputs.network-name }}" \
+            '._embedded.networkList[] | select(.name==$nf_network_name).id'
+        )"
+
+        # delete network if exists
+        if [[ -n "$NF_NETWORK_ID" ]]; then
+            NF_NETWORK_STATUS="$(curl --silent --fail --location --request DELETE \
+                "https://gateway.production.netfoundry.io/core/v3/networks/$NF_NETWORK_ID" \
+                --header 'Content-Type: application/json' \
+                --header "Authorization: Bearer ${{ inputs.access-token }}"
+            )"
+            if [[ -z "$NF_NETWORK_STATUS" ]]; then
+                echo "ERROR: NF_NETWORK_STATUS is empty" >&2
+                exit 1
+            fi
+        else
+            echo "INFO: network ${{ inputs.network-name }} does not exist"
+        fi

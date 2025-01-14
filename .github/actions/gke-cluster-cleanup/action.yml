@@ -1,0 +1,105 @@
+name: 'GKE Cluster Cleanup'
+description: 'Delete a GKE cluster with retries'
+inputs:
+  cluster-name:
+    description: 'Name of the cluster to delete'
+    required: true
+  region:
+    description: 'GCP region'
+    required: true
+  workload-identity-provider:
+    description: 'GCP workload identity provider'
+    required: true
+  service-account:
+    description: 'GCP service account'
+    required: true
+  audience:
+    description: 'GCP audience'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Configure GCP Credentials
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.workload-identity-provider }}
+        service_account: ${{ inputs.service-account }}
+        audience: ${{ inputs.audience }}
+        export_environment_variables: true  # sets GCP_PROJECT
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: delete-gke-cluster
+      shell: bash
+      run: |
+        set -o pipefail
+        set -o xtrace
+
+        # Function to check if cluster exists and get its status
+        get_cluster_status() {
+          gcloud container clusters describe "${{ inputs.cluster-name }}" \
+            --project "$GCP_PROJECT" \
+            --region "${{ inputs.region }}" \
+            --format='get(status)' 2>/dev/null || echo "NOT_FOUND"
+        }
+
+        # Function to check if an operation is in progress
+        get_operation_status() {
+          local operation=$1
+          gcloud container operations describe "$operation" \
+            --project "$GCP_PROJECT" \
+            --region "${{ inputs.region }}" \
+            --format='get(status)' 2>/dev/null || echo "NOT_FOUND"
+        }
+
+        # Try to delete cluster with retries
+        MAX_ATTEMPTS=10
+        ATTEMPT=1
+        while [[ $ATTEMPT -le $MAX_ATTEMPTS ]]; do
+          STATUS=$(get_cluster_status)
+          
+          if [[ "$STATUS" == "NOT_FOUND" ]]; then
+            echo "Cluster does not exist, nothing to delete"
+            exit 0
+          fi
+          
+          echo "Attempt $ATTEMPT: Cluster status is $STATUS"
+          
+          # Try to delete the cluster
+          DELETE_OUTPUT=$(gcloud container clusters delete "${{ inputs.cluster-name }}" \
+            --project "$GCP_PROJECT" \
+            --region "${{ inputs.region }}" \
+            --quiet 2>&1) || true
+          
+          # Check if delete failed due to ongoing operation
+          if echo "$DELETE_OUTPUT" | grep -q "operation.*is currently"; then
+            OPERATION=$(echo "$DELETE_OUTPUT" | grep -o 'operation-[[:alnum:]-]*')
+            echo "Waiting for operation $OPERATION to complete..."
+            
+            # Wait for operation to complete
+            while true; do
+              OP_STATUS=$(get_operation_status "$OPERATION")
+              if [[ "$OP_STATUS" == "DONE" ]] || [[ "$OP_STATUS" == "NOT_FOUND" ]]; then
+                break
+              fi
+              echo "Operation status: $OP_STATUS, waiting 30 seconds..."
+              sleep 30
+            done
+          else
+            # If delete succeeded or failed for other reasons, break the loop
+            break
+          fi
+          
+          ATTEMPT=$((ATTEMPT + 1))
+          if [[ $ATTEMPT -le $MAX_ATTEMPTS ]]; then
+            echo "Waiting 30 seconds before next attempt..."
+            sleep 30
+          fi
+        done
+
+        if [[ $ATTEMPT -gt $MAX_ATTEMPTS ]]; then
+          echo "Failed to delete cluster after $MAX_ATTEMPTS attempts"
+          exit 1
+        fi

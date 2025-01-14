@@ -11,6 +11,7 @@ env:
   GKE_NETWORK_NAME: default
   GKE_SUBNETWORK_NAME: default
   NF_NETWORK_NAME: ziti-k8s-agent-regression-${{ github.run_id }}
+
 jobs:
   build_deploy:
     runs-on: ubuntu-24.04
@@ -108,16 +109,6 @@ jobs:
               privateAccess: true
           YAML
 
-          # delete the cluster if it already exists, which shouldn't happen because CLUSTER_NAME is unique to the
-          # workflow run ID
-          STATUS="$(eksctl get clusters --region "$AWS_REGION" -o json \
-            | jq -r --arg cluster_name "$CLUSTER_NAME" \
-              '.[] | select(.name==$cluster_name).Status'
-          )"
-          if [[ -n "$STATUS" ]]; then
-            eksctl delete cluster -f ./eks-cluster.yaml --force --disable-nodegroup-eviction
-          fi
-
           # create the cluster
           eksctl create cluster -f ./eks-cluster.yaml
 
@@ -152,6 +143,7 @@ jobs:
           workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
           service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
           audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
+          export_environment_variables: true  # sets GCP_PROJECT
 
       - name: install-gcloud-cli
         uses: google-github-actions/setup-gcloud@v2
@@ -164,16 +156,6 @@ jobs:
         run: |
           set -o pipefail
           set -o xtrace
-
-          # delete the cluster if it already exists, which shouldn't happen because CLUSTER_NAME is unique to the
-          # workflow run ID
-          STATUS="$(
-            gcloud container --project $GCP_PROJECT clusters list --region $GKE_REGION --format json \
-            | jq -r --arg cluster_name "$CLUSTER_NAME" '.[] | select(.name==$cluster_name).status'
-          )"
-          if [[ -n "$STATUS" ]]; then
-            gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
-          fi
 
           # create the cluster
           gcloud container --project $GCP_PROJECT clusters create-auto $CLUSTER_NAME \
@@ -225,6 +207,9 @@ jobs:
       - name: install postman, ziti-edge-tunnel, and ziti
         shell: bash
         run: |
+          set -o pipefail
+          set -o xtrace
+
           # get postman
           curl -o- --silent --fail --location https://dl-cli.pstmn.io/install/linux64.sh | bash
 
@@ -241,7 +226,8 @@ jobs:
           sudo ziti-edge-tunnel set_log_level --loglevel DEBUG
 
           # get ziti
-          curl --silent --fail --location https://get.openziti.io/install.bash | sudo bash -s openziti
+          curl --silent --show-error --fail --location https://get.openziti.io/install.bash | sudo bash -s openziti
+          ziti version
 
       - name: Authenticate to AWS Cloud
         uses: aws-actions/configure-aws-credentials@v4
@@ -265,6 +251,7 @@ jobs:
           workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
           service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
           audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
+          export_environment_variables: true  # sets GCP_PROJECT
 
       - name: install-gcloud-cli
         uses: google-github-actions/setup-gcloud@v2
@@ -280,73 +267,32 @@ jobs:
           
           gcloud container clusters get-credentials "$CLUSTER_NAME" --region "$GKE_REGION" --project "$GCP_PROJECT"
 
-      - name: get-cluster-info-and-all-pods
-        shell: bash
-        run: |
-          ATTEMPTS=30
-          until \
-            (
-              kubectl cluster-info --context "$AWS_CLUSTER" &>/dev/null && \
-              kubectl cluster-info --context "$GKE_CLUSTER" &>/dev/null
-            ) || ! (( ATTEMPTS-- ))
-          do
-            echo "Waiting for clusters"
-            sleep 1
-          done
-          kubectl get pods --all-namespaces --context "$AWS_CLUSTER"
-          kubectl get pods --all-namespaces --context "$GKE_CLUSTER"
-
       - name: create-nf-network-services
+        id: nf_auth
         shell: bash
         run: |
           set -o pipefail
-          set -o xtrace
 
-          OAUTH_RESP="$(curl --silent --fail --location --request POST \
+          set +o xtrace  # mask the oauth access token
+          OAUTH_RESP="$(
+            curl --silent --fail --location --request POST \
               https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
               --header 'Content-Type: application/x-www-form-urlencoded' \
               --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" \
-              --data-urlencode 'grant_type=client_credentials')"
-          if [[ -z "$OAUTH_RESP" ]]; then
-              echo "ERROR: OAUTH_RESP is empty" >&2
-              exit 1
-          fi
-          ACCESS_TOKEN="$(echo "$OAUTH_RESP" | jq -r .access_token)"
-          if [[ -z "$ACCESS_TOKEN" ]]; then
-              echo "ERROR: ACCESS_TOKEN is empty" >&2
-              exit 1
-          fi
-          ACCESS_TOKEN_TYPE="$(echo "$OAUTH_RESP" | jq -r .token_type)"
-          if [[ -z "$ACCESS_TOKEN_TYPE" ]]; then
-              echo "ERROR: ACCESS_TOKEN_TYPE is empty" >&2
-              exit 1
-          fi
-          NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
-              https://gateway.production.netfoundry.io/core/v3/networks \
-              --header 'Content-Type: application/json' \
-              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN")"
-          if [[ -z "$NF_NETWORK_LIST" ]]; then
-              echo "ERROR: NF_NETWORK_LIST is empty" >&2
-              exit 1
-          fi
-          NF_NETWORK_ID="$(
-            echo "$NF_NETWORK_LIST" | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
-              '._embedded.networkList[] | select(.name==$nf_network_name).id'
+              --data-urlencode 'grant_type=client_credentials'
           )"
-
-          # delete old network if exists, which shouldn't happen because NF_NETWORK_NAME is unique to the
-          # workflow run ID
-          if [[ -n "$NF_NETWORK_ID" ]]; then
-            NF_NETWORK_STATUS="$(curl --silent --fail --location --request DELETE \
-              https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
-              --header 'Content-Type: application/json' \
-              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN")"
-            if [[ -z "$NF_NETWORK_STATUS" ]]; then
-                echo "ERROR: NF_NETWORK_STATUS for DELETE operation is empty" >&2
-                exit 1
-            fi
-            sleep 120
+          if [[ -z "$OAUTH_RESP" ]]; then
+            echo "ERROR: OAUTH_RESP is empty" >&2
+            exit 1
           fi
+          ACCESS_TOKEN="$(echo $OAUTH_RESP | jq -r .access_token)"
+          if [[ -z "$ACCESS_TOKEN" ]]; then
+            echo "ERROR: ACCESS_TOKEN is empty" >&2
+            exit 1
+          fi
+          echo "::add-mask::$ACCESS_TOKEN"
+          echo "NF_ACCESS_TOKEN=$ACCESS_TOKEN" | tee -a $GITHUB_ENV
+          set -o xtrace
 
           # compose a Postman global variable file for creating the NF network for this workflow run ID
           cat <<JSON | tee nf-network-services-create.postman_global.json
@@ -523,11 +469,11 @@ jobs:
           postman collection run \
               test/nf-network-services-create.postman_collection.json \
               -g nf-network-services-create.postman_global.json \
-            -k
+              -k
           NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
               https://gateway.production.netfoundry.io/core/v3/networks \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN")"
+              --header "Authorization: Bearer $NF_ACCESS_TOKEN")"
           if [[ -z "$NF_NETWORK_LIST" ]]; then
               echo "ERROR: NF_NETWORK_LIST is empty" >&2
               exit 1
@@ -546,7 +492,7 @@ jobs:
             curl  --silent --fail --location --request POST \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID"/exchange \
               --header 'Content-Type: application/json' \
-              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN" \
+              --header "Authorization: Bearer $NF_ACCESS_TOKEN" \
               --data '{"type": "session"}'
           )"
           if [[ -z "$ZITI_SESSION_OBJ" ]]; then
@@ -718,6 +664,14 @@ jobs:
           set -o pipefail
           set -o xtrace
 
+          # get cluster info
+          kubectl cluster-info --context "$AWS_CLUSTER"
+          kubectl cluster-info --context "$GKE_CLUSTER"
+
+          # list all pods
+          kubectl get pods --all-namespaces --context "$AWS_CLUSTER"
+          kubectl get pods --all-namespaces --context "$GKE_CLUSTER"
+
           # inspect cert-manager app
           kubectl --context $AWS_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
           kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
@@ -739,137 +693,52 @@ jobs:
           # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service
 
-  cleanup:
-    if: always()
+  cleanup-debug-delay:
+    if: failure()
     needs: [regression_test]
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
-          role-session-name: GitHubActions
-          audience: sts.amazonaws.com
-
-      - name: install aws eksctl
+      - name: wait 30 minutes
         shell: bash
         run: |
           set -o pipefail
           set -o xtrace
 
-          # get the cli for aws eks
-          curl --silent --show-error --fail --location \
-            https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz \
-          | tar xz -C /tmp
-          sudo install /tmp/eksctl /usr/local/bin/
-
-      - name: sleep-if-failure
-        if: failure()
-        shell: bash
-        run: |
-          # delay cleanup by 30 minutes if regression test failed to allow for debugging
           sleep 1800
 
-      - name: delete-eks-cluster
-        shell: bash
-        run: |
-          set -o pipefail
-          set -o xtrace
-
-          # Check if cluster exists before attempting deletion
-          if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
-            eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --force --disable-nodegroup-eviction
-          else
-            echo "Cluster $CLUSTER_NAME does not exist in region $AWS_REGION, skipping deletion"
-          fi
-
-      - name: Configure GCP Credentials
-        uses: google-github-actions/auth@v2
+  cleanup-nf:
+    needs: [cleanup-debug-delay]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/nf-network-cleanup
         with:
-          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
-          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
+          network-name: ${{ env.NF_NETWORK_NAME }}
+          access-token: ${{ env.NF_ACCESS_TOKEN }}
+
+  cleanup-eks:
+    needs: [cleanup-debug-delay]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/eks-cluster-cleanup
+        with:
+          cluster-name: ${{ env.CLUSTER_NAME }}
+          region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+
+  cleanup-gke:
+    needs: [cleanup-debug-delay]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/gke-cluster-cleanup
+        with:
+          cluster-name: ${{ env.CLUSTER_NAME }}
+          region: ${{ env.GKE_REGION }}
+          workload-identity-provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
+          service-account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
           audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: delete-gke-cluster
-        shell: bash
-        run: |
-          set -o pipefail
-          set -o xtrace
-          
-          gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
-
-      - name: delete-nf-network
-        shell: bash
-        run: |
-          set -o pipefail
-
-          set +o xtrace  # mask the oauth access token
-          OAUTH_RESP="$(
-            curl --silent --fail --location --request POST \
-              https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
-              --header 'Content-Type: application/x-www-form-urlencoded' \
-              --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" \
-              --data-urlencode 'grant_type=client_credentials'
-          )"
-          if [[ -z "$OAUTH_RESP" ]]; then
-            echo "ERROR: OAUTH_RESP is empty" >&2
-            exit 1
-          fi
-          ACCESS_TOKEN="$(echo $OAUTH_RESP | jq -r .access_token)"
-          if [[ -z "$ACCESS_TOKEN" ]]; then
-            echo "ERROR: ACCESS_TOKEN is empty" >&2
-            exit 1
-          fi
-          echo "::add-mask::$ACCESS_TOKEN"
-          ACCESS_TOKEN_TYPE="$(echo $OAUTH_RESP | jq -r .token_type)"
-          set -o xtrace
-
-          NF_NETWORK_LIST="$(
-            curl --silent --fail --location --request GET \
-              https://gateway.production.netfoundry.io/core/v3/networks \
-              --header 'Content-Type: application/json' \
-              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN"
-          )"
-          if [[ -z "$NF_NETWORK_LIST" ]]; then
-            echo "ERROR: NF_NETWORK_LIST is empty" >&2
-            exit 1
-          fi
-          NF_NETWORK_ID="$(
-            echo $NF_NETWORK_LIST | jq -r --arg nf_network_name "$NF_NETWORK_NAME" \
-              '._embedded.networkList[]
-              | select(.name==$nf_network_name).id'
-          )"
-          if [[ -z "$NF_NETWORK_ID" ]]; then
-            echo "ERROR: NF_NETWORK_ID is empty" >&2
-            exit 1
-          fi
-          echo NF_NETWORK_ID="$NF_NETWORK_ID" | tee -a $GITHUB_ENV
-          NF_NETWORK_STATUS_RESP="$(
-            curl --silent --fail --location --request DELETE \
-              https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID" \
-              --header 'Content-Type: application/json' \
-              --header "Authorization: $ACCESS_TOKEN_TYPE $ACCESS_TOKEN"
-          )"
-          if [[ -z "$NF_NETWORK_STATUS_RESP" ]]; then
-            echo "ERROR: NF_NETWORK_STATUS_RESP is empty" >&2
-            exit 1
-          fi
-          NF_NETWORK_STATUS="$(
-            echo "$NF_NETWORK_STATUS_RESP" | jq -r '.status'
-          )"
-          if [[ -n "$NF_NETWORK_STATUS" ]]; then
-            echo "INFO: NF_NETWORK_STATUS: $NF_NETWORK_STATUS"
-          else
-            echo "ERROR: NF_NETWORK_STATUS is empty" >&2
-            exit 1
-          fi
