@@ -179,6 +179,8 @@ jobs:
   regression_test:
     needs: [build_deploy, create-eks, create-gke]
     runs-on: ubuntu-24.04
+    outputs:
+      nf_access_token: ${{ steps.nf_auth.outputs.nf_access_token }}
     permissions:
       contents: read
       id-token: write
@@ -291,7 +293,7 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$ACCESS_TOKEN"
-          echo "NF_ACCESS_TOKEN=$ACCESS_TOKEN" | tee -a $GITHUB_ENV
+          echo "nf_access_token=$ACCESS_TOKEN" | tee -a $GITHUB_OUTPUT
           set -o xtrace
 
           # compose a Postman global variable file for creating the NF network for this workflow run ID
@@ -731,8 +733,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/nf-network-cleanup
         with:
-          network-name: ${{ env.NF_NETWORK_NAME }}
-          access-token: ${{ env.NF_ACCESS_TOKEN }}
+          network_name: ${{ env.NF_NETWORK_NAME }}
+          access_token: ${{ needs.regression_test.outputs.nf_access_token }}
 
   cleanup-eks:
     needs: [cleanup-debug-delay]
@@ -745,9 +747,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/eks-cluster-cleanup
         with:
-          cluster-name: ${{ env.CLUSTER_NAME }}
+          cluster_name: ${{ env.CLUSTER_NAME }}
           region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role_to_assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
 
   cleanup-gke:
     needs: [cleanup-debug-delay]
@@ -760,7 +762,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/gke-cluster-cleanup
         with:
-          cluster-name: ${{ env.CLUSTER_NAME }}
+          cluster_name: ${{ env.CLUSTER_NAME }}
           region: ${{ env.GKE_REGION }}
           workload-identity-provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
           service-account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}

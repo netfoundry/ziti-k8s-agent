@@ -1,14 +1,14 @@
-name: 'EKS Cluster Cleanup'
-description: 'Delete an EKS cluster with retries'
+name: EKS Cluster Cleanup
+description: Delete an EKS cluster with retries
 inputs:
-  cluster-name:
-    description: 'Name of the cluster to delete'
+  cluster_name:
+    description: Name of the cluster to delete
     required: true
   region:
-    description: 'AWS region'
+    description: AWS region
     required: true
-  role-to-assume:
-    description: 'AWS role to assume'
+  role_to_assume:
+    description: AWS role to assume
     required: true
 
 runs:
@@ -18,7 +18,7 @@ runs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-region: ${{ inputs.region }}
-        role-to-assume: ${{ inputs.role-to-assume }}
+        role-to-assume: ${{ inputs.role_to_assume }}
         role-session-name: GitHubActions
         audience: sts.amazonaws.com
 
@@ -42,7 +42,7 @@ runs:
         # Function to get cluster status
         get_cluster_status() {
           aws eks describe-cluster \
-            --name "${{ inputs.cluster-name }}" \
+            --name "${{ inputs.cluster_name }}" \
             --region "${{ inputs.region }}" \
             --query 'cluster.status' \
             --output text 2>/dev/null || echo "NOT_FOUND"
@@ -65,7 +65,7 @@ runs:
           
           # Try to delete the cluster
           if eksctl delete cluster \
-              --name "${{ inputs.cluster-name }}" \
+              --name "${{ inputs.cluster_name }}" \
               --region "${{ inputs.region }}" \
               --force \
               --disable-nodegroup-eviction \
