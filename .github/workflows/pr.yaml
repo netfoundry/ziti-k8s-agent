@@ -473,7 +473,7 @@ jobs:
           NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
               https://gateway.production.netfoundry.io/core/v3/networks \
               --header 'Content-Type: application/json' \
-              --header "Authorization: Bearer $NF_ACCESS_TOKEN")"
+              --header "Authorization: Bearer $ACCESS_TOKEN")"
           if [[ -z "$NF_NETWORK_LIST" ]]; then
               echo "ERROR: NF_NETWORK_LIST is empty" >&2
               exit 1
@@ -492,7 +492,7 @@ jobs:
             curl  --silent --fail --location --request POST \
               https://gateway.production.netfoundry.io/core/v3/networks/"$NF_NETWORK_ID"/exchange \
               --header 'Content-Type: application/json' \
-              --header "Authorization: Bearer $NF_ACCESS_TOKEN" \
+              --header "Authorization: Bearer $ACCESS_TOKEN" \
               --data '{"type": "session"}'
           )"
           if [[ -z "$ZITI_SESSION_OBJ" ]]; then
