@@ -1,11 +1,11 @@
-name: 'NetFoundry Network Cleanup'
-description: 'Delete a NetFoundry network'
+name: NetFoundry Network Cleanup
+description: Delete a NetFoundry network
 inputs:
   network-name:
-    description: 'Name of the network to delete'
+    description: Name of the network to delete
     required: true
   access-token:
-    description: 'NetFoundry access token'
+    description: NetFoundry access token
     required: true
 
 runs:
