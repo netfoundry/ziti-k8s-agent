@@ -616,12 +616,12 @@ jobs:
           kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.1/cert-manager.yaml --context $GKE_CLUSTER
           
           : "Waiting for cert-manager pods to be ready in AWS cluster..."
-          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=240s --context $AWS_CLUSTER
           kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=240s --context $AWS_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=240s --context $AWS_CLUSTER
           
           : "Waiting for cert-manager pods to be ready in GKE cluster..."
-          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=240s --context $GKE_CLUSTER
           kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=240s --context $GKE_CLUSTER
+          kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=480s --context $GKE_CLUSTER
 
           kubectl apply -f ziti-k8s-agent-namespace-selector.yaml --context $AWS_CLUSTER
           kubectl apply -f ziti-k8s-agent-pod-selector.yaml --context $GKE_CLUSTER
@@ -718,8 +718,25 @@ jobs:
           set -o pipefail
           set -o xtrace
 
+          # inspect cert-manager app
+          kubectl --context $AWS_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
+          kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
+          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=cert-manager
+          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=cert-manager
+
+          # inspect cert-manager webhook
+          kubectl --context $AWS_CLUSTER --namespace cert-manager describe pod --selector app=webhook
+          kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=webhook
+          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=webhook
+          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook
+
+          # inspect ziti-admission-webhook
+          kubectl --context $AWS_CLUSTER --namespace ziti describe pod --selector app=ziti-admission-webhook
+          kubectl --context $GKE_CLUSTER --namespace ziti describe pod --selector app=ziti-admission-webhook
           kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
           kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+
+          # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service
 
   cleanup:
@@ -753,12 +770,19 @@ jobs:
           | tar xz -C /tmp
           sudo install /tmp/eksctl /usr/local/bin/
 
+      - name: sleep-if-failure
+        if: failure()
+        shell: bash
+        run: |
+          # delay cleanup by 30 minutes if regression test failed to allow for debugging
+          sleep 1800
+
       - name: delete-eks-cluster
         shell: bash
         run: |
           set -o pipefail
           set -o xtrace
-          
+
           # Check if cluster exists before attempting deletion
           if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
             eksctl delete cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" --force --disable-nodegroup-eviction
@@ -769,8 +793,9 @@ jobs:
       - name: Configure GCP Credentials
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
+          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
+          audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -780,7 +805,7 @@ jobs:
         run: |
           set -o pipefail
           set -o xtrace
-
+          
           gcloud container --project $GCP_PROJECT clusters delete $CLUSTER_NAME --region $GKE_REGION --quiet
 
       - name: delete-nf-network
