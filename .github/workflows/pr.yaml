@@ -547,7 +547,7 @@ jobs:
         shell: bash
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
-          ZITI_AGENT_NAMESPACE: ziti
+          ZITI_AGENT_NAMESPACE: ziti  # must be new because of the way this test is written
         run: |
           set -o pipefail
           set -o xtrace
@@ -569,9 +569,14 @@ jobs:
           kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=240s --context $GKE_CLUSTER
           kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=480s --context $GKE_CLUSTER
 
+          # create new namespace for ziti agent
+          kubectl create namespace $ZITI_AGENT_NAMESPACE --context $AWS_CLUSTER
+          kubectl create namespace $ZITI_AGENT_NAMESPACE --context $GKE_CLUSTER
+
+          # deploy ziti agent
           kubectl apply -f ziti-k8s-agent-namespace-selector.yaml --context $AWS_CLUSTER
           kubectl apply -f ziti-k8s-agent-pod-selector.yaml --context $GKE_CLUSTER
-          
+
           : "Waiting for ziti-admission-webhook pods to be ready in AWS cluster..."
           kubectl wait --for=condition=ready pod -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
           
@@ -584,19 +589,22 @@ jobs:
           set -o pipefail
           set -o xtrace
 
+          # test the AWS cluster with a namespace selector
           kubectl create namespace test1 --context $AWS_CLUSTER
-          kubectl label namespace test1 openziti/ziti-tunnel=enabled --context $AWS_CLUSTER
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $AWS_CLUSTER -n test1
+          kubectl label namespace test1 "openziti/ziti-tunnel=enabled" --context $AWS_CLUSTER
+          kubectl apply -f ./test/bookinfo.yaml --context $AWS_CLUSTER -n test1
+          # wait for pods to be ready
+          kubectl wait --for=condition=ready deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=60s --context $AWS_CLUSTER
+
+          # test the GKE cluster with pod selectors
           kubectl create namespace test2 --context $GKE_CLUSTER
-          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.22/samples/bookinfo/platform/kube/bookinfo.yaml --context $GKE_CLUSTER -n test2
-          sleep 30
-          kubectl patch deployment/ratings-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/productpage-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/details-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/reviews-v1 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/reviews-v2 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          kubectl patch deployment/reviews-v3 -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          sleep 120
+          kubectl apply -f ./test/bookinfo.yaml --context $GKE_CLUSTER -n test2
+          # wait for pods to be ready
+          kubectl wait --for=condition=ready deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=60s --context $GKE_CLUSTER
+          kubectl get deployments -n test2 -l 'app in (details,productpage,ratings,reviews)' -o name --context $GKE_CLUSTER \
+          | xargs -I POD DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          # wait for pods to be ready after patch
+          kubectl wait --for=condition=ready deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=60s --context $GKE_CLUSTER
 
       - name: run-testcase-01
         shell: bash
@@ -610,15 +618,17 @@ jobs:
           if [ -f "./testcase_curl_output.log" ]; then
             rm ./testcase_curl_output.log
           fi
-          kubectl get pods -n test1 --context  $AWS_CLUSTER >> testcase_pods.log
-          kubectl get pods -n test2 --context  $GKE_CLUSTER >> testcase_pods.log
+          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase_pods.log
+          kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase_pods.log
           for i in $(seq 1 40);
           do
-            curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
+            curl -sS -X GET http://productpage.ziti:9080/productpage?u=test \
+            |& grep reviews \
+            | tee -a ./testcase_curl_output.log
           done
-          cat testcase_curl_output.log
-          cat testcase_pods.log
-          test/verify_test_results.py
+          cat ./testcase_curl_output.log
+          cat ./testcase_pods.log
+          python ./test/verify_test_results.py ./testcase_pods.log ./testcase_curl_output.log
 
       - name: scaledown-2-testcase-02
         shell: bash
@@ -640,15 +650,17 @@ jobs:
           if [ -f "./testcase_curl_output.log" ]; then
             rm ./testcase_curl_output.log
           fi
-          kubectl get pods -n test1 --context  $AWS_CLUSTER >> testcase_pods.log
-          kubectl get pods -n test2 --context  $GKE_CLUSTER >> testcase_pods.log
+          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase_pods.log
+          kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase_pods.log
           for i in $(seq 1 40);
           do
-            curl -s -X GET http://productpage.ziti:9080/productpage?u=test | grep reviews >> testcase_curl_output.log
+            curl -s -X GET http://productpage.ziti:9080/productpage?u=test \
+            | grep reviews \
+            | tee -a ./testcase_curl_output.log
           done
-          cat testcase_curl_output.log
-          cat testcase_pods.log
-          test/verify_test_results.py
+          cat ./testcase_curl_output.log
+          cat ./testcase_pods.log
+          python ./test/verify_test_results.py ./testcase_pods.log ./testcase_curl_output.log
 
       - name: delete-bookinfo-app
         shell: bash
