@@ -13,7 +13,7 @@ env:
   NF_NETWORK_NAME: ziti-k8s-agent-regression-${{ github.run_id }}
 jobs:
   build_deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
           tags: netfoundry/ziti-k8s-agent:${{ github.run_id }}
 
   create-eks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
       contents: read
@@ -137,7 +137,7 @@ jobs:
           echo "context=$CONTEXT_NAME" | tee -a $GITHUB_OUTPUT
 
   create-gke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
@@ -196,7 +196,7 @@ jobs:
 
   regression_test:
     needs: [build_deploy, create-eks, create-gke]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
@@ -742,7 +742,7 @@ jobs:
   cleanup:
     if: always()
     needs: [regression_test]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
