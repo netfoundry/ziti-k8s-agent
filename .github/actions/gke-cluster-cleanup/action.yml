@@ -1,16 +1,16 @@
 name: GKE Cluster Cleanup
 description: Delete a GKE cluster with retries
 inputs:
-  cluster-name:
+  cluster_name:
     description: Name of the cluster to delete
     required: true
   region:
     description: GCP region
     required: true
-  workload-identity-provider:
+  workload_identity_provider:
     description: GCP workload identity provider
     required: true
-  service-account:
+  service_account:
     description: GCP service account
     required: true
   audience:
@@ -23,8 +23,8 @@ runs:
     - name: Configure GCP Credentials
       uses: google-github-actions/auth@v2
       with:
-        workload_identity_provider: ${{ inputs.workload-identity-provider }}
-        service_account: ${{ inputs.service-account }}
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
         audience: ${{ inputs.audience }}
         export_environment_variables: true  # sets GCP_PROJECT
 
@@ -39,7 +39,7 @@ runs:
 
         # Function to check if cluster exists and get its status
         get_cluster_status() {
-          gcloud container clusters describe "${{ inputs.cluster-name }}" \
+          gcloud container clusters describe "${{ inputs.cluster_name }}" \
             --project "$GCP_PROJECT" \
             --region "${{ inputs.region }}" \
             --format='get(status)' 2>/dev/null || echo "NOT_FOUND"
@@ -68,7 +68,7 @@ runs:
           echo "Attempt $ATTEMPT: Cluster status is $STATUS"
           
           # Try to delete the cluster
-          DELETE_OUTPUT=$(gcloud container clusters delete "${{ inputs.cluster-name }}" \
+          DELETE_OUTPUT=$(gcloud container clusters delete "${{ inputs.cluster_name }}" \
             --project "$GCP_PROJECT" \
             --region "${{ inputs.region }}" \
             --quiet 2>&1) || true
