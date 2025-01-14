@@ -737,6 +737,9 @@ jobs:
     needs: [cleanup-debug-delay]
     if: always()
     runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/eks-cluster-cleanup
@@ -749,6 +752,9 @@ jobs:
     needs: [cleanup-debug-delay]
     if: always()
     runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/gke-cluster-cleanup

@@ -1,20 +1,20 @@
-name: 'GKE Cluster Cleanup'
-description: 'Delete a GKE cluster with retries'
+name: GKE Cluster Cleanup
+description: Delete a GKE cluster with retries
 inputs:
   cluster-name:
-    description: 'Name of the cluster to delete'
+    description: Name of the cluster to delete
     required: true
   region:
-    description: 'GCP region'
+    description: GCP region
     required: true
   workload-identity-provider:
-    description: 'GCP workload identity provider'
+    description: GCP workload identity provider
     required: true
   service-account:
-    description: 'GCP service account'
+    description: GCP service account
     required: true
   audience:
-    description: 'GCP audience'
+    description: GCP audience
     required: true
 
 runs:
