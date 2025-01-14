@@ -3,6 +3,7 @@ on:
   pull_request:
     types: [opened, synchronize]
   workflow_dispatch:
+
 env:
   CLUSTER_NAME: ziti-k8s-agent-regression-${{ github.run_id }}
   AWS_REGION: us-west-2
