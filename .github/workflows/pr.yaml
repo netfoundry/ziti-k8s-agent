@@ -585,9 +585,9 @@ jobs:
           # Wait for cert-manager components and verify webhook is properly configured
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
             : Waiting for cert-manager components in cluster $CLUSTER
-            kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=300s --context "$CLUSTER"
-            kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=300s --context "$CLUSTER"
-            kubectl wait --for=condition=ready pod -l app=cainjector -n cert-manager --timeout=300s --context "$CLUSTER"
+            kubectl wait --for=condition=Available deployment -l app=cert-manager -n cert-manager --timeout=300s --context "$CLUSTER"
+            kubectl wait --for=condition=Available deployment -l app=webhook -n cert-manager --timeout=300s --context "$CLUSTER"
+            kubectl wait --for=condition=Available deployment -l app=cainjector -n cert-manager --timeout=300s --context "$CLUSTER"
 
             : Checking apiserver readiness
             kubectl wait --for=condition=Available apiservice v1.cert-manager.io --timeout=300s --context $CLUSTER
@@ -619,10 +619,10 @@ jobs:
           done
 
           : Waiting for ziti-admission-webhook pods to be ready in AWS cluster...
-          kubectl wait --for=condition=ready pod -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=condition=Available deployment -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
           
           : Waiting for ziti-admission-webhook pods to be ready in GKE cluster...
-          kubectl wait --for=condition=ready pod -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
+          kubectl wait --for=condition=Available deployment -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
 
       - name: deploy-bookinfo-app
         shell: bash
@@ -630,22 +630,22 @@ jobs:
           set -o pipefail
           set -o xtrace
 
+          # test the GKE cluster with pod selectors
+          kubectl create namespace test2 --context $GKE_CLUSTER
+          kubectl apply -f ./test/bookinfo.yaml --context $GKE_CLUSTER -n test2
+          # wait for pods to be ready
+          kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
+          kubectl get deployments -n test2 -l 'app in (details,productpage,ratings,reviews)' -o name --context $GKE_CLUSTER \
+          | xargs -I POD DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          # wait for pods to be ready after patch
+          kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
+
           # test the AWS cluster with a namespace selector
           kubectl create namespace test1 --context $AWS_CLUSTER
           kubectl label namespace test1 "openziti/ziti-tunnel=enabled" --context $AWS_CLUSTER
           kubectl apply -f ./test/bookinfo.yaml --context $AWS_CLUSTER -n test1
           # wait for pods to be ready
-          kubectl wait --for=condition=ready deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=60s --context $AWS_CLUSTER
-
-          # test the GKE cluster with pod selectors
-          kubectl create namespace test2 --context $GKE_CLUSTER
-          kubectl apply -f ./test/bookinfo.yaml --context $GKE_CLUSTER -n test2
-          # wait for pods to be ready
-          kubectl wait --for=condition=ready deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=60s --context $GKE_CLUSTER
-          kubectl get deployments -n test2 -l 'app in (details,productpage,ratings,reviews)' -o name --context $GKE_CLUSTER \
-          | xargs -I POD DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          # wait for pods to be ready after patch
-          kubectl wait --for=condition=ready deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=60s --context $GKE_CLUSTER
+          kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=120s --context $AWS_CLUSTER
 
       # this verifies that Ziti's non-default terminatorStrategy: random (configured in
       # test/nf-network-services-create.postman_collection.json) is evenly distributing requests to all reviews pods
@@ -685,11 +685,11 @@ jobs:
 
           # in the EKS test1 cluster, scale the backend deployments to 0
           kubectl scale deployment -l 'app in (details,ratings)' --replicas=0 -n test1 --context $AWS_CLUSTER
-          kubectl wait --for=condition=deleted pods -l 'app in (details,ratings)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=condition=Deleted pods -l 'app in (details,ratings)' -n test1 --timeout=120s --context $AWS_CLUSTER
 
           # in the GKE test2 cluster, scale the frontend deployments to 0
           kubectl scale deployment -l 'app in (productpage,reviews)' --replicas=0 -n test2 --context $GKE_CLUSTER
-          kubectl wait --for=condition=deleted pods -l 'app in (productpage,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
+          kubectl wait --for=condition=Deleted pods -l 'app in (productpage,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
 
       # this verifies the result has not changed since the last test, despite a radical change of stack topology,
       # relying on Ziti to adapt to the loss of frontend and backend pods
