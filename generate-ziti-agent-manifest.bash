@@ -90,6 +90,8 @@ kind: Deployment
 metadata:
   name: ziti-admission-wh-deployment
   namespace: $ZITI_AGENT_NAMESPACE
+  labels:
+    app: ziti-admission-webhook
 spec:
   replicas: 1
   selector:
