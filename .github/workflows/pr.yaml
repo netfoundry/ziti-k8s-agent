@@ -735,7 +735,7 @@ jobs:
           sleep 1800
 
   cleanup-nf:
-    needs: [cleanup-debug-delay]
+    needs: [cleanup-debug-delay, regression_test]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -773,6 +773,6 @@ jobs:
         with:
           cluster_name: ${{ env.CLUSTER_NAME }}
           region: ${{ env.GKE_REGION }}
-          workload-identity-provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
-          service-account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
+          workload_identity_provider: ${{ secrets.GCLOUD_WL_ID_FOR_GITHUB }}
+          service_account: ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }}
           audience: ${{ secrets.GCLOUD_AUD_ID_FOR_GITHUB }}
