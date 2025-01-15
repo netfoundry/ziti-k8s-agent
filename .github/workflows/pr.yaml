@@ -565,13 +565,13 @@ jobs:
           helm upgrade --install cert-manager jetstack/cert-manager \
             --namespace cert-manager \
             --create-namespace \
-            --set installCRDs=true \
+            --set crds.enabled=true \
             --version "$CERT_MANAGER_VERSION" \
             --kube-context "$AWS_CLUSTER"
           helm upgrade --install cert-manager jetstack/cert-manager \
             --namespace cert-manager \
             --create-namespace \
-            --set installCRDs=true \
+            --set crds.enabled=true \
             --version "$CERT_MANAGER_VERSION" \
             --kube-context "$GKE_CLUSTER"
 
