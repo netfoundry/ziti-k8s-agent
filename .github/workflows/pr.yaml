@@ -179,8 +179,6 @@ jobs:
   regression_test:
     needs: [build_deploy, create-eks, create-gke]
     runs-on: ubuntu-24.04
-    outputs:
-      nf_access_token: ${{ steps.nf_auth.outputs.nf_access_token }}
     permissions:
       contents: read
       id-token: write
@@ -293,7 +291,6 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$ACCESS_TOKEN"
-          echo "nf_access_token=$ACCESS_TOKEN" | tee -a $GITHUB_OUTPUT
           set -o xtrace
 
           # compose a Postman global variable file for creating the NF network for this workflow run ID
@@ -743,7 +740,6 @@ jobs:
       - uses: ./.github/actions/nf-network-cleanup
         with:
           network_name: ${{ env.NF_NETWORK_NAME }}
-          access_token: ${{ needs.regression_test.outputs.nf_access_token }}
 
   cleanup-eks:
     needs: [cleanup-debug-delay]
