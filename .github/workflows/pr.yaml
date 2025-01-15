@@ -558,6 +558,7 @@ jobs:
           ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-pod-selector.yaml
 
           # Install cert-manager via helm for both clusters
+          CERT_MANAGER_VERSION=v1.16.2
           curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           helm repo add jetstack https://charts.jetstack.io
           helm repo update
@@ -565,18 +566,18 @@ jobs:
             --namespace cert-manager \
             --create-namespace \
             --set installCRDs=true \
-            --version v1.16.2 \
-            --context $AWS_CLUSTER
+            --version "$CERT_MANAGER_VERSION" \
+            --kube-context "$AWS_CLUSTER"
           helm upgrade --install cert-manager jetstack/cert-manager \
             --namespace cert-manager \
             --create-namespace \
             --set installCRDs=true \
-            --version v1.16.2 \
-            --context $GKE_CLUSTER
+            --version "$CERT_MANAGER_VERSION" \
+            --kube-context "$GKE_CLUSTER"
 
           # create new namespace for ziti agent
-          kubectl create namespace $ZITI_AGENT_NAMESPACE --context $AWS_CLUSTER
-          kubectl create namespace $ZITI_AGENT_NAMESPACE --context $GKE_CLUSTER
+          kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context "$AWS_CLUSTER"
+          kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context "$GKE_CLUSTER"
 
           # Wait for cert-manager components and verify webhook is properly configured
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
