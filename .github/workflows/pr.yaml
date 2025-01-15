@@ -579,9 +579,26 @@ jobs:
             kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations -n cert-manager --context "$CLUSTER"
           done
 
-          # Apply Ziti configurations
-          kubectl apply -f ziti-k8s-agent-namespace-selector.yaml --context "$AWS_CLUSTER"
-          kubectl apply -f ziti-k8s-agent-pod-selector.yaml --context "$GKE_CLUSTER"
+          # Apply agent manifests with retries
+          for CLUSTER_MANIFEST in \
+            "${AWS_CLUSTER}=ziti-k8s-agent-namespace-selector.yaml" \
+            "${GKE_CLUSTER}=ziti-k8s-agent-pod-selector.yaml"
+          do
+            CLUSTER="${CLUSTER_MANIFEST%%=*}"
+            MANIFEST="${CLUSTER_MANIFEST#*=}"
+
+            : Applying Ziti configurations to cluster $CLUSTER
+            ATTEMPTS=2
+            DELAY=30
+            while (( ATTEMPTS-- )); do
+              if kubectl apply -f "$MANIFEST" --context "$CLUSTER"; then
+                break
+              else
+                sleep $DELAY
+              fi
+            done
+            kubectl apply -f "$MANIFEST" --context "$CLUSTER"
+          done
 
           : Waiting for ziti-admission-webhook pods to be ready in AWS cluster...
           kubectl wait --for=condition=ready pod -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
