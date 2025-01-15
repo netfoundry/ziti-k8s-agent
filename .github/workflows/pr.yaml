@@ -567,13 +567,16 @@ jobs:
             --create-namespace \
             --set crds.enabled=true \
             --version "$CERT_MANAGER_VERSION" \
-            --kube-context "$AWS_CLUSTER"
+            --kube-context "$AWS_CLUSTER" \
+            --timeout 5m
           helm upgrade --install cert-manager jetstack/cert-manager \
             --namespace cert-manager \
             --create-namespace \
             --set crds.enabled=true \
+            --set global.leaderElection.namespace="cert-manager" \
             --version "$CERT_MANAGER_VERSION" \
-            --kube-context "$GKE_CLUSTER"
+            --kube-context "$GKE_CLUSTER" \
+            --timeout 5m
 
           # create new namespace for ziti agent
           kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context "$AWS_CLUSTER"
