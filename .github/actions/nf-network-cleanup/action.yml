@@ -18,10 +18,15 @@ runs:
         set -o xtrace
 
         # get network ID
+        NF_ACCESS_TOKEN="${{ inputs.access_token }}"
+        if [[ -z "$NF_ACCESS_TOKEN" ]]; then
+            echo "ERROR: NF_ACCESS_TOKEN is empty" >&2
+            exit 1
+        fi
         NF_NETWORK_LIST="$(curl --silent --fail --location --request GET \
             https://gateway.production.netfoundry.io/core/v3/networks \
             --header 'Content-Type: application/json' \
-            --header "Authorization: Bearer ${{ inputs.access_token }}"
+            --header "Authorization: Bearer $NF_ACCESS_TOKEN"
         )"
         if [[ -z "$NF_NETWORK_LIST" ]]; then
             echo "ERROR: NF_NETWORK_LIST is empty" >&2
