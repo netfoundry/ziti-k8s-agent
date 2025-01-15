@@ -570,9 +570,9 @@ jobs:
             kubectl wait --for=condition=ready pod -l app=webhook -n cert-manager --timeout=300s --context "$CLUSTER"
             kubectl wait --for=condition=ready pod -l app=cainjector -n cert-manager --timeout=300s --context "$CLUSTER"
 
-            : Checking webhook readiness
-            echo "Verifying cert-manager webhook configuration in cluster $CLUSTER"
-            kubectl wait --for=condition=Available apiservice v1beta1.webhook.cert-manager.io --timeout=300s --context $CLUSTER
+            : Checking apiserver readiness
+            kubectl wait --for=condition=Available apiservice v1.cert-manager.io --timeout=300s --context $CLUSTER
+            kubectl wait --for=condition=Available apiservice v1.acme.cert-manager.io --timeout=300s --context $CLUSTER
 
             : Verifying webhook is properly configured
             kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations -n cert-manager --context "$CLUSTER"
