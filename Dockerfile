@@ -1,6 +1,3 @@
-# args used in FROM
-ARG ZITI_CLI_TAG="latest"
-ARG ZITI_CLI_IMAGE="docker.io/openziti/ziti-cli"
 
 # build executable
 FROM golang:1.22 AS build-stage
@@ -14,8 +11,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 ##
 #
 
-# this builds docker.io/openziti/ziti-k8s-agent
-FROM ${ZITI_CLI_IMAGE}:${ZITI_CLI_TAG}
+# auto-updated by Dependabot
+FROM docker.io/openziti/ziti-cli:1.1.16
 
 ### Required OpenShift Labels
 LABEL name="openziti/ziti-k8s-agent" \
