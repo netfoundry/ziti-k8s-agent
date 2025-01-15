@@ -56,15 +56,27 @@ runs:
 
         # delete network if exists
         if [[ -n "$NF_NETWORK_ID" ]]; then
-            NF_NETWORK_STATUS="$(curl --silent --fail --location --request DELETE \
+            NF_NETWORK_DELETE_RESP="$(curl --silent --fail --location --request DELETE \
                 "https://gateway.production.netfoundry.io/core/v3/networks/$NF_NETWORK_ID" \
                 --header 'Content-Type: application/json' \
                 --header "Authorization: Bearer $ACCESS_TOKEN"
             )"
+            if [[ -z "$NF_NETWORK_DELETE_RESP" ]]; then
+                echo "ERROR: NF_NETWORK_DELETE_RESP is empty" >&2
+                exit 1
+            fi
+            NF_NETWORK_STATUS="$(echo "$NF_NETWORK_DELETE_RESP" | jq -r .status)"
             if [[ -z "$NF_NETWORK_STATUS" ]]; then
                 echo "ERROR: NF_NETWORK_STATUS is empty" >&2
                 exit 1
+            elif [[ "$NF_NETWORK_STATUS" == "DELETED" ]]; then
+                echo "INFO: network ${{ inputs.network_name }} deleted"
+                exit 0
+            elif [[ "$NF_NETWORK_STATUS" == "DELETING" ]]; then
+                echo "INFO: network ${{ inputs.network_name }} is being deleted"
+                exit 0
             fi
         else
             echo "INFO: network ${{ inputs.network_name }} does not exist"
+            exit 1
         fi
