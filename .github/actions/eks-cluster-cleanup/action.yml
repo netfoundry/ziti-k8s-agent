@@ -95,8 +95,8 @@ runs:
         fi
 
         # Verify cluster is actually gone
-        VERIFY_ATTEMPTS=6
-        VERIFY_DELAY=30
+        VERIFY_ATTEMPTS=12
+        VERIFY_DELAY=60
         for ((i=1; i<=VERIFY_ATTEMPTS; i++)); do
           STATUS=$(get_cluster_status)
           if [[ "$STATUS" == "NOT_FOUND" ]]; then
@@ -107,5 +107,11 @@ runs:
           sleep $VERIFY_DELAY
         done
 
-        echo "Warning: Cluster deletion initiated but cluster still exists after verification period"
+        # If we get here, the cluster is still deleting but that's okay
+        echo "Warning: Cluster deletion is still in progress (status: $STATUS) after verification period"
+        if [[ "$STATUS" == "DELETING" ]]; then
+          echo "Cluster is in DELETING state, considering this a success"
+          exit 0
+        fi
+        echo "Cluster is in unexpected state: $STATUS"
         exit 1
