@@ -4,6 +4,12 @@ inputs:
   network_name:
     description: Name of the network to delete
     required: true
+  client_id:
+    description: NetFoundry API client ID
+    required: true
+  client_secret:
+    description: NetFoundry API client secret
+    required: true
 
 runs:
   using: composite
@@ -18,7 +24,7 @@ runs:
           curl --silent --fail --location --request POST \
             https://netfoundry-production-xfjiye.auth.us-east-1.amazoncognito.com/oauth2/token \
             --header 'Content-Type: application/x-www-form-urlencoded' \
-            --user "${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}:${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}" \
+            --user "${{ inputs.client_id }}:${{ inputs.client_secret }}" \
             --data-urlencode 'grant_type=client_credentials'
         )"
         if [[ -z "$OAUTH_RESP" ]]; then

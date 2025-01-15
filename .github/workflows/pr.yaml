@@ -737,6 +737,8 @@ jobs:
       - uses: ./.github/actions/nf-network-cleanup
         with:
           network_name: ${{ env.NF_NETWORK_NAME }}
+          client_id: ${{ secrets.NF_API_CLIENT_ID_FOR_GITHUB }}
+          client_secret: ${{ secrets.NF_API_CLIENT_PW_FOR_GITHUB }}
 
   cleanup-eks:
     needs: [cleanup-debug-delay]
