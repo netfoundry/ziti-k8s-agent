@@ -668,7 +668,7 @@ jobs:
           for i in $(seq 1 40);
           do
             curl -sS -X GET http://productpage.ziti:9080/productpage?u=test \
-            |& grep reviews \
+            | grep reviews \
             | tee -a ./testcase-01_curl_output.log \
             || true  # ignore individual curl|grep errors because we're verifying the aggregate result later
           done
@@ -687,9 +687,9 @@ jobs:
             exit 1
           fi
 
-      # this changes the stack topology for the next test so that GKE test2 cluster hosts only frontend pods, e.g.,
-      # providing the productpage.ziti service, and the EKS test1 cluster hosts only backend pods, e.g., the reviews
-      # pods that log the requests that are counted by the Python verification script
+      # this changes the stack topology for the next test so that EKS test1 cluster hosts only frontend pods, e.g.,
+      # providing the productpage.ziti service, and the GKE test2 cluster hosts only backend pods, e.g., the ratings,
+      # reviews, and details pods
       - name: split frontend and backend between the clusters
         shell: bash
         run: |
@@ -697,35 +697,45 @@ jobs:
           set -o xtrace
 
           # in the EKS test1 cluster, scale the backend deployments to 0
-          kubectl scale deployment -l 'app in (details,ratings)' --replicas=0 -n test1 --context $AWS_CLUSTER
-          kubectl wait --for=condition=Deleted pods -l 'app in (details,ratings)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          kubectl scale deployment -l 'app in (ratings,reviews,details)' --replicas=0 -n test1 --context $AWS_CLUSTER
+          kubectl wait --for=condition=Deleted pods -l 'app in (ratings,reviews,details)' -n test1 --timeout=120s --context $AWS_CLUSTER
 
           # in the GKE test2 cluster, scale the frontend deployments to 0
-          kubectl scale deployment -l 'app in (productpage,reviews)' --replicas=0 -n test2 --context $GKE_CLUSTER
-          kubectl wait --for=condition=Deleted pods -l 'app in (productpage,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
+          kubectl scale deployment -l app=productpage --replicas=0 -n test2 --context $GKE_CLUSTER
+          kubectl wait --for=condition=Deleted pods -l app=productpage -n test2 --timeout=120s --context $GKE_CLUSTER
 
       # this verifies the result has not changed since the last test, despite a radical change of stack topology,
       # relying on Ziti to adapt to the loss of frontend and backend pods
       - name: run-testcase-02
         shell: bash
         run: |
-          if [ -f "./testcase_pods.log" ]; then
-            rm ./testcase_pods.log
-          fi
-          if [ -f "./testcase_curl_output.log" ]; then
-            rm ./testcase_curl_output.log
-          fi
-          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase_pods.log
-          kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase_pods.log
+          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase-02_pods.log
+          kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase-02_pods.log
+          
+          LOG_EMPTY=0
+          # send enough requests to trigger the terminatorStrategy: random evenly distributing of requests across all
+          # pods
           for i in $(seq 1 40);
           do
             curl -s -X GET http://productpage.ziti:9080/productpage?u=test \
             | grep reviews \
-            | tee -a ./testcase_curl_output.log
+            | tee -a ./testcase-02_curl_output.log || true  # ignore individual curl|grep errors because we're verifying the aggregate result later
           done
-          cat ./testcase_curl_output.log
-          cat ./testcase_pods.log
-          python ./test/verify_test_results.py ./testcase_pods.log ./testcase_curl_output.log
+
+          for LOG in testcase-02_curl_output.log testcase-02_pods.log; do
+            if [[ -s "./$LOG" ]]; then
+              cat "./$LOG"
+            else
+              echo "ERROR: $LOG is empty" >&2
+              LOG_EMPTY=1
+            fi
+          done
+          if ! (( LOG_EMPTY )); then
+            python ./test/verify_test_results.py ./testcase-02_pods.log ./testcase-02_curl_output.log
+          else
+            echo "One or more test logs are empty. Skipping verification."
+            exit 1
+          fi
 
       - name: print logs
         if: failure()
@@ -759,6 +769,12 @@ jobs:
           kubectl --context $GKE_CLUSTER --namespace ziti describe pod --selector app=ziti-admission-webhook
           kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
           kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+
+          # inspect bookinfo apps
+          kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app in (details,ratings)'
+          kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (productpage,reviews)'
+          kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app in (details,ratings)'
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (productpage,reviews)'
 
           # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service
