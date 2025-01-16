@@ -157,16 +157,18 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          # create the cluster - Autopilot does not support NET_ADMIN capability
+          # create GKE Standard cluster - NOTE: Autopilot does not support the required NET_ADMIN capability
           gcloud container --project $GCP_PROJECT clusters create $CLUSTER_NAME \
-            --region $GKE_REGION \
-            --release-channel "regular" \
-            --network "projects/$GCP_PROJECT/global/networks/default" \
-            --subnetwork "projects/$GCP_PROJECT/regions/$GKE_REGION/subnetworks/default" \
-            --cluster-ipv4-cidr "/17" \
-            --services-ipv4-cidr "/22" \
-            --num-nodes 1 \
-            --machine-type "e2-standard-2"
+          --region $GKE_REGION --no-enable-basic-auth \
+          --release-channel "regular" --machine-type "e2-medium" \
+          --disk-size "100" --metadata disable-legacy-endpoints=true \
+          --service-account ${{ secrets.GCLOUD_SVC_ACCT_FOR_GITHUB }} \
+          --network "projects/$GCP_PROJECT/global/networks/$GKE_NETWORK_NAME" \
+          --subnetwork "projects/$GCP_PROJECT/regions/$GKE_REGION/subnetworks/$GKE_SUBNETWORK_NAME" \
+          --no-enable-intra-node-visibility --cluster-dns=clouddns --cluster-dns-scope=cluster \
+          --security-posture=standard --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks \
+          --addons HorizontalPodAutoscaling,NodeLocalDNS,GcePersistentDiskCsiDriver --num-nodes "1" \
+          --default-max-pods-per-node "110" --enable-ip-alias
 
       - name: set-context-name
         id: set-context
