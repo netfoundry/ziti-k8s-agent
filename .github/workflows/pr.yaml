@@ -636,7 +636,7 @@ jobs:
           # wait for pods to be ready
           kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
           kubectl get deployments -n test2 -l 'app in (details,productpage,ratings,reviews)' -o name --context $GKE_CLUSTER \
-          | xargs -I POD DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
+          | xargs -I DEPLOYMENT kubectl patch deployment DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
           # wait for pods to be ready after patch
           kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
 
