@@ -637,7 +637,9 @@ jobs:
           kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=240s --context $GKE_CLUSTER
           kubectl get deployments -n test2 -l 'app in (details,productpage,ratings,reviews)' -o name --context $GKE_CLUSTER \
           | xargs -I DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
-          # wait for pods to be ready after patch
+          sleep 5  # Wait for rollout to start (pods to be terminated)
+          kubectl rollout status deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=240s --context $GKE_CLUSTER
+          # Then wait for new pods to be fully available
           kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=240s --context $GKE_CLUSTER
 
           # test the AWS cluster with a namespace selector
@@ -656,23 +658,34 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          if [ -f "./testcase_pods.log" ]; then
-            rm ./testcase_pods.log
-          fi
-          if [ -f "./testcase_curl_output.log" ]; then
-            rm ./testcase_curl_output.log
-          fi
-          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase_pods.log
-          kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase_pods.log
+          LOG_EMPTY=0
+
+          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase-01_pods.log
+          kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase-01_pods.log
+
+          # send enough requests to trigger the terminatorStrategy: random evenly distributing of requests across all
+          # pods in both clusters
           for i in $(seq 1 40);
           do
             curl -sS -X GET http://productpage.ziti:9080/productpage?u=test \
             |& grep reviews \
-            | tee -a ./testcase_curl_output.log
+            | tee -a ./testcase-01_curl_output.log \
+            || true  # ignore individual curl|grep errors because we're verifying the aggregate result later
           done
-          cat ./testcase_curl_output.log
-          cat ./testcase_pods.log
-          python ./test/verify_test_results.py ./testcase_pods.log ./testcase_curl_output.log
+          for LOG in testcase-01_curl_output.log testcase-01_pods.log; do
+            if [[ -s "./$LOG" ]]; then
+              cat "./$LOG"
+            else
+              echo "ERROR: $LOG is empty" >&2
+              LOG_EMPTY=1
+            fi
+          done
+          if ! (( LOG_EMPTY )); then
+            python ./test/verify_test_results.py ./testcase-01_pods.log ./testcase-01_curl_output.log
+          else
+            echo "One or more test logs are empty. Skipping verification."
+            exit 1
+          fi
 
       # this changes the stack topology for the next test so that GKE test2 cluster hosts only frontend pods, e.g.,
       # providing the productpage.ziti service, and the EKS test1 cluster hosts only backend pods, e.g., the reviews
