@@ -18,6 +18,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 )
 
@@ -226,6 +227,11 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			Args:            []string{"tproxy", "-i", fmt.Sprintf("%v.json", identityName)},
 			VolumeMounts:    []corev1.VolumeMount{{Name: volumeMountName, MountPath: "/netfoundry", ReadOnly: true}},
 			SecurityContext: sidecarSecurityContext,
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceEphemeralStorage: resource.MustParse("10Mi"),
+				},
+			},
 		})
 
 		containersBytes, err := json.Marshal(&pod.Spec.Containers)
