@@ -638,14 +638,14 @@ jobs:
           kubectl get deployments -n test2 -l 'app in (details,productpage,ratings,reviews)' -o name --context $GKE_CLUSTER \
           | xargs -I DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/ziti-tunnel":"enabled"}}}}}' --context $GKE_CLUSTER -n test2
           # wait for pods to be ready after patch
-          kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
+          kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=240s --context $GKE_CLUSTER
 
           # test the AWS cluster with a namespace selector
           kubectl create namespace test1 --context $AWS_CLUSTER
           kubectl label namespace test1 "openziti/ziti-tunnel=enabled" --context $AWS_CLUSTER
           kubectl apply -f ./test/bookinfo.yaml --context $AWS_CLUSTER -n test1
           # wait for pods to be ready
-          kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=240s --context $AWS_CLUSTER
 
       # this verifies that Ziti's non-default terminatorStrategy: random (configured in
       # test/nf-network-services-create.postman_collection.json) is evenly distributing requests to all reviews pods
