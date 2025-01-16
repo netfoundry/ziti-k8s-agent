@@ -157,14 +157,16 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          # create the cluster
-          gcloud container --project $GCP_PROJECT clusters create-auto $CLUSTER_NAME \
+          # create the cluster - Autopilot does not support NET_ADMIN capability
+          gcloud container --project $GCP_PROJECT clusters create $CLUSTER_NAME \
             --region $GKE_REGION \
             --release-channel "regular" \
             --network "projects/$GCP_PROJECT/global/networks/default" \
             --subnetwork "projects/$GCP_PROJECT/regions/$GKE_REGION/subnetworks/default" \
             --cluster-ipv4-cidr "/17" \
-            --services-ipv4-cidr "/22"
+            --services-ipv4-cidr "/22" \
+            --num-nodes 1 \
+            --machine-type "e2-standard-2"
 
       - name: set-context-name
         id: set-context
