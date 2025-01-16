@@ -660,7 +660,7 @@ jobs:
 
           LOG_EMPTY=0
 
-          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase-01_pods.log
+          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee ./testcase-01_pods.log
           kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase-01_pods.log
 
           # send enough requests to trigger the terminatorStrategy: random evenly distributing of requests across all
@@ -709,7 +709,7 @@ jobs:
       - name: run-testcase-02
         shell: bash
         run: |
-          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee -a ./testcase-02_pods.log
+          kubectl get pods -n test1 --context  $AWS_CLUSTER | tee ./testcase-02_pods.log
           kubectl get pods -n test2 --context  $GKE_CLUSTER | tee -a ./testcase-02_pods.log
           
           LOG_EMPTY=0
