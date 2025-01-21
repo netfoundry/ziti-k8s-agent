@@ -20,9 +20,9 @@ for BIN in sed awk jq base64; do
 done
 
 ZITI_MGMT_API=$(jq -r '.ztAPI' "$IDENTITY_FILE" | sed -E 's|/edge/client/v1|/edge/management/v1|')
-IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
-IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
-IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 -w0)
+IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 )
+IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 )
+IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 )
 
 cat <<YAML
 
