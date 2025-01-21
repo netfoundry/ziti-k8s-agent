@@ -550,12 +550,21 @@ jobs:
         shell: bash
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
-          ZITI_AGENT_NAMESPACE: ziti  # must be new because of the way this test is written
+          ZITI_AGENT_NAMESPACE: ziti-agent  # this test assumes the namespace does not exist and will be created during the test
+          ZITI_AGENT_LOG_LEVEL: 4
+          SIDECAR_IMAGE: ${{ vars.SIDECAR_IMAGE || 'docker.io/openziti/ziti-tunnel' }} 
+          SIDECAR_IMAGE_VERSION: ${{ vars.SIDECAR_IMAGE_VERSION || 'latest' }}
         run: |
           set -o pipefail
           set -o xtrace
 
+          # run the shell script to generate the k8s manifests, consuming env vars as configuration
           # IDENTITY_FILE exported in prior step create-nf-network-services
+          # ZITI_AGENT_IMAGE exported in this step environment
+          # ZITI_AGENT_NAMESPACE exported in this step environment
+          # ZITI_AGENT_LOG_LEVEL exported in this step environment
+          # SIDECAR_IMAGE exported in this step environment
+          # SIDECAR_IMAGE_VERSION exported in this step environment
           SIDECAR_SELECTORS=namespace \
           ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-namespace-selector.yaml
           SIDECAR_SELECTORS=pod \
