@@ -17,6 +17,7 @@ var (
 	sidecarImage           string
 	sidecarImageVersion    string
 	sidecarPrefix          string
+	sidecarIdentityDir     string
 	zitiCtrlMgmtApi        string
 	zitiCtrlClientCertFile string
 	zitiCtrlClientKeyFile  string
@@ -52,6 +53,8 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"Image Varsion of sidecar")
 	webhookCmd.Flags().StringVar(&sidecarPrefix, "sidecar-prefix", "zt",
 		"Used in creation of ContainerName to be used as injected sidecar")
+	webhookCmd.Flags().StringVar(&sidecarIdentityDir, "sidecar-identity-dir", "/ziti-tunnel",
+		"Directory where sidecar container will store identity files")
 	webhookCmd.Flags().StringVar(&zitiCtrlMgmtApi, "ziti-ctrl-addr", "",
 		"Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1 ")
 	webhookCmd.Flags().StringVar(&zitiCtrlClientCertFile, "ziti-ctrl-client-cert-file", "",
