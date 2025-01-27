@@ -17,9 +17,10 @@ import (
 	"github.com/openziti/sdk-golang/ziti"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -108,6 +109,8 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 
 		zec, err := ze.Client(&zecfg)
 		if err != nil {
+			err = errors.WithStack(err)
+			klog.Errorf("Error with stack trace: %+v", err)
 			return failureResponse(reviewResponse, err)
 		}
 

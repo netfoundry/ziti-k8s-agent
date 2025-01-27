@@ -48,18 +48,21 @@ Select pods labeled `openziti/tunnel-enabled="true"` only in namespaces labeled 
 
 The agent manifest must reflect your choice to select by pod. Setting `SIDECAR_SELECTORS="namespace,pod"` in the script's environment before generating the manifest will configure the mutating webhook with both `namespaceSelector` and `objectSelector`. Both selectors must match for a pod to be selected.
 
-```yaml
-    namespaceSelector:
-      matchLabels:
-        openziti/tunnel-enabled: "true"
-    objectSelector:
-      matchLabels:
-        openziti/tunnel-enabled: "true"
+```bash
+kubectl label namespace "default" openziti/tunnel-enabled="true"
 ```
 
 ## Specify Ziti roles for Pod Identities
 
 The Ziti agent will generate a default Ziti identity role based on the app label unless you annotate it with a comma-separated list of roles. This example adds the role `acme-api-clients` to the Ziti identity shared by all replicas of the deployment. Updating the running pod's annotation will update the Ziti identity role.
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        identity.openziti.io/role-attributes: acme-api-clients
+```
 
 ```bash
 kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"annotations":{"identity.openziti.io/role-attributes":"acme-api-clients"}}}}}'
