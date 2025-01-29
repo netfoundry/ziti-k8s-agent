@@ -19,10 +19,21 @@ for BIN in sed awk jq base64; do
     checkCommand "$BIN"
 done
 
+# Function to handle base64 encoding consistently across platforms
+base64_encode() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        base64 -b 0
+    else
+        base64 -w 0
+    fi
+}
+
 ZITI_MGMT_API=$(jq -r '.ztAPI' "$IDENTITY_FILE" | sed -E 's|/edge/client/v1|/edge/management/v1|')
-IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 )
-IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 )
-IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64 )
+
+# Base64 encode the certificates and keys
+IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64_encode)
+IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64_encode)
+IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64_encode)
 
 cat <<YAML
 
