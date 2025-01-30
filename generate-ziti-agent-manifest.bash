@@ -21,7 +21,7 @@ done
 
 # Function to handle base64 encoding consistently across platforms
 base64_encode() {
-    if [[ "$(uname)" == "Darwin" ]]; then
+    if [[ "$(uname -o)" == "Darwin" ]]; then
         base64 -b 0
     else
         base64 -w 0
