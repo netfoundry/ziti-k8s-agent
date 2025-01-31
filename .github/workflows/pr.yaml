@@ -40,6 +40,8 @@ jobs:
           context: .
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
+          cache-from: type=registry,ref=netfoundry/ziti-k8s-agent:build
+          cache-to: type=registry,ref=netfoundry/ziti-k8s-agent:build,mode=max
           push: true
           tags: netfoundry/ziti-k8s-agent:${{ github.run_id }}
 
