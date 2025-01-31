@@ -13,21 +13,21 @@ var (
 	key                    []byte
 	zitiAdminCert          []byte
 	zitiAdminKey           []byte
+	zitiCtrlCaBundle       []byte
 	port                   int
 	sidecarImage           string
 	sidecarImageVersion    string
 	sidecarPrefix          string
+	sidecarIdentityDir     string
 	zitiCtrlMgmtApi        string
 	zitiCtrlClientCertFile string
 	zitiCtrlClientKeyFile  string
+	zitiCtrlCaBundleFile   string
 	podSecurityOverride    bool
 	clusterDnsServiceIP    string
 	searchDomainList       string
 	searchDomains          []string
-	zitiIdentityRoles      []string
 	zitiRoleKey            string
-	value                  string
-	ok                     bool
 	err                    error
 )
 
@@ -54,12 +54,16 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"Image Varsion of sidecar")
 	webhookCmd.Flags().StringVar(&sidecarPrefix, "sidecar-prefix", "zt",
 		"Used in creation of ContainerName to be used as injected sidecar")
+	webhookCmd.Flags().StringVar(&sidecarIdentityDir, "sidecar-identity-dir", "/ziti-tunnel",
+		"Directory where sidecar container will store identity files")
 	webhookCmd.Flags().StringVar(&zitiCtrlMgmtApi, "ziti-ctrl-addr", "",
 		"Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1 ")
 	webhookCmd.Flags().StringVar(&zitiCtrlClientCertFile, "ziti-ctrl-client-cert-file", "",
 		"Ziti Controller Client Certificate")
 	webhookCmd.Flags().StringVar(&zitiCtrlClientKeyFile, "ziti-ctrl-client-key-file", "",
 		"Ziti Controller Client Private Key")
+	webhookCmd.Flags().StringVar(&zitiCtrlCaBundleFile, "ziti-ctrl-ca-bundle-file", "",
+		"Ziti Controller CA Bundle")
 	webhookCmd.Flags().BoolVar(&podSecurityOverride, "pod-sc-override", false,
 		"Override the security context at pod level, i.e. runAsNonRoot: false")
 	webhookCmd.Flags().StringVar(&clusterDnsServiceIP, "cluster-dns-svc-ip", "",

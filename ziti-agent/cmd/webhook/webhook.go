@@ -15,10 +15,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var (
-	runtimeScheme = runtime.NewScheme()
-)
-
 func init() {
 	/*
 		AdmissionReview is registered for version admission.k8s.io/v1 or admission.k8s.io/v1beta1
@@ -91,8 +87,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response = admit.admissionv1beta1(*requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
-
-		klog.Infof(fmt.Sprintf("Admission Response UID: %s", responseAdmissionReview.Response.UID))
+		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)
@@ -105,8 +100,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response = admit.admissionv1(*requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
-
-		klog.Infof(fmt.Sprintf("Admission Response UID: %s", responseAdmissionReview.Response.UID))
+		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
@@ -115,6 +109,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		return
 	}
 
+	klog.V(5).Infof("Admission Response: %s", responseObj)
 	respBytes, err := json.Marshal(responseObj)
 	if err != nil {
 		klog.Error(err)
@@ -128,12 +123,15 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 }
 
 func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
-	serve(w, r, newDelegateToV1AdmitHandler(zitiTunnel))
+	serve(w, r, newDelegateToV1AdmitHandler(handleZitiTunnelAdmission))
 }
 
 func webhook(cmd *cobra.Command, args []string) {
 
-	klog.Infof("Current version is %s", common.Version)
+	// load env vars to override the command line vars if any
+	lookupEnvVars()
+
+	klog.Infof("Running version is %s", common.Version)
 
 	// process certs passed from the file through the command line
 	if certFile != "" && keyFile != "" {
@@ -147,9 +145,12 @@ func webhook(cmd *cobra.Command, args []string) {
 			klog.Info(err)
 		}
 	}
+	if cert == nil || key == nil {
+		klog.Fatal("Cert and key required, but one or both are missing")
+	}
 
-	// process ziti admin user certs passed from the file through the command line
-	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" {
+	// process ziti admin user identity passed as separate file paths instead of env vars
+	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" && zitiCtrlCaBundleFile != "" {
 		zitiAdminCert, err = os.ReadFile(zitiCtrlClientCertFile)
 		if err != nil {
 			klog.Info(err)
@@ -159,12 +160,17 @@ func webhook(cmd *cobra.Command, args []string) {
 		if err != nil {
 			klog.Info(err)
 		}
+
+		zitiCtrlCaBundle, err = os.ReadFile(zitiCtrlCaBundleFile)
+		if err != nil {
+			klog.Info(err)
+		}
 	}
 
-	// load env vars to override the command line vars if any
-	lookupEnvVars()
+	if zitiAdminCert == nil || zitiAdminKey == nil || zitiCtrlCaBundle == nil {
+		klog.Fatal("ziti admin cert, key, and root ca bundle are required as env var or run parameter, but at least one is missing")
+	}
 
-	klog.Infof("AC WH Server is listening on port %d", port)
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),
@@ -172,6 +178,7 @@ func webhook(cmd *cobra.Command, args []string) {
 	}
 	err := server.ListenAndServeTLS("", "")
 	if err != nil {
-		panic(err)
+		klog.Fatal(err)
 	}
+	klog.Infof("ziti agent webhook server is listening on port %d", port)
 }
