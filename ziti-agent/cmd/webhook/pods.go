@@ -15,12 +15,13 @@ import (
 
 	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/openziti/sdk-golang/ziti"
+	"github.com/pkg/errors"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -42,7 +43,7 @@ type JsonPatchEntry struct {
 	Value json.RawMessage `json:"value,omitempty"`
 }
 
-// zitiTunnel handles Kubernetes admission requests for pod operations.
+// handleZitiTunnelAdmission handles Kubernetes admission requests for pod operations.
 // It processes "CREATE", "DELETE", and "UPDATE" operations to manage Ziti identities
 // and associated Kubernetes resources based on pod annotations and labels.
 //
@@ -52,12 +53,12 @@ type JsonPatchEntry struct {
 // Returns:
 //   A pointer to the AdmissionResponse indicating success or failure
 //   of the admission request processing.
-func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	reviewResponse := admissionv1.AdmissionResponse{}
 	pod := corev1.Pod{}
 	oldPod := corev1.Pod{}
 
-	// parse ziti admin certs
+	// parse ziti admin certs to synchronously (blocking) create a ziti identity
 	zitiAdminIdentity, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
 	if err != nil {
 		klog.Error(err)
@@ -74,7 +75,6 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		return toV1AdmissionResponse(err)
 	}
 	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
-
 	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
 	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
 	certPool := x509.NewCertPool()
@@ -103,7 +103,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			return toV1AdmissionResponse(err)
 		}
 
-		identityName, err := buildZitiIdentityName(sidecarPrefix, &pod)
+		identityName, err := buildZitiIdentityName(sidecarPrefix, &pod, ar.Request.UID)
 		if err != nil {
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
@@ -526,7 +526,7 @@ func validateSubdomain(input string) error {
 	return nil
 }
 
-func buildZitiIdentityName(prefix string, pod *corev1.Pod) (string, error) {
+func buildZitiIdentityName(prefix string, pod *corev1.Pod, uid types.UID) (string, error) {
 	var name string
 	var isUID bool
 
@@ -562,7 +562,7 @@ func buildZitiIdentityName(prefix string, pod *corev1.Pod) (string, error) {
 	}
 
 	// Build the full identity name
-	identityName := fmt.Sprintf("%s-%s-%s", prefix, name, pod.Namespace)
+	identityName := fmt.Sprintf("%s-%s-%s-%s", prefix, name, pod.Namespace, uid)
 
 	// Validate the final name
 	if err := validateSubdomain(identityName); err != nil {

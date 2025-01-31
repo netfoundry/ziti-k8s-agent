@@ -123,7 +123,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 }
 
 func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
-	serve(w, r, newDelegateToV1AdmitHandler(zitiTunnel))
+	serve(w, r, newDelegateToV1AdmitHandler(handleZitiTunnelAdmission))
 }
 
 func webhook(cmd *cobra.Command, args []string) {
@@ -149,7 +149,7 @@ func webhook(cmd *cobra.Command, args []string) {
 		klog.Fatal("Cert and key required, but one or both are missing")
 	}
 
-	// process ziti admin user certs passed from the file through the command line
+	// process ziti admin user identity passed as separate file paths instead of env vars
 	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" && zitiCtrlCaBundleFile != "" {
 		zitiAdminCert, err = os.ReadFile(zitiCtrlClientCertFile)
 		if err != nil {
@@ -168,7 +168,7 @@ func webhook(cmd *cobra.Command, args []string) {
 	}
 
 	if zitiAdminCert == nil || zitiAdminKey == nil || zitiCtrlCaBundle == nil {
-		klog.Fatal("ziti admin cert, key, and root ca bundle are required, but at least one is missing")
+		klog.Fatal("ziti admin cert, key, and root ca bundle are required as env var or run parameter, but at least one is missing")
 	}
 
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
