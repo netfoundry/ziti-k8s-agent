@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pkg/errors"
 	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/kubernetes"
 	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/ziti-edge"
 
@@ -108,7 +109,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
 		}
-		klog.V(4).Infof("identity name is %s", identityName)
+		klog.V(4).Infof("deterministic identity name is %s", identityName)
 		klog.V(4).Infof("Pod Labels are %s", pod.Labels)
 		klog.V(4).Infof("Pod Annotations are %s", pod.Annotations)
 
@@ -133,62 +134,41 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		klog.V(4).Infof("Pod Name is %s", pod.Name)
 		klog.V(4).Infof("Pod Namespace is %s", pod.Namespace)
 
-		identityCfg, _, err := createAndEnrollIdentity(identityName, roles, zec)
+		identityDetails, err := ze.CreateIdentity(identityName, roles, "Device", zec)
 		if err != nil {
+			klog.Errorf("failed to create identity %s: %v", identityName, err)
 			return failureResponse(reviewResponse, err)
 		}
+		klog.V(4).Infof("created identity with details: %v", identityDetails)
 
-		secretJson, err := json.Marshal(identityCfg)
+		identityJwt, err := ze.GetIdentityEnrollmentJWT(identityDetails.GetPayload().Data.ID, zec)
 		if err != nil {
-			klog.Error(err)
+			klog.Errorf("failed to get JWT for identity %s: %v", identityName, err)
 			return failureResponse(reviewResponse, err)
 		}
-		klog.V(5).Infof("Enrolled identity cfg is '%s'", string(secretJson))
+		klog.V(4).Infof("successfully created identity '%s' with JWT: '%v'", identityName, identityJwt)
 
-		// kubernetes client
-		kc := k.Client()
-
-		//Create secret in the same namespace
-		_, err = kc.CoreV1().Secrets(pod.Namespace).Create(
-			context.TODO(), &corev1.Secret{
-				Data: map[string][]byte{identityName: secretJson},
-				Type: "Opaque",
-				ObjectMeta: metav1.ObjectMeta{
-					Name: identityName,
-				},
-			}, metav1.CreateOptions{},
-		)
-		if err != nil {
-			klog.Error(err)
-		}
-
-		if len(clusterDnsServiceIP) == 0 {
-			dnsService, err := kc.CoreV1().Services("kube-system").Get(context.TODO(), "kube-dns", metav1.GetOptions{})
-			if err != nil {
-				klog.Error(err)
-			}
-			if len(dnsService.Spec.ClusterIP) != 0 {
-				clusterDnsServiceIP = dnsService.Spec.ClusterIP
-				klog.Infof("Looked up DNS SVC ClusterIP: %s", dnsService.Spec.ClusterIP)
-			} else {
-				klog.Info("Looked up DNS SVC ClusterIP and is not found")
-			}
-		}
-
-		// add sidecar volume to pod
+		// add identity dir empty dir volume to pod
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 			Name: volumeMountName,
 			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: identityName,
-					Items:      []corev1.KeyToPath{{Key: identityName, Path: fmt.Sprintf("%v.json", identityName)}},
-				},
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		})
+
+		// create container env vars
+		var containerEnv []corev1.EnvVar
+		if identityJwt != nil {
+			containerEnv = append(containerEnv, corev1.EnvVar{
+				Name:  "ZITI_ENROLL_TOKEN",
+				Value: *identityJwt,
+			})
+		}
 
 		volumesBytes, err := json.Marshal(&pod.Spec.Volumes)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		// update pod dns config and policy
@@ -206,33 +186,26 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 		pod.Spec.DNSPolicy = "None"
 		dnsPolicyBytes, err := json.Marshal(&pod.Spec.DNSPolicy)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		var podSecurityContextBytes []byte
 		var patch []JsonPatchEntry
 		var rootUser int64 = 0
 		var isNotTrue bool = false
-		var isPrivileged = false
+		var isPrivileged = false  // this should always be false because the sidecar does not require privileges on the node outside its kernel namespace - kb - 2025-01-16
 		var sidecarSecurityContext *corev1.SecurityContext
-
-		sidecarSecurityContext = &corev1.SecurityContext{
-			Capabilities: &corev1.Capabilities{
-				Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
-				Drop: []corev1.Capability{"ALL"},
-			},
-			RunAsUser:  &rootUser,
-			Privileged: &isPrivileged,
-		}
 
 		if pod.Spec.SecurityContext != nil && pod.Spec.SecurityContext.RunAsUser != nil {
 			sidecarSecurityContext = &corev1.SecurityContext{
 				Capabilities: &corev1.Capabilities{
-					Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+					Add:  []corev1.Capability{"NET_ADMIN"},  // pruned net_bind because it's only required to bind privileged low ports in proxy mode which is never used by the sidecar - kb - 2025-01-16
 					Drop: []corev1.Capability{"ALL"},
 				},
 				RunAsUser:  &rootUser,
@@ -243,8 +216,9 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
 			Name:            identityName,
 			Image:           fmt.Sprintf("%s:%s", sidecarImage, sidecarImageVersion),
-			Args:            []string{"tproxy", "-i", fmt.Sprintf("%v.json", identityName)},
-			VolumeMounts:    []corev1.VolumeMount{{Name: volumeMountName, MountPath: "/netfoundry", ReadOnly: true}},
+			Args:            []string{"tproxy"},
+			Env:            containerEnv,
+			VolumeMounts:    []corev1.VolumeMount{{Name: volumeMountName, MountPath: sidecarIdentityDir}},
 			SecurityContext: sidecarSecurityContext,
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -256,6 +230,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		containersBytes, err := json.Marshal(&pod.Spec.Containers)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		patch = []JsonPatchEntry{
@@ -288,6 +263,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			podSecurityContextBytes, err = json.Marshal(&pod.Spec.SecurityContext)
 			if err != nil {
 				klog.Error(err)
+				return failureResponse(reviewResponse, err)
 			}
 			patch = append(patch, []JsonPatchEntry{
 				{
@@ -301,6 +277,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		patchBytes, err := json.Marshal(&patch)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		reviewResponse.Patch = patchBytes
@@ -395,60 +372,27 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 
 		klog.V(4).Infof("Roles are %v", roles)
 		klog.V(4).Infof("Roles length is %d", len(roles))
-		// Update only if Ziti Annotation is changed
-		if len(roles) > 0 {
-			zec, err := ze.Client(&zecfg)
+
+		zec, err := ze.Client(&zecfg)
+		if err != nil {
+			return failureResponse(reviewResponse, err)
+		}
+		zId, found, err := findIdentity(identityName, zec)
+		if err != nil {
+			klog.Error(err)
+			return failureResponse(reviewResponse, err)
+		}
+		if found {
+			identityDetails, err := ze.PatchIdentity(zId, roles, zec)
 			if err != nil {
 				return failureResponse(reviewResponse, err)
 			}
-			zId, found, err := findIdentity(identityName, zec)
-			if err != nil {
-				klog.Error(err)
-				return failureResponse(reviewResponse, err)
-			}
-			if found {
-				identityDetails, err := ze.PatchIdentity(zId, roles, zec)
-				if err != nil {
-					return failureResponse(reviewResponse, err)
-				}
-				klog.V(5).Infof("Updated identity details are %v", identityDetails)
-			} else {
-				klog.Errorf("Identity '%s' not found during pod update operation", identityName)
-			}
+			klog.V(5).Infof("Updated identity details are %v", identityDetails)
+		} else {
+			klog.Errorf("Identity '%s' not found during pod update operation", identityName)
 		}
 	}
 	return successResponse(reviewResponse)
-}
-
-// createAndEnrollIdentity creates a new identity in Ziti Edge with the given name, UID and roles,
-// enrolls it and returns the enrolled configuration and the name of the created identity.
-//
-// Args:
-//   name: The name of the identity to create.
-//   uid: The UID of the pod for which the identity is created.
-//   roles: A list of roles to assign to the created identity.
-//   zec: A reference to the Ziti Edge client.
-//
-// Returns:
-//   A pointer to a ziti.Config containing the enrolled configuration if successful, otherwise nil.
-//   A string containing the name of the created identity.
-//   An error if any occurs.
-func createAndEnrollIdentity(name string, roles []string, zec *rest_management_api_client.ZitiEdgeManagement) (*ziti.Config, string, error) {
-	klog.V(4).Infof("creating identity %s", name)
-
-	identityDetails, err := ze.CreateIdentity(name, roles, "Device", zec)
-	if err != nil {
-		klog.Error(err)
-		return nil, name, err
-	}
-
-	identityCfg, err := ze.EnrollIdentity(identityDetails.GetPayload().Data.ID, zec)
-	if err != nil {
-		klog.Error(err)
-		return nil, name, err
-	}
-
-	return identityCfg, name, nil
 }
 
 // findIdentity looks up an identity by name and returns its ID if found.
@@ -461,26 +405,20 @@ func createAndEnrollIdentity(name string, roles []string, zec *rest_management_a
 //   A string containing the ID of the identity if found, otherwise an empty string.
 //   A boolean indicating whether the identity was found.
 //   An error object if an error occurred.
-func findIdentity(name string, zec *rest_management_api_client.ZitiEdgeManagement) (string, bool, error) {
+func findIdentity(name string, zec *rest_management_api_client.ZitiEdgeManagement) (zId string, roles string[], err error) {
 	identityDetails, err := ze.GetIdentityByName(name, zec)
 	if err != nil {
 		klog.Error(err)
-		return "", false, err
+		return "", nil, err
 	}
-
 	data := identityDetails.GetPayload().Data
-	if len(data) == 0 {
-		klog.V(4).Infof("No identity found with name: %s", name)
-		return "", false, nil
-	}
-
 	if len(data) > 1 {
 		klog.Warningf("Multiple identities found with name %s. Using first match.", name)
 	}
-
-	zId := *data[0].ID
+	zId = *data[0].ID
+	roles = data[0].RoleAttributes
 	klog.V(4).Infof("Found identity %s with name: %s", zId, name)
-	return zId, true, nil
+	return zId, roles, nil
 }
 
 // getIdentityAttributes extracts the role attributes from the given roles map.
