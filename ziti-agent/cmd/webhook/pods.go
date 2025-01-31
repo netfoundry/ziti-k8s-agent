@@ -300,15 +300,16 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		reviewResponse.PatchType = &pt
 
 	case "DELETE":
-		if _, _, err := deserializer.Decode(ar.Request.OldObject.Raw, nil, &pod); err != nil {
-			klog.Error(err)
+		pod := corev1.Pod{}
+		if err := json.Unmarshal(ar.Request.Object.Raw, &pod); err != nil {
 			return toV1AdmissionResponse(err)
 		}
 
 		identityName, err := getZitiIdentityName(&pod)
 		if err != nil {
-			klog.Error(err)
-			return toV1AdmissionResponse(err)
+			// Don't block deletion if we can't get the identity name
+			klog.V(4).Infof("Could not get identity name for pod deletion: %v", err)
+			return successResponse(reviewResponse)
 		}
 		klog.V(4).Infof("Identity name is %s", identityName)
 
@@ -316,20 +317,24 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		if err != nil {
 			return failureResponse(reviewResponse, err)
 		}
-
 		zId, found, err := findIdentity(identityName, zec)
 		if err != nil {
-			return failureResponse(reviewResponse, err)
+			// Don't block deletion if we can't find the identity
+			klog.V(4).Infof("Error finding identity for deletion: %v", err)
+			return successResponse(reviewResponse)
 		}
 		if found {
 			err = ze.DeleteIdentity(zId, zec)
 			if err != nil {
-				return failureResponse(reviewResponse, err)
+				klog.Errorf("Failed to delete identity '%s': %v", identityName, err)
+				// Don't block pod deletion even if identity deletion fails
+				return successResponse(reviewResponse)
 			}
-			klog.V(4).Infof("Deleted identity '%s' with id '%s'", identityName, zId)
+			klog.Infof("Deleted identity '%s'", identityName)
 		} else {
-			klog.V(4).Infof("Identity '%s' already deleted", identityName)
+			klog.V(4).Infof("Identity '%s' not found during pod deletion - proceeding with pod deletion", identityName)
 		}
+		return successResponse(reviewResponse)
 
 	case "UPDATE":
 		klog.Infof("Starting webhook operation: %s", ar.Request.Operation)
