@@ -65,7 +65,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/openziti/channel/v3 v3.0.26 // indirect
+	github.com/openziti/channel/v2 v2.0.136 // indirect
 	github.com/openziti/foundation/v2 v2.0.56 // indirect
 	github.com/openziti/identity v1.0.94 // indirect
 	github.com/openziti/metrics v1.2.65 // indirect
