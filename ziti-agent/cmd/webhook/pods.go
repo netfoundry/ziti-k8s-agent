@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -10,12 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pkg/errors"
-	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/kubernetes"
 	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/ziti-edge"
 
 	"github.com/openziti/edge-api/rest_management_api_client"
-	"github.com/openziti/sdk-golang/ziti"
 	"github.com/pkg/errors"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -36,6 +32,9 @@ const (
 	labelAppName      = "app.kubernetes.io/name"
 	labelAppInstance  = "app.kubernetes.io/instance"
 	labelAppComponent = "app.kubernetes.io/component"
+
+	// Annotation key for storing Ziti identity name
+	identityNameAnnotationKey = "identity.openziti.io/name"
 )
 
 type JsonPatchEntry struct {
@@ -131,9 +130,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			return failureResponse(reviewResponse, err)
 		}
 
-		klog.V(4).Infof("Pod Name is %s", pod.Name)
-		klog.V(4).Infof("Pod Namespace is %s", pod.Namespace)
-
+		klog.V(4).Infof("pod.Name is %s, pod.Namespace is %s", pod.Name, pod.Namespace)
 		identityDetails, err := ze.CreateIdentity(identityName, roles, "Device", zec)
 		if err != nil {
 			klog.Errorf("failed to create identity %s: %v", identityName, err)
@@ -146,7 +143,8 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			klog.Errorf("failed to get JWT for identity %s: %v", identityName, err)
 			return failureResponse(reviewResponse, err)
 		}
-		klog.V(4).Infof("successfully created identity '%s' with JWT: '%v'", identityName, identityJwt)
+		klog.V(4).Infof("successfully created identity '%s'", identityName)
+		klog.V(5).Infof("identity '%s' has JWT: '%v'", identityName, identityJwt)
 
 		// add identity dir empty dir volume to pod
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
@@ -155,6 +153,17 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		})
+
+		// Store admission request UID in annotations for identity correlation
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string)
+		}
+		pod.Annotations[identityNameAnnotationKey] = identityName
+		annotationsBytes, err := json.Marshal(pod.Annotations)
+		if err != nil {
+			klog.Error(err)
+			return failureResponse(reviewResponse, err)
+		}
 
 		// create container env vars
 		var containerEnv []corev1.EnvVar
@@ -255,6 +264,11 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 				Path:  "/spec/dnsConfig",
 				Value: dnsConfigBytes,
 			},
+			{
+				OP:    "replace",
+				Path:  "/metadata/annotations",
+				Value: annotationsBytes,
+			},
 		}
 
 		// update Pod Security Context RunAsNonRoot to false
@@ -291,29 +305,12 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			return toV1AdmissionResponse(err)
 		}
 
-		identityName, err := buildZitiIdentityName(sidecarPrefix, &pod)
+		identityName, err := getZitiIdentityName(&pod)
 		if err != nil {
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
 		}
 		klog.V(4).Infof("Identity name is %s", identityName)
-
-		// kubernetes client
-		kc := k.Client()
-		secretData, err := kc.CoreV1().Secrets(pod.Namespace).Get(context.TODO(), identityName, metav1.GetOptions{})
-		if err != nil {
-			klog.Error(err)
-		}
-		if len(secretData.Name) > 0 {
-			err = kc.CoreV1().Secrets(pod.Namespace).Delete(context.TODO(), identityName, metav1.DeleteOptions{})
-			if err != nil {
-				klog.Error(err)
-			} else {
-				klog.Infof("Deleted secret '%s'", identityName)
-			}
-		} else {
-			klog.Infof("Secret '%s' already deleted", identityName)
-		}
 
 		zec, err := ze.Client(&zecfg)
 		if err != nil {
@@ -347,7 +344,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			return toV1AdmissionResponse(err)
 		}
 
-		identityName, err := buildZitiIdentityName(sidecarPrefix, &pod)
+		identityName, err := getZitiIdentityName(&pod)
 		if err != nil {
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
@@ -405,20 +402,19 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 //   A string containing the ID of the identity if found, otherwise an empty string.
 //   A boolean indicating whether the identity was found.
 //   An error object if an error occurred.
-func findIdentity(name string, zec *rest_management_api_client.ZitiEdgeManagement) (zId string, roles string[], err error) {
+func findIdentity(name string, zec *rest_management_api_client.ZitiEdgeManagement) (zId string, ok bool, err error) {
 	identityDetails, err := ze.GetIdentityByName(name, zec)
 	if err != nil {
 		klog.Error(err)
-		return "", nil, err
+		return "", false, err
 	}
 	data := identityDetails.GetPayload().Data
 	if len(data) > 1 {
 		klog.Warningf("Multiple identities found with name %s. Using first match.", name)
 	}
 	zId = *data[0].ID
-	roles = data[0].RoleAttributes
 	klog.V(4).Infof("Found identity %s with name: %s", zId, name)
-	return zId, roles, nil
+	return zId, true, nil
 }
 
 // getIdentityAttributes extracts the role attributes from the given roles map.
@@ -462,6 +458,13 @@ func validateSubdomain(input string) error {
 		return err
 	}
 	return nil
+}
+
+func getZitiIdentityName(pod *corev1.Pod) (string, error) {
+	if name, exists := pod.Annotations[identityNameAnnotationKey]; exists && name != "" {
+		return name, nil
+	}
+	return "", errors.Errorf("identity name annotation '%s' not found", identityNameAnnotationKey)
 }
 
 func buildZitiIdentityName(prefix string, pod *corev1.Pod, uid types.UID) (string, error) {
