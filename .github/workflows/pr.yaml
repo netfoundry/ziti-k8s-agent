@@ -815,7 +815,7 @@ jobs:
 
   cleanup-nf:
     needs: [cleanup-debug-delay]
-    if: always()
+    if: always() && needs.regression_test.result != 'skipped'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
