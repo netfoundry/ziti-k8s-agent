@@ -122,8 +122,8 @@ spec:
           args:
             - webhook
             - --v=${ZITI_AGENT_LOG_LEVEL:-2}
-            - --sidecar-image="${SIDECAR_IMAGE:-docker.io/openziti/ziti-tunnel}"
-            - --sidecar-image-version="${SIDECAR_IMAGE_VERSION:-latest}"
+            - --sidecar-image=${SIDECAR_IMAGE:-docker.io/openziti/ziti-tunnel}
+            - --sidecar-image-version=${SIDECAR_IMAGE_VERSION:-latest}
           env:
             - name: TLS_CERT
               valueFrom:
