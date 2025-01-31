@@ -127,6 +127,16 @@ func lookupEnvVars() {
 		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ADMIN_KEY"})
 	}
 
+	value, ok = os.LookupEnv("ZITI_CTRL_CA_BUNDLE")
+	if ok && len(value) > 0 {
+		zitiCtrlCaBundle = []byte(value)
+		klog.V(5).Infof("CA bundle content from env: %s", string(zitiCtrlCaBundle))
+	}
+	if zitiCtrlCaBundle == nil {
+		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_CTRL_CA_BUNDLE"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_CTRL_CA_BUNDLE"})
+	}
+
 	value, ok = os.LookupEnv("POD_SECURITY_CONTEXT_OVERRIDE")
 	if ok && len(value) > 0 {
 		var err error

@@ -19,10 +19,26 @@ type Config struct {
 
 // Create a Ziti Edge API session with a Ziti Identity configuration
 func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error) {
-    klog.V(5).Infof("Creating Ziti Edge Management client with endpoint: %s, cert subject: %s, and CA pool with %d entries",
+    klog.V(5).Infof("Creating Ziti Edge Management client with endpoint: %s, cert subject: %s",
         cfg.ApiEndpoint, 
         cfg.Cert.Subject, 
-        len(cfg.CAS.Subjects()))
+    )
+
+    klog.V(4).Info("Client Certificate Details:")
+    klog.V(4).Infof("  Subject: %v", cfg.Cert.Subject)
+    klog.V(4).Infof("  Issuer: %v", cfg.Cert.Issuer)
+    klog.V(4).Infof("  Valid from: %v to %v", cfg.Cert.NotBefore, cfg.Cert.NotAfter)
+
+    klog.V(4).Info("CA Pool Certificate Details:")
+    // Check if our client cert is trusted by the CA pool
+    opts := x509.VerifyOptions{
+        Roots: &cfg.CAS,
+    }
+    if _, err := cfg.Cert.Verify(opts); err == nil {
+        klog.V(4).Info("Client certificate is trusted by the CA pool")
+    } else {
+        klog.V(4).Infof("Warning: Client certificate is not trusted by the CA pool: %v", err)
+    }
 
     klog.V(5).Info("Verifying controller with provided CA pool...")
     ok, err := rest_util.VerifyController(cfg.ApiEndpoint, &cfg.CAS)

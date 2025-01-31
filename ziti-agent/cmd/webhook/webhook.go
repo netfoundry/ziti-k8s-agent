@@ -150,13 +150,18 @@ func webhook(cmd *cobra.Command, args []string) {
 	}
 
 	// process ziti admin user certs passed from the file through the command line
-	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" {
+	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" && zitiCtrlCaBundleFile != "" {
 		zitiAdminCert, err = os.ReadFile(zitiCtrlClientCertFile)
 		if err != nil {
 			klog.Info(err)
 		}
 
 		zitiAdminKey, err = os.ReadFile(zitiCtrlClientKeyFile)
+		if err != nil {
+			klog.Info(err)
+		}
+
+		zitiCtrlCaBundle, err = os.ReadFile(zitiCtrlCaBundleFile)
 		if err != nil {
 			klog.Info(err)
 		}

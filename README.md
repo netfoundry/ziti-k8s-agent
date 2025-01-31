@@ -20,11 +20,7 @@ kubectl label namespace {name} openziti/tunnel-enabled="true"
 
 The agent manifest must reflect your choice to select by namespace. Setting `SIDECAR_SELECTORS="namespace"` in the script's environment before generating the manifest will configure the mutating webhook with a `namespaceSelector`.
 
-```yaml
-    namespaceSelector:
-      matchLabels:
-        openziti/tunnel-enabled: "true"
-```
+The `kube-system` namespace is excluded based on the advice in this [Kubernetes documentation](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#avoiding-operating-on-the-kube-system-namespace).
 
 ### Select by Pod
 
@@ -35,12 +31,6 @@ kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"
 ```
 
 The agent manifest must reflect your choice to select by pod. Setting `SIDECAR_SELECTORS="pod"` in the script's environment before generating the manifest will configure the mutating webhook with an `objectSelector`.
-
-```yaml
-    objectSelector:
-      matchLabels:
-        openziti/tunnel-enabled: "true"
-```
 
 ### Select by Namespace and Pod
 

@@ -13,6 +13,7 @@ var (
 	key                    []byte
 	zitiAdminCert          []byte
 	zitiAdminKey           []byte
+	zitiCtrlCaBundle       []byte
 	port                   int
 	sidecarImage           string
 	sidecarImageVersion    string
@@ -21,12 +22,12 @@ var (
 	zitiCtrlMgmtApi        string
 	zitiCtrlClientCertFile string
 	zitiCtrlClientKeyFile  string
+	zitiCtrlCaBundleFile   string
 	podSecurityOverride    bool
 	clusterDnsServiceIP    string
 	searchDomainList       string
 	searchDomains          []string
 	zitiRoleKey            string
-	verbose                bool
 	err                    error
 )
 
@@ -61,6 +62,8 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"Ziti Controller Client Certificate")
 	webhookCmd.Flags().StringVar(&zitiCtrlClientKeyFile, "ziti-ctrl-client-key-file", "",
 		"Ziti Controller Client Private Key")
+	webhookCmd.Flags().StringVar(&zitiCtrlCaBundleFile, "ziti-ctrl-ca-bundle-file", "",
+		"Ziti Controller CA Bundle")
 	webhookCmd.Flags().BoolVar(&podSecurityOverride, "pod-sc-override", false,
 		"Override the security context at pod level, i.e. runAsNonRoot: false")
 	webhookCmd.Flags().StringVar(&clusterDnsServiceIP, "cluster-dns-svc-ip", "",

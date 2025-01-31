@@ -150,6 +150,11 @@ spec:
                 secretKeyRef:
                   name: ziti-agent-identity
                   key:  tls.key
+            - name: ZITI_CTRL_CA_BUNDLE
+              valueFrom:
+                secretKeyRef:
+                  name: ziti-agent-identity
+                  key: tls.ca
             - name: ZITI_ROLE_KEY
               valueFrom:
                 configMapKeyRef:
@@ -183,6 +188,13 @@ metadata:
 webhooks:
   - name: tunnel.ziti.webhook
     admissionReviewVersions: ["v1"]
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
 $(
 IFS=',' read -ra SELECTORS <<< "$SIDECAR_SELECTORS"
 for SELECTOR in "${SELECTORS[@]}"; do
