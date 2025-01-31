@@ -6,7 +6,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version = "0.2.0"
+// Version will be injected at build time
+var Version = "v0.0.0"
 
 func NewVersionCmd() *cobra.Command {
 	return &cobra.Command{

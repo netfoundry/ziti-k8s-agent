@@ -167,8 +167,8 @@ func webhook(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	if zitiAdminCert == nil || zitiAdminKey == nil {
-		klog.Fatal("ziti admin cert and key required, but one or both are missing")
+	if zitiAdminCert == nil || zitiAdminKey == nil || zitiCtrlCaBundle == nil {
+		klog.Fatal("ziti admin cert, key, and root ca bundle are required, but at least one is missing")
 	}
 
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)

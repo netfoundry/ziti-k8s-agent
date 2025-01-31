@@ -1,15 +1,13 @@
-
 # build executable
 FROM golang:1.23 AS build-stage
 WORKDIR /app
+
+# Version can be passed as --build-arg VERSION=$(git describe --tags --always)
+ARG VERSION=development
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -x -v -o build/ ./...
-
-    # without debug
-    # go build -o build/ ./...
-
+    go build -x -v -ldflags="-X 'github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common.Version=${VERSION}'" -o build/ ./...
 
 #
 ##
