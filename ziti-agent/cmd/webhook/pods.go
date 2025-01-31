@@ -58,23 +58,39 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	oldPod := corev1.Pod{}
 
 	// parse ziti admin certs
-	zitiTlsCertificate, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
+	zitiAdminIdentity, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
 	if err != nil {
 		klog.Error(err)
 		return toV1AdmissionResponse(err)
 	}
-	if len(zitiTlsCertificate.Certificate) == 0 {
+	if len(zitiAdminIdentity.Certificate) == 0 {
 		err := fmt.Errorf("no certificates found in TLS key pair")
 		klog.Error(err)
 		return toV1AdmissionResponse(err)
 	}
-	parsedCert, err := x509.ParseCertificate(zitiTlsCertificate.Certificate[0])
+	parsedCert, err := x509.ParseCertificate(zitiAdminIdentity.Certificate[0])
 	if err != nil {
 		klog.Error(err)
 		return toV1AdmissionResponse(err)
 	}
+	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
 
-	zecfg := ze.Config{ApiEndpoint: zitiCtrlMgmtApi, Cert: parsedCert, PrivateKey: zitiTlsCertificate.PrivateKey}
+	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
+	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(zitiCtrlCaBundle) {
+		klog.V(2).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
+		err := fmt.Errorf("failed to append CA certificates from PEM")
+		klog.Error(err)
+		return toV1AdmissionResponse(err)
+	}
+
+	zecfg := ze.Config{
+		ApiEndpoint: zitiCtrlMgmtApi,
+		Cert:        parsedCert,
+		PrivateKey:  zitiAdminIdentity.PrivateKey,
+		CAS:         *certPool,
+	}
 
 	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
 	switch ar.Request.Operation {
