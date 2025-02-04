@@ -136,11 +136,12 @@ webhooks:
   - name: tunnel.ziti.webhook
     admissionReviewVersions: ["v1"]
     namespaceSelector:
-      matchLabels:
-        openziti/tunnel-inject: enable
-    # objectSelector:
-    #   matchLabels:
-    #     openziti/ziti-tunnel: pod
+      matchExpressions:
+      - key: openziti/tunnel-inject
+        operator: In
+        values:
+        - "enable"
+        - "disable"
     rules:
       - operations: ["CREATE","UPDATE","DELETE"]
         apiGroups: [""]
