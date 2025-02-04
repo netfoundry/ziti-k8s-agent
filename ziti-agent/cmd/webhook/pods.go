@@ -249,19 +249,6 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 
 		zName, ok := hasContainer(oldPod.Spec.Containers, fmt.Sprintf("%s-%s", oldPod.Labels["app"], sidecarPrefix))
 		if ok {
-			// secretData, err := kc.CoreV1().Secrets(oldPod.Namespace).Get(context.TODO(), zName, metav1.GetOptions{})
-			// if err != nil {
-			// 	klog.Error(err)
-			// }
-			// if len(secretData.Name) > 0 {
-			// 	err = kc.CoreV1().Secrets(oldPod.Namespace).Delete(context.TODO(), zName, metav1.DeleteOptions{})
-			// 	if err != nil {
-			// 		klog.Error(err)
-			// 	} else {
-			// 		klog.Infof("Secret %s was deleted at %s", zName, secretData.DeletionTimestamp)
-			// 	}
-			// }
-
 			zec, err := ze.Client(&zecfg)
 			if err != nil {
 				return failureResponse(reviewResponse, err)
@@ -325,5 +312,20 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 
 func zitiRouter(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	reviewResponse := admissionv1.AdmissionResponse{}
+	pod := corev1.Pod{}
+	oldPod := corev1.Pod{}
+	// Get Pod and OldPod Details
+	if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, &pod); err != nil {
+		klog.Error(err)
+		return toV1AdmissionResponse(err)
+	}
+	if _, _, err := deserializer.Decode(ar.Request.OldObject.Raw, nil, &oldPod); err != nil {
+		klog.Error(err)
+		return toV1AdmissionResponse(err)
+	}
+	klog.Infof("Admission Request UID: %s", ar.Request.UID)
+	klog.Infof("Admission Request Operation: %s", ar.Request.Operation)
+	klog.Infof("New Router Name %s", pod.GenerateName)
+	klog.Infof("Old Router Name %s", oldPod.GenerateName)
 	return successResponse(reviewResponse)
 }

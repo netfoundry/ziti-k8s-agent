@@ -157,6 +157,30 @@ webhooks:
       caBundle: ""
     sideEffects: None
     timeoutSeconds: 30
+  - name: router.ziti.webhook
+    admissionReviewVersions: ["v1"]
+    namespaceSelector:
+      matchExpressions:
+      - key: openziti/router-manage
+        operator: In
+        values:
+        - "enable"
+        - "disable"
+    rules:
+      - operations: ["CREATE","UPDATE","DELETE"]
+        apiGroups: [""]
+        apiVersions: ["v1","v1beta1"]
+        resources: ["pods"]
+        scope: "*"
+    clientConfig:
+      service:
+        name: ziti-admission-service
+        namespace: ziti
+        port: 443
+        path: "/ziti-router"
+      caBundle: ""
+    sideEffects: None
+    timeoutSeconds: 30
 
 ---
 kind: ClusterRole
