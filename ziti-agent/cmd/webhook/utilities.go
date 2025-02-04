@@ -1,0 +1,45 @@
+package webhook
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
+)
+
+type JsonPatchEntry struct {
+	OP    string          `json:"op"`
+	Path  string          `json:"path"`
+	Value json.RawMessage `json:"value,omitempty"`
+}
+
+func hasContainer(containers []corev1.Container, containerName string) (string, bool) {
+	for _, container := range containers {
+		if strings.HasPrefix(container.Name, containerName) {
+			return container.Name, true
+		}
+	}
+	return "", false
+}
+
+func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.AdmissionResponse {
+	klog.Error(err)
+	ar.Allowed = false
+	ar.Result = &metav1.Status{
+		Status: "Failure",
+		Reason: metav1.StatusReason(fmt.Sprintf("Ziti Controller -  %s", err)),
+	}
+	return &ar
+}
+
+func successResponse(ar admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+	ar.Allowed = true
+	ar.Result = &metav1.Status{
+		Status: "Success",
+	}
+	return &ar
+}

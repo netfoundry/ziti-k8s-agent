@@ -137,7 +137,7 @@ webhooks:
     admissionReviewVersions: ["v1"]
     namespaceSelector:
       matchLabels:
-        openziti/ziti-tunnel: namespace
+        openziti/tunnel-inject: enable
     # objectSelector:
     #   matchLabels:
     #     openziti/ziti-tunnel: pod
@@ -164,12 +164,9 @@ metadata:
   namespace: $WEBHOOK_NAMESPACE
   name: ziti-agent-wh-roles
 rules:
-- apiGroups: [""] # "" indicates the core API group
-  resources: ["secrets"]
-  verbs: ["get", "list", "create", "delete"]
 - apiGroups: [""]
-  resources: ["services"]
-  verbs: ["get"]
+  resources: ["services","namespaces"]
+  verbs: ["get", "list"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

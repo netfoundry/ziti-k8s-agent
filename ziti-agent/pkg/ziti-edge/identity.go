@@ -67,6 +67,19 @@ func GetIdentityByName(name string, edge *rest_management_api_client.ZitiEdgeMan
 	return resp, nil
 }
 
+func GetIdentityById(zId string, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.DetailIdentityOK, error) {
+	req := &identity.DetailIdentityParams{
+		ID:      zId,
+		Context: context.Background(),
+	}
+	req.SetTimeout(30 * time.Second)
+	resp, err := edge.Identity.DetailIdentity(req, nil)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func EnrollIdentity(zId string, edge *rest_management_api_client.ZitiEdgeManagement) (*ziti.Config, error) {
 	p := &identity.DetailIdentityParams{
 		Context: context.Background(),

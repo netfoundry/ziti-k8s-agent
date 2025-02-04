@@ -15,10 +15,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var (
-	runtimeScheme = runtime.NewScheme()
-)
-
 func init() {
 	/*
 		AdmissionReview is registered for version admission.k8s.io/v1 or admission.k8s.io/v1beta1
@@ -92,7 +88,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
 
-		klog.Infof(fmt.Sprintf("Admission Response UID: %s", responseAdmissionReview.Response.UID))
+		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)
@@ -106,7 +102,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
 
-		klog.Infof(fmt.Sprintf("Admission Response UID: %s", responseAdmissionReview.Response.UID))
+		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
@@ -129,6 +125,10 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, newDelegateToV1AdmitHandler(zitiTunnel))
+}
+
+func serveZitiRouterSC(w http.ResponseWriter, r *http.Request) {
+	serve(w, r, newDelegateToV1AdmitHandler(zitiRouter))
 }
 
 func webhook(cmd *cobra.Command, args []string) {
@@ -166,6 +166,7 @@ func webhook(cmd *cobra.Command, args []string) {
 
 	klog.Infof("AC WH Server is listening on port %d", port)
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
+	http.HandleFunc("/ziti-router", serveZitiRouterSC)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),
 		TLSConfig: configTLS(cert, key),
