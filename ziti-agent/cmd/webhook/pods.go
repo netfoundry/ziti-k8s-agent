@@ -1,21 +1,21 @@
 package webhook
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
-	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/kubernetes"
 	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/ziti-edge"
 
 	"github.com/openziti/edge-api/rest_management_api_client"
-	"github.com/openziti/sdk-golang/ziti"
+	"github.com/pkg/errors"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -23,6 +23,18 @@ import (
 
 const (
 	volumeMountName string = "sidecar-ziti-identity"
+
+	// Annotation key for explicitly setting identity name
+	annotationIdentityName = "identity.openziti.io/name"
+
+	// Label keys in order of precedence
+	labelApp          = "app"
+	labelAppName      = "app.kubernetes.io/name"
+	labelAppInstance  = "app.kubernetes.io/instance"
+	labelAppComponent = "app.kubernetes.io/component"
+
+	// Annotation key for storing Ziti identity name
+	identityNameAnnotationKey = "identity.openziti.io/name"
 )
 
 type JsonPatchEntry struct {
@@ -31,92 +43,141 @@ type JsonPatchEntry struct {
 	Value json.RawMessage `json:"value,omitempty"`
 }
 
-func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+// handleZitiTunnelAdmission handles Kubernetes admission requests for pod operations.
+// It processes "CREATE", "DELETE", and "UPDATE" operations to manage Ziti identities
+// and associated Kubernetes resources based on pod annotations and labels.
+//
+// Args:
+//   ar: AdmissionReview object containing the admission request details.
+//
+// Returns:
+//   A pointer to the AdmissionResponse indicating success or failure
+//   of the admission request processing.
+func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	reviewResponse := admissionv1.AdmissionResponse{}
 	pod := corev1.Pod{}
 	oldPod := corev1.Pod{}
 
-	// parse ziti admin certs
-	zitiTlsCertificate, _ := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
-	parsedCert, err := x509.ParseCertificate(zitiTlsCertificate.Certificate[0])
+	// parse ziti admin certs to synchronously (blocking) create a ziti identity
+	zitiAdminIdentity, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
 	if err != nil {
 		klog.Error(err)
 		return toV1AdmissionResponse(err)
 	}
+	if len(zitiAdminIdentity.Certificate) == 0 {
+		err := fmt.Errorf("no certificates found in TLS key pair")
+		klog.Error(err)
+		return toV1AdmissionResponse(err)
+	}
+	parsedCert, err := x509.ParseCertificate(zitiAdminIdentity.Certificate[0])
+	if err != nil {
+		klog.Error(err)
+		return toV1AdmissionResponse(err)
+	}
+	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
+	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
+	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(zitiCtrlCaBundle) {
+		klog.V(2).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
+		err := fmt.Errorf("failed to append CA certificates from PEM")
+		klog.Error(err)
+		return toV1AdmissionResponse(err)
+	}
 
-	zecfg := ze.Config{ApiEndpoint: zitiCtrlMgmtApi, Cert: parsedCert, PrivateKey: zitiTlsCertificate.PrivateKey}
+	zecfg := ze.Config{
+		ApiEndpoint: zitiCtrlMgmtApi,
+		Cert:        parsedCert,
+		PrivateKey:  zitiAdminIdentity.PrivateKey,
+		CAS:         *certPool,
+	}
 
-	klog.Infof(fmt.Sprintf("Admission Request UID: %s", ar.Request.UID))
+	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
 	switch ar.Request.Operation {
 
 	case "CREATE":
-		klog.Infof(fmt.Sprintf("%s", ar.Request.Operation))
-		klog.Infof(fmt.Sprintf("Object: %s", ar.Request.Object.Raw))
-		klog.Infof(fmt.Sprintf("OldObject: %s", ar.Request.OldObject.Raw))
+		klog.V(4).Infof("Object: %s", ar.Request.Object.Raw)
+		klog.V(4).Infof("OldObject: %s", ar.Request.OldObject.Raw)
 		if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, &pod); err != nil {
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
 		}
 
-		klog.Infof(fmt.Sprintf("Pod Labels are %s", pod.Labels))
-		klog.Infof(fmt.Sprintf("Pod Annotations are %s", pod.Annotations))
+		identityName, err := buildZitiIdentityName(sidecarPrefix, &pod, ar.Request.UID)
+		if err != nil {
+			klog.Error(err)
+			return toV1AdmissionResponse(err)
+		}
+		klog.V(4).Infof("deterministic identity name is %s", identityName)
+		klog.V(4).Infof("Pod Labels are %s", pod.Labels)
+		klog.V(4).Infof("Pod Annotations are %s", pod.Annotations)
 
 		roles, ok := getIdentityAttributes(pod.Annotations)
 		if !ok {
-			roles = []string{pod.Labels["app"]}
+			appLabel, exists := pod.Labels["app"]
+			if !exists {
+				err := fmt.Errorf("pod must have either ziti role annotation or an 'app' label")
+				klog.Error(err)
+				return failureResponse(reviewResponse, err)
+			}
+			roles = []string{appLabel}
 		}
 
 		zec, err := ze.Client(&zecfg)
 		if err != nil {
+			err = errors.WithStack(err)
+			klog.Errorf("Error with stack trace: %+v", err)
 			return failureResponse(reviewResponse, err)
 		}
 
-		identityCfg, sidecarIdentityName, err := createAndEnrollIdentity(pod.Labels["app"], ar.Request.UID, roles, zec)
-		if identityCfg == nil {
+		klog.V(4).Infof("pod.Name is %s, pod.Namespace is %s", pod.Name, pod.Namespace)
+		identityDetails, err := ze.CreateIdentity(identityName, roles, "Device", zec)
+		if err != nil {
+			klog.Errorf("failed to create identity %s: %v", identityName, err)
 			return failureResponse(reviewResponse, err)
 		}
+		klog.V(4).Infof("created identity with details: %v", identityDetails)
 
-		secretData, err := json.Marshal(identityCfg)
+		identityJwt, err := ze.GetIdentityEnrollmentJWT(identityDetails.GetPayload().Data.ID, zec)
 		if err != nil {
-			klog.Error(err)
+			klog.Errorf("failed to get JWT for identity %s: %v", identityName, err)
+			return failureResponse(reviewResponse, err)
 		}
+		klog.V(4).Infof("successfully created identity '%s'", identityName)
+		klog.V(5).Infof("identity '%s' has JWT: '%v'", identityName, identityJwt)
 
-		// kubernetes client
-		kc := k.Client()
-
-		//Create secret in the same namespace
-		_, err = kc.CoreV1().Secrets(pod.Namespace).Create(context.TODO(), &corev1.Secret{Data: map[string][]byte{sidecarIdentityName: secretData}, Type: "Opaque", ObjectMeta: metav1.ObjectMeta{Name: sidecarIdentityName}}, metav1.CreateOptions{})
-		if err != nil {
-			klog.Error(err)
-		}
-
-		if len(clusterDnsServiceIP) == 0 {
-			dnsService, err := kc.CoreV1().Services("kube-system").Get(context.TODO(), "kube-dns", metav1.GetOptions{})
-			if err != nil {
-				klog.Error(err)
-			}
-			if len(dnsService.Spec.ClusterIP) != 0 {
-				clusterDnsServiceIP = dnsService.Spec.ClusterIP
-				klog.Infof(fmt.Sprintf("Looked up DNS SVC ClusterIP and is %s", dnsService.Spec.ClusterIP))
-			} else {
-				klog.Info("Looked up DNS SVC ClusterIP and is not found")
-			}
-		}
-
-		// add sidecar volume to pod
+		// add identity dir empty dir volume to pod
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 			Name: volumeMountName,
 			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: sidecarIdentityName,
-					Items:      []corev1.KeyToPath{{Key: sidecarIdentityName, Path: fmt.Sprintf("%v.json", sidecarIdentityName)}},
-				},
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		})
+
+		// Store admission request UID in annotations for identity correlation
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string)
+		}
+		pod.Annotations[identityNameAnnotationKey] = identityName
+		annotationsBytes, err := json.Marshal(pod.Annotations)
+		if err != nil {
+			klog.Error(err)
+			return failureResponse(reviewResponse, err)
+		}
+
+		// create container env vars
+		var containerEnv []corev1.EnvVar
+		if identityJwt != nil {
+			containerEnv = append(containerEnv, corev1.EnvVar{
+				Name:  "ZITI_ENROLL_TOKEN",
+				Value: *identityJwt,
+			})
+		}
 
 		volumesBytes, err := json.Marshal(&pod.Spec.Volumes)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		// update pod dns config and policy
@@ -134,34 +195,26 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
-
 		pod.Spec.DNSPolicy = "None"
 		dnsPolicyBytes, err := json.Marshal(&pod.Spec.DNSPolicy)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		var podSecurityContextBytes []byte
 		var patch []JsonPatchEntry
 		var rootUser int64 = 0
 		var isNotTrue bool = false
-		var isPrivileged = false
+		var isPrivileged = false  // this should always be false because the sidecar does not require privileges on the node outside its kernel namespace - kb - 2025-01-16
 		var sidecarSecurityContext *corev1.SecurityContext
-
-		sidecarSecurityContext = &corev1.SecurityContext{
-			Capabilities: &corev1.Capabilities{
-				Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
-				Drop: []corev1.Capability{"ALL"},
-			},
-			RunAsUser:  &rootUser,
-			Privileged: &isPrivileged,
-		}
 
 		if pod.Spec.SecurityContext != nil && pod.Spec.SecurityContext.RunAsUser != nil {
 			sidecarSecurityContext = &corev1.SecurityContext{
 				Capabilities: &corev1.Capabilities{
-					Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+					Add:  []corev1.Capability{"NET_ADMIN"},  // pruned net_bind because it's only required to bind privileged low ports in proxy mode which is never used by the sidecar - kb - 2025-01-16
 					Drop: []corev1.Capability{"ALL"},
 				},
 				RunAsUser:  &rootUser,
@@ -170,16 +223,23 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		}
 
 		pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
-			Name:            sidecarIdentityName,
+			Name:            identityName,
 			Image:           fmt.Sprintf("%s:%s", sidecarImage, sidecarImageVersion),
-			Args:            []string{"tproxy", "-i", fmt.Sprintf("%v.json", sidecarIdentityName)},
-			VolumeMounts:    []corev1.VolumeMount{{Name: volumeMountName, MountPath: "/netfoundry", ReadOnly: true}},
+			Args:            []string{"tproxy"},
+			Env:            containerEnv,
+			VolumeMounts:    []corev1.VolumeMount{{Name: volumeMountName, MountPath: sidecarIdentityDir}},
 			SecurityContext: sidecarSecurityContext,
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceEphemeralStorage: resource.MustParse("10Mi"),
+				},
+			},
 		})
 
 		containersBytes, err := json.Marshal(&pod.Spec.Containers)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		patch = []JsonPatchEntry{
@@ -204,6 +264,11 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 				Path:  "/spec/dnsConfig",
 				Value: dnsConfigBytes,
 			},
+			{
+				OP:    "replace",
+				Path:  "/metadata/annotations",
+				Value: annotationsBytes,
+			},
 		}
 
 		// update Pod Security Context RunAsNonRoot to false
@@ -212,6 +277,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			podSecurityContextBytes, err = json.Marshal(&pod.Spec.SecurityContext)
 			if err != nil {
 				klog.Error(err)
+				return failureResponse(reviewResponse, err)
 			}
 			patch = append(patch, []JsonPatchEntry{
 				{
@@ -225,6 +291,7 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		patchBytes, err := json.Marshal(&patch)
 		if err != nil {
 			klog.Error(err)
+			return failureResponse(reviewResponse, err)
 		}
 
 		reviewResponse.Patch = patchBytes
@@ -233,50 +300,46 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 		reviewResponse.PatchType = &pt
 
 	case "DELETE":
-		klog.Infof(fmt.Sprintf("%s", ar.Request.Operation))
-		if _, _, err := deserializer.Decode(ar.Request.OldObject.Raw, nil, &pod); err != nil {
-			klog.Error(err)
+		pod := corev1.Pod{}
+		if err := json.Unmarshal(ar.Request.Object.Raw, &pod); err != nil {
 			return toV1AdmissionResponse(err)
 		}
 
-		zName, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], sidecarPrefix))
-		if ok {
-			// kubernetes client
-			kc := k.Client()
-			secretData, err := kc.CoreV1().Secrets(pod.Namespace).Get(context.TODO(), zName, metav1.GetOptions{})
-			if err != nil {
-				klog.Error(err)
-			}
-			if len(secretData.Name) > 0 {
-				err = kc.CoreV1().Secrets(pod.Namespace).Delete(context.TODO(), zName, metav1.DeleteOptions{})
-				if err != nil {
-					klog.Error(err)
-				} else {
-					klog.Infof(fmt.Sprintf("Secret %s was deleted at %s", zName, secretData.DeletionTimestamp))
-				}
-			}
-
-			zec, err := ze.Client(&zecfg)
-			if err != nil {
-				return failureResponse(reviewResponse, err)
-			}
-
-			zId, ok, err := findIdentity(zName, zec)
-			if err != nil {
-				return failureResponse(reviewResponse, err)
-			}
-			if ok {
-				err = ze.DeleteIdentity(zId, zec)
-				if err != nil {
-					return failureResponse(reviewResponse, err)
-				}
-			}
+		identityName, err := getZitiIdentityName(&pod)
+		if err != nil {
+			// Don't block deletion if we can't get the identity name
+			klog.V(4).Infof("Could not get identity name for pod deletion: %v", err)
+			return successResponse(reviewResponse)
 		}
+		klog.V(4).Infof("Identity name is %s", identityName)
+
+		zec, err := ze.Client(&zecfg)
+		if err != nil {
+			return failureResponse(reviewResponse, err)
+		}
+		zId, found, err := findIdentity(identityName, zec)
+		if err != nil {
+			// Don't block deletion if we can't find the identity
+			klog.V(4).Infof("Error finding identity for deletion: %v", err)
+			return successResponse(reviewResponse)
+		}
+		if found {
+			err = ze.DeleteIdentity(zId, zec)
+			if err != nil {
+				klog.Errorf("Failed to delete identity '%s': %v", identityName, err)
+				// Don't block pod deletion even if identity deletion fails
+				return successResponse(reviewResponse)
+			}
+			klog.Infof("Deleted identity '%s'", identityName)
+		} else {
+			klog.V(4).Infof("Identity '%s' not found during pod deletion - proceeding with pod deletion", identityName)
+		}
+		return successResponse(reviewResponse)
 
 	case "UPDATE":
-		klog.Infof(fmt.Sprintf("%s", ar.Request.Operation))
-		klog.Infof(fmt.Sprintf("Object: %s", ar.Request.Object.Raw))
-		klog.Infof(fmt.Sprintf("OldObject: %s", ar.Request.OldObject.Raw))
+		klog.Infof("Starting webhook operation: %s", ar.Request.Operation)
+		klog.V(5).Infof("Object: %s", ar.Request.Object.Raw)
+		klog.V(5).Infof("OldObject: %s", ar.Request.OldObject.Raw)
 		if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, &pod); err != nil {
 			klog.Error(err)
 			return toV1AdmissionResponse(err)
@@ -286,102 +349,96 @@ func zitiTunnel(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 			return toV1AdmissionResponse(err)
 		}
 
-		zName, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], sidecarPrefix))
-		if ok {
-			var roles []string
-			klog.Infof(fmt.Sprintf("Pod Annotations are %s", pod.Annotations))
-			newRoles, newOk := getIdentityAttributes(pod.Annotations)
-			klog.Infof(fmt.Sprintf("OldPod Annotations are %s", oldPod.Annotations))
-			oldRoles, oldOk := getIdentityAttributes(oldPod.Annotations)
+		identityName, err := getZitiIdentityName(&pod)
+		if err != nil {
+			klog.Error(err)
+			return toV1AdmissionResponse(err)
+		}
+		klog.V(4).Infof("identity name is %s", identityName)
 
-			if !newOk && oldOk {
-				// Ziti Annotation is removed
-				roles = []string{pod.Labels["app"]}
-			} else if newOk && !reflect.DeepEqual(newRoles, oldRoles) {
-				//Ziti Annotation is created or updated
-				roles = newRoles
-			} else {
-				roles = []string{}
-			}
+		var roles []string
+		klog.Infof("Pod Annotations are %v", pod.Annotations)
+		newRoles, newOk := getIdentityAttributes(pod.Annotations)
+		klog.Infof("OldPod Annotations are %v", oldPod.Annotations)
+		oldRoles, oldOk := getIdentityAttributes(oldPod.Annotations)
 
-			klog.Infof(fmt.Sprintf("Roles are %s", roles))
-			klog.Infof(fmt.Sprintf("Roles length is %d", len(roles)))
-			// Update only if Ziti Annotation is changed
-			if len(roles) > 0 {
-				zec, err := ze.Client(&zecfg)
-				if err != nil {
-					return failureResponse(reviewResponse, err)
-				}
-				zId, ok, err := findIdentity(zName, zec)
-				if ok {
-					identityDetails, err := ze.PatchIdentity(zId, roles, zec)
-					if err != nil {
-						return failureResponse(reviewResponse, err)
-					}
-					klog.Infof(fmt.Sprintf("Updated Identity Details are %v", identityDetails))
-				}
-			}
+		if !newOk && oldOk {
+			// Ziti Annotation is removed
+			roles = []string{pod.Labels["app"]}
+		} else if newOk && !reflect.DeepEqual(newRoles, oldRoles) {
+			//Ziti Annotation is created or updated
+			roles = newRoles
+		} else {
+			roles = []string{}
 		}
 
-	}
+		klog.V(4).Infof("Roles are %v", roles)
+		klog.V(4).Infof("Roles length is %d", len(roles))
 
+		zec, err := ze.Client(&zecfg)
+		if err != nil {
+			return failureResponse(reviewResponse, err)
+		}
+		zId, found, err := findIdentity(identityName, zec)
+		if err != nil {
+			klog.Error(err)
+			return failureResponse(reviewResponse, err)
+		}
+		if found {
+			identityDetails, err := ze.PatchIdentity(zId, roles, zec)
+			if err != nil {
+				return failureResponse(reviewResponse, err)
+			}
+			klog.V(5).Infof("Updated identity details are %v", identityDetails)
+		} else {
+			klog.Errorf("Identity '%s' not found during pod update operation", identityName)
+		}
+	}
 	return successResponse(reviewResponse)
 }
 
-func hasContainer(containers []corev1.Container, containerName string) (string, bool) {
-	for _, container := range containers {
-		if strings.HasPrefix(container.Name, containerName) {
-			return container.Name, true
-		}
-	}
-	return "", false
-}
-
-func createAndEnrollIdentity(name string, uid types.UID, roles []string, zec *rest_management_api_client.ZitiEdgeManagement) (*ziti.Config, string, error) {
-
-	identityName := fmt.Sprintf("%s-%s%s", trimString(name), sidecarPrefix, uid)
-
-	identityDetails, err := ze.CreateIdentity(identityName, roles, "Device", zec)
-	if err != nil {
-		klog.Error(err)
-		return nil, identityName, err
-	}
-
-	identityCfg, err := ze.EnrollIdentity(identityDetails.GetPayload().Data.ID, zec)
-	if err != nil {
-		klog.Error(err)
-		return nil, identityName, err
-	}
-
-	return identityCfg, identityName, nil
-}
-
-func findIdentity(name string, zec *rest_management_api_client.ZitiEdgeManagement) (string, bool, error) {
-
-	var zId string = ""
-	// klog.Infof(fmt.Sprintf("Deleting Ziti Identity"))
-
+// findIdentity looks up an identity by name and returns its ID if found.
+//
+// Args:
+//   name: The name of the identity to look up.
+//   zec: A reference to the Ziti Edge client.
+//
+// Returns:
+//   A string containing the ID of the identity if found, otherwise an empty string.
+//   A boolean indicating whether the identity was found.
+//   An error object if an error occurred.
+func findIdentity(name string, zec *rest_management_api_client.ZitiEdgeManagement) (zId string, ok bool, err error) {
 	identityDetails, err := ze.GetIdentityByName(name, zec)
 	if err != nil {
 		klog.Error(err)
-		return zId, false, err
+		return "", false, err
 	}
-
-	for _, identityItem := range identityDetails.GetPayload().Data {
-		zId = *identityItem.ID
+	data := identityDetails.GetPayload().Data
+	if len(data) > 1 {
+		klog.Warningf("Multiple identities found with name %s. Using first match.", name)
 	}
-
-	if len(zId) > 0 {
-		klog.Infof(fmt.Sprintf("Identity %s was found", zId))
-		return zId, true, nil
-	}
-
-	return zId, false, nil
+	zId = *data[0].ID
+	klog.V(4).Infof("Found identity %s with name: %s", zId, name)
+	return zId, true, nil
 }
 
+// getIdentityAttributes extracts the role attributes from the given roles map.
+//
+// If the given roles map contains a key matching the value of zitiRoleKey, it
+// is expected to have a value that is a comma-separated list of role attributes.
+// If the value is not empty, it is split into individual strings and returned.
+// If the key is not present, or the value is empty, an empty list is returned
+// and the boolean value is false.
+//
+// Args:
+//   roles: A map of string key-value pairs.
+//
+// Returns:
+//   A list of strings representing the role attributes, and a boolean indicating
+//   whether the key was present in the roles map.
 func getIdentityAttributes(roles map[string]string) ([]string, bool) {
 	// if a ziti role key is not present, use app name as a role attribute
-	value, ok = roles[zitiRoleKey]
+	value, ok := roles[zitiRoleKey]
 	if ok {
 		if len(value) > 0 {
 			return strings.Split(value, ","), true
@@ -390,6 +447,9 @@ func getIdentityAttributes(roles map[string]string) ([]string, bool) {
 	return []string{}, false
 }
 
+// trimString is called when creating Ziti identity names and trims input to a maximum of 24 characters in length. If
+// the string is longer than 24 characters, the first 24 characters are returned. Otherwise, the original string is
+// returned.
 func trimString(input string) string {
 	if len(input) > 24 {
 		return input[:24]
@@ -397,6 +457,76 @@ func trimString(input string) string {
 	return input
 }
 
+func validateSubdomain(input string) error {
+	_, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, input)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getZitiIdentityName(pod *corev1.Pod) (string, error) {
+	if name, exists := pod.Annotations[identityNameAnnotationKey]; exists && name != "" {
+		return name, nil
+	}
+	return "", errors.Errorf("identity name annotation '%s' not found", identityNameAnnotationKey)
+}
+
+func buildZitiIdentityName(prefix string, pod *corev1.Pod, uid types.UID) (string, error) {
+	var name string
+	var isUID bool
+
+	// Check for explicit annotation first
+	if annotatedName, exists := pod.Annotations[annotationIdentityName]; exists && annotatedName != "" {
+		name = annotatedName
+	} else {
+		// Check labels in order of precedence
+		labels := []string{labelApp, labelAppName, labelAppInstance, labelAppComponent}
+		for _, label := range labels {
+			klog.V(4).Infof("Checking label %s=%s", label, pod.Labels[label])
+			if labelName, exists := pod.Labels[label]; exists && labelName != "" {
+				name = labelName
+				klog.V(4).Infof("Set name from label %s=%s", label, name)
+				break
+			}
+		}
+
+		// Check pod name if no label was found
+		if name == "" && pod.Name != "" {
+			name = pod.Name
+		}
+
+		// Fall back to pod UID if nothing else is available
+		if name == "" {
+			return "", fmt.Errorf("failed to build identity name: set pod app label or pod.Name")
+		}
+	}
+
+	// Trim the name if it's too long and not a UID
+	if !isUID {
+		name = trimString(name)
+	}
+
+	// Build the full identity name
+	identityName := fmt.Sprintf("%s-%s-%s-%s", prefix, name, pod.Namespace, uid)
+
+	// Validate the final name
+	if err := validateSubdomain(identityName); err != nil {
+		return "", fmt.Errorf("invalid identity name '%s': %v", identityName, err)
+	}
+
+	return identityName, nil
+}
+
+// failureResponse sets the admission response as a failure with the provided error.
+//
+// Args:
+//   ar: The admissionv1.AdmissionResponse to be updated.
+//   err: The error that occurred, which will be logged and included in the response reason.
+//
+// Returns:
+//   A pointer to the updated admissionv1.AdmissionResponse with Allowed set to false,
+//   and the Result status set to "Failure" with a reason including the error message.
 func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.AdmissionResponse {
 	klog.Error(err)
 	ar.Allowed = false
@@ -407,6 +537,14 @@ func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.A
 	return &ar
 }
 
+// successResponse sets the admission response as a success.
+//
+// Args:
+//   ar: The admissionv1.AdmissionResponse to be updated.
+//
+// Returns:
+//   A pointer to the updated admissionv1.AdmissionResponse with Allowed set to true,
+//   and the Result status set to "Success".
 func successResponse(ar admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 	ar.Allowed = true
 	ar.Result = &metav1.Status{
