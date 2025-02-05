@@ -2,6 +2,7 @@ package zitiedge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -80,7 +81,12 @@ func GetIdentityEnrollmentJWT(zId string, edge *rest_management_api_client.ZitiE
 	if err != nil {
 		return nil, err
 	}
-	klog.V(4).Infof("Parsed token '%s' with claims '%v' for Ziti identity '%v'", jwt.Raw, claims, zId)
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		klog.Warningf("failed to marshal JWT claims to JSON: %v", err)
+	} else {
+		klog.V(4).Infof("Parsed token '%s' with claims:\n%s\nfor Ziti identity '%v'", jwt.Raw, string(claimsJSON), zId)
+	}
 	return &jwt.Raw, nil
 }
 
