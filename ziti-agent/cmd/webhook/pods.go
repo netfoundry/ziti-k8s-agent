@@ -325,7 +325,7 @@ func zitiRouter(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	}
 	klog.Infof("Admission Request UID: %s", ar.Request.UID)
 	klog.Infof("Admission Request Operation: %s", ar.Request.Operation)
-	klog.Infof("New Router Name %s", pod.GenerateName)
-	klog.Infof("Old Router Name %s", oldPod.GenerateName)
+	klog.Infof("New Router %v", pod)
+	klog.Infof("Old Router %v", oldPod)
 	return successResponse(reviewResponse)
 }

@@ -1,6 +1,6 @@
 
 # build executable
-FROM golang:1.22 AS build-stage
+FROM golang:1.23 AS build-stage
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \

@@ -143,7 +143,7 @@ func lookupEnvVars() {
 		if len(clusterDnsServiceIP) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "CLUSTER_DNS_SVC_IP"})
 			klog.Error(&MissingCmdLineVarError{variable: "CLUSTER_DNS_SVC_IP"})
-			klog.Infof(fmt.Sprintf("Custom DNS Server IP not set, Cluster DNS IP will be used instead"))
+			klog.Infof("Custom DNS Server IP not set, Cluster DNS IP will be used instead")
 		}
 	}
 
@@ -154,7 +154,7 @@ func lookupEnvVars() {
 		if len(searchDomainList) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "SEARCH_DOMAIN_LIST"})
 			klog.Error(&MissingCmdLineVarError{variable: "SEARCH_DOMAIN_LIST"})
-			klog.Infof(fmt.Sprintf("Custom DNS search domains not set, Kubernetes default domains will be used instead"))
+			klog.Infof("Custom DNS search domains not set, Kubernetes default domains will be used instead")
 		} else {
 			searchDomains = []string(strings.Split(searchDomainList, " "))
 		}

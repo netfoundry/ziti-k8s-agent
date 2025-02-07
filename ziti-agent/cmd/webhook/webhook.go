@@ -1,6 +1,8 @@
 package webhook
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,9 +10,11 @@ import (
 	"os"
 
 	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common"
+	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/kubernetes"
+	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
+	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admission/v1"
-	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 )
@@ -23,32 +27,32 @@ func init() {
 	addToScheme(scheme)
 }
 
-// admitv1beta1Func handles a v1beta1 admission
-type admitv1beta1Func func(admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse
+// // admitv1beta1Func handles a v1beta1 admission
+// type admitv1beta1Func func(admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse
 
 // admitv1Func handles a v1 admission
 type admitv1Func func(admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
 
 // admitHandler is a handler, for both validators and mutators, that supports multiple admission review versions
 type admitHandler struct {
-	admissionv1beta1 admitv1beta1Func
-	admissionv1      admitv1Func
+	// admissionv1beta1 admitv1beta1Func
+	admissionv1 admitv1Func
 }
 
 func newDelegateToV1AdmitHandler(f admitv1Func) admitHandler {
 	return admitHandler{
-		admissionv1beta1: delegateV1beta1AdmitToV1(f),
-		admissionv1:      f,
+		// admissionv1beta1: delegateV1beta1AdmitToV1(f),
+		admissionv1: f,
 	}
 }
 
-func delegateV1beta1AdmitToV1(f admitv1Func) admitv1beta1Func {
-	return func(review admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse {
-		in := admissionv1.AdmissionReview{Request: convertAdmissionRequestToV1(review.Request)}
-		out := f(in)
-		return convertAdmissionResponseToV1beta1(out)
-	}
-}
+// func delegateV1beta1AdmitToV1(f admitv1Func) admitv1beta1Func {
+// 	return func(review admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse {
+// 		in := admissionv1.AdmissionReview{Request: convertAdmissionRequestToV1(review.Request)}
+// 		out := f(in)
+// 		return convertAdmissionResponseToV1beta1(out)
+// 	}
+// }
 
 // serve handles the http portion of a request prior to handing to an admit function
 func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
@@ -76,19 +80,19 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 	var responseObj runtime.Object
 	switch *gvk {
-	case admissionv1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
-		requestedAdmissionReview, ok := obj.(*admissionv1beta1.AdmissionReview)
-		if !ok {
-			klog.Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
-			return
-		}
-		responseAdmissionReview := &admissionv1beta1.AdmissionReview{}
-		responseAdmissionReview.SetGroupVersionKind(*gvk)
-		responseAdmissionReview.Response = admit.admissionv1beta1(*requestedAdmissionReview)
-		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-		responseObj = responseAdmissionReview
+	// case admissionv1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
+	// 	requestedAdmissionReview, ok := obj.(*admissionv1beta1.AdmissionReview)
+	// 	if !ok {
+	// 		klog.Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
+	// 		return
+	// 	}
+	// 	responseAdmissionReview := &admissionv1beta1.AdmissionReview{}
+	// 	responseAdmissionReview.SetGroupVersionKind(*gvk)
+	// 	responseAdmissionReview.Response = admit.admissionv1beta1(*requestedAdmissionReview)
+	// 	responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
+	// 	responseObj = responseAdmissionReview
 
-		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
+	// 	klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)
@@ -123,19 +127,51 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	}
 }
 
-func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
-	serve(w, r, newDelegateToV1AdmitHandler(zitiTunnel))
+func zitiClientImpl() *rest_management_api_client.ZitiEdgeManagement {
+	// initialize ziti client
+	tlsCertificate, _ := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
+	if err != nil {
+		klog.Error(err)
+	}
+	parsedCert, err := x509.ParseCertificate(tlsCertificate.Certificate[0])
+	if err != nil {
+		klog.Error(err)
+	}
+	cfg := ze.Config{ApiEndpoint: zitiCtrlMgmtApi,
+		Cert:       parsedCert,
+		PrivateKey: tlsCertificate.PrivateKey}
+	zc, err := ze.Client(&cfg)
+	if err != nil {
+		klog.Error(err)
+	}
+	return zc
 }
 
-func serveZitiRouterSC(w http.ResponseWriter, r *http.Request) {
-	serve(w, r, newDelegateToV1AdmitHandler(zitiRouter))
+func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
+	zh := &zitiHandler{
+		KC: &clusterClient{Client: k.Client()},
+		ZC: &zitiClient{Client: zitiClientImpl()},
+		Config: &ZitiConfig{
+			VolumeMountName: "sidecar-ziti-identity",
+			LabelKey:        "openziti/tunnel-inject",
+			RoleKey:         zitiRoleKey,
+			Image:           sidecarImage,
+			ImageVersion:    sidecarImageVersion,
+			Prefix:          sidecarPrefix,
+			labelDelValue:   "disable",
+			labelCrValue:    "enable",
+		}}
+	serve(w, r, newDelegateToV1AdmitHandler(zh.HandleAdmissionRequest))
+}
+
+func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
+	zh := &zitiHandler{}
+	serve(w, r, newDelegateToV1AdmitHandler(zh.HandleAdmissionRequest))
 }
 
 func webhook(cmd *cobra.Command, args []string) {
 
 	klog.Infof("Current version is %s", common.Version)
-
-	// process certs passed from the file through the command line
 	if certFile != "" && keyFile != "" {
 		cert, err = os.ReadFile(certFile)
 		if err != nil {
@@ -165,8 +201,8 @@ func webhook(cmd *cobra.Command, args []string) {
 	lookupEnvVars()
 
 	klog.Infof("AC WH Server is listening on port %d", port)
-	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
-	http.HandleFunc("/ziti-router", serveZitiRouterSC)
+	http.HandleFunc("/ziti-tunnel", serveZitiTunnel)
+	http.HandleFunc("/ziti-router", serveZitiRouter)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),
 		TLSConfig: configTLS(cert, key),
