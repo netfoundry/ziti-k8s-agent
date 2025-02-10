@@ -160,6 +160,7 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 			Prefix:          sidecarPrefix,
 			labelDelValue:   "disable",
 			labelCrValue:    "enable",
+			resolverIp:      clusterDnsServiceIP,
 		}}
 	serve(w, r, newDelegateToV1AdmitHandler(zh.HandleAdmissionRequest))
 }

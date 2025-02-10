@@ -17,13 +17,20 @@ type JsonPatchEntry struct {
 	Value json.RawMessage `json:"value,omitempty"`
 }
 
-func hasContainer(containers []corev1.Container, containerName string) (string, bool) {
+func hasContainer(containers []corev1.Container, prefix string) (string, bool) {
 	for _, container := range containers {
-		if strings.HasPrefix(container.Name, containerName) {
+		if strings.HasPrefix(container.Name, prefix) {
 			return container.Name, true
 		}
 	}
 	return "", false
+}
+
+func trimString(input string) string {
+	if len(input) > 24 {
+		return input[:24]
+	}
+	return input
 }
 
 func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.AdmissionResponse {
