@@ -8,10 +8,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common"
 	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/kubernetes"
-	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
+	zitiedge "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
 	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -27,35 +28,20 @@ func init() {
 	addToScheme(scheme)
 }
 
-// // admitv1beta1Func handles a v1beta1 admission
-// type admitv1beta1Func func(admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse
-
-// admitv1Func handles a v1 admission
 type admitv1Func func(admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
 
-// admitHandler is a handler, for both validators and mutators, that supports multiple admission review versions
 type admitHandler struct {
-	// admissionv1beta1 admitv1beta1Func
 	admissionv1 admitv1Func
 }
 
-func newDelegateToV1AdmitHandler(f admitv1Func) admitHandler {
+func newAdmitHandler(f admitv1Func) admitHandler {
 	return admitHandler{
-		// admissionv1beta1: delegateV1beta1AdmitToV1(f),
 		admissionv1: f,
 	}
 }
 
-// func delegateV1beta1AdmitToV1(f admitv1Func) admitv1beta1Func {
-// 	return func(review admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse {
-// 		in := admissionv1.AdmissionReview{Request: convertAdmissionRequestToV1(review.Request)}
-// 		out := f(in)
-// 		return convertAdmissionResponseToV1beta1(out)
-// 	}
-// }
-
-// serve handles the http portion of a request prior to handing to an admit function
 func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
+
 	var body []byte
 	if r.Body != nil {
 		if data, err := io.ReadAll(r.Body); err == nil {
@@ -80,19 +66,6 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 	var responseObj runtime.Object
 	switch *gvk {
-	// case admissionv1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
-	// 	requestedAdmissionReview, ok := obj.(*admissionv1beta1.AdmissionReview)
-	// 	if !ok {
-	// 		klog.Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
-	// 		return
-	// 	}
-	// 	responseAdmissionReview := &admissionv1beta1.AdmissionReview{}
-	// 	responseAdmissionReview.SetGroupVersionKind(*gvk)
-	// 	responseAdmissionReview.Response = admit.admissionv1beta1(*requestedAdmissionReview)
-	// 	responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-	// 	responseObj = responseAdmissionReview
-
-	// 	klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)
@@ -100,6 +73,13 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 			klog.Errorf("Expected v1.AdmissionReview but got: %T", obj)
 			return
 		}
+		// Report the time taken to process the request
+		startTime := time.Now()
+		defer func() {
+			duration := time.Since(startTime)
+			klog.Infof("Request ID %s processed in %s", requestedAdmissionReview.Request.UID, duration.Round(time.Millisecond))
+		}()
+
 		responseAdmissionReview := &admissionv1.AdmissionReview{}
 		responseAdmissionReview.SetGroupVersionKind(*gvk)
 		responseAdmissionReview.Response = admit.admissionv1(*requestedAdmissionReview)
@@ -127,31 +107,33 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	}
 }
 
-func zitiClientImpl() *rest_management_api_client.ZitiEdgeManagement {
+func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 	// initialize ziti client
 	tlsCertificate, _ := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
 	if err != nil {
-		klog.Error(err)
+		return nil, err
 	}
+
 	parsedCert, err := x509.ParseCertificate(tlsCertificate.Certificate[0])
 	if err != nil {
-		klog.Error(err)
+		return nil, err
 	}
-	cfg := ze.Config{ApiEndpoint: zitiCtrlMgmtApi,
+
+	cfg := zitiedge.Config{ApiEndpoint: zitiCtrlMgmtApi,
 		Cert:       parsedCert,
 		PrivateKey: tlsCertificate.PrivateKey}
-	zc, err := ze.Client(&cfg)
-	if err != nil {
-		klog.Error(err)
-	}
-	return zc
+	zc, err := zitiedge.Client(&cfg)
+
+	return zc, err
 }
 
 func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
-	zh := &zitiHandler{
-		KC: &clusterClient{Client: k.Client()},
-		ZC: &zitiClient{Client: zitiClientImpl()},
-		Config: &ZitiConfig{
+
+	client, err := zitiClientImpl()
+	zh := newZitiHandler(
+		&clusterClient{client: k.Client()},
+		&zitiClient{client: client, err: err},
+		&zitiConfig{
 			VolumeMountName: "sidecar-ziti-identity",
 			LabelKey:        "openziti/tunnel-inject",
 			RoleKey:         zitiRoleKey,
@@ -161,13 +143,22 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 			labelDelValue:   "disable",
 			labelCrValue:    "enable",
 			resolverIp:      clusterDnsServiceIP,
-		}}
-	serve(w, r, newDelegateToV1AdmitHandler(zh.HandleAdmissionRequest))
+		},
+	)
+	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))
+
 }
 
 func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
-	zh := &zitiHandler{}
-	serve(w, r, newDelegateToV1AdmitHandler(zh.HandleAdmissionRequest))
+
+	client, err := zitiClientImpl()
+	zh := newZitiHandler(
+		&clusterClient{client: k.Client()},
+		&zitiClient{client: client, err: err},
+		&zitiConfig{},
+	)
+	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))
+
 }
 
 func webhook(cmd *cobra.Command, args []string) {
@@ -201,7 +192,7 @@ func webhook(cmd *cobra.Command, args []string) {
 	// load env vars to override the command line vars if any
 	lookupEnvVars()
 
-	klog.Infof("AC WH Server is listening on port %d", port)
+	// klog.Infof("AC WH Server is listening on port %d", port)
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnel)
 	http.HandleFunc("/ziti-router", serveZitiRouter)
 	server := &http.Server{

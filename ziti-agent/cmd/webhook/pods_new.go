@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
+	zitiedge "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
 	"github.com/openziti/edge-api/rest_management_api_client"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -23,35 +23,33 @@ var (
 	isNotTrue               bool  = false
 	isPrivileged            bool  = false
 	podSecurityContextBytes []byte
-	patch                   []JsonPatchEntry
-	sidecarSecurityContext  *corev1.SecurityContext
+	jsonPatch               []JsonPatchEntry
+	podSecurityContext      *corev1.SecurityContext
 )
 
 type clusterClient struct {
-	Client *kubernetes.Clientset
+	client *kubernetes.Clientset
 }
 
-// ClusterClient defines the interface for Kubernetes client operations.
-type ClusterClient interface {
-	GetClusterService(ctx context.Context, namespace string, name string, opts metav1.GetOptions) (*corev1.Service, error)
-	FindNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error)
+type clusterClientIntf interface {
+	getClusterService(ctx context.Context, namespace string, name string, opts metav1.GetOptions) (*corev1.Service, error)
+	findNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error)
 }
 
 type zitiClient struct {
-	Client *rest_management_api_client.ZitiEdgeManagement
+	client *rest_management_api_client.ZitiEdgeManagement
+	err    error
 }
 
-// ZitiClient defines the interface for Ziti client operations.
-type ZitiClient interface {
-	DeleteIdentity(id string) error
-	FindIdentity(name string) (string, error)
-	GetIdentityAttributes(roles map[string]string, key string) ([]string, bool)
-	GetIdentityToken(name string, prefix string, uid types.UID, roles []string) (string, string, error)
-	PatchIdentityRoles(id string, roles []string) error
+type zitiClientIntf interface {
+	deleteIdentity(id string) error
+	findIdentity(name string) (string, error)
+	getIdentityAttributes(roles map[string]string, key string) ([]string, bool)
+	getIdentityToken(name string, prefix string, uid types.UID, roles []string) (string, string, error)
+	patchIdentityRoles(id string, roles []string) error
 }
 
-// Ziti Config holds configuration for the sidecar/router container.
-type ZitiConfig struct {
+type zitiConfig struct {
 	Image           string
 	ImageVersion    string
 	VolumeMountName string
@@ -64,36 +62,35 @@ type ZitiConfig struct {
 }
 
 type zitiHandler struct {
-	KC     ClusterClient
-	ZC     ZitiClient
-	Config *ZitiConfig
+	KC     clusterClientIntf
+	ZC     zitiClientIntf
+	Config *zitiConfig
 }
 
-// ZitiHandler defines the interface for Ziti Handler operations.
 type ZitiHandler interface {
-	HandleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
+	handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
 }
 
 // HandleAdmissionRequest handles the admission request for old pod types, i.e. tunnel, router, etc.
-func (zh *zitiHandler) HandleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	reviewResponse := admissionv1.AdmissionResponse{}
 	pod := &corev1.Pod{}
 	oldPod := &corev1.Pod{}
 
 	if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, pod); err != nil {
 		klog.Error(err)
-		return toV1AdmissionResponse(err)
+		return failureResponse(reviewResponse, err)
 	}
 	if _, _, err := deserializer.Decode(ar.Request.OldObject.Raw, nil, oldPod); err != nil {
 		klog.Error(err)
-		return toV1AdmissionResponse(err)
+		return failureResponse(reviewResponse, err)
 	}
 
-	klog.Infof("Admission Request UID: %s", ar.Request.UID)
-	klog.Infof("Admission Request Operation: %s", ar.Request.Operation)
-	klog.Infof("Ziti Config LableKey: %s", zh.Config.LabelKey)
+	// klog.Infof("Admission Request UID: %s", ar.Request.UID)
+	// klog.Infof("Admission Request Operation: %s", ar.Request.Operation)
+	// klog.Infof("Admission Request App Name %s, OldApp Name: %s", pod.Labels["app"], oldPod.Labels["app"])
 
-	deleteLabelFound, err := zh.KC.FindNamespaceByOption(
+	deleteLabelFound, err := zh.KC.findNamespaceByOption(
 		context.Background(),
 		pod.Namespace,
 		metav1.ListOptions{
@@ -109,15 +106,15 @@ func (zh *zitiHandler) HandleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 	switch ar.Request.Operation {
 	case "CREATE":
 		if !deleteLabelFound {
-			klog.Infof("Creating: delete action %v", deleteLabelFound)
+			// klog.Infof("Creating: delete action %v", deleteLabelFound)
 			return zh.handleCreate(pod, ar.Request.UID, reviewResponse)
 		}
 	case "DELETE":
-		klog.Infof("Deleting: delete action %v", deleteLabelFound)
+		// klog.Infof("Deleting: delete action %v", deleteLabelFound)
 		return zh.handleDelete(oldPod, reviewResponse)
 	case "UPDATE":
 		if !deleteLabelFound {
-			klog.Infof("Updating: delete action %v", deleteLabelFound)
+			// klog.Infof("Updating: delete action %v", deleteLabelFound)
 			return zh.handleUpdate(pod, oldPod, reviewResponse)
 		}
 	}
@@ -127,7 +124,7 @@ func (zh *zitiHandler) HandleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 
 func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	roles, ok := zh.ZC.GetIdentityAttributes(
+	roles, ok := zh.ZC.getIdentityAttributes(
 		pod.Annotations,
 		zh.Config.RoleKey,
 	)
@@ -135,7 +132,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 		roles = []string{pod.Labels["app"]}
 	}
 
-	identityToken, identityName, err := zh.ZC.GetIdentityToken(
+	identityToken, identityName, err := zh.ZC.getIdentityToken(
 		pod.Labels["app"],
 		zh.Config.Prefix,
 		uid,
@@ -146,7 +143,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 	}
 
 	if len(zh.Config.resolverIp) == 0 {
-		service, err := zh.KC.GetClusterService(
+		service, err := zh.KC.getClusterService(
 			context.Background(),
 			"kube-system", "kube-dns",
 			metav1.GetOptions{},
@@ -156,7 +153,6 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 		}
 		if len(service.Spec.ClusterIP) != 0 {
 			zh.Config.resolverIp = service.Spec.ClusterIP
-			klog.Infof("Looked up DNS SVC ClusterIP and is %s", service.Spec.ClusterIP)
 		} else {
 			klog.Info("Looked up DNS SVC ClusterIP and is not found")
 		}
@@ -206,7 +202,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 		klog.Error(err)
 	}
 
-	sidecarSecurityContext = &corev1.SecurityContext{
+	podSecurityContext = &corev1.SecurityContext{
 		Capabilities: &corev1.Capabilities{
 			Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
 			Drop: []corev1.Capability{"ALL"},
@@ -216,12 +212,23 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 	}
 
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
-		Name:  identityName,
-		Image: fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
-		Args:  []string{"tproxy", "-i", fmt.Sprintf("%v.json", identityName)},
+		Name:            identityName,
+		Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Args: []string{
+			"tproxy",
+			"-i",
+			fmt.Sprintf("%v.json", identityName),
+		},
 		Env: []corev1.EnvVar{
-			{Name: "ZITI_ENROLL_TOKEN", Value: identityToken},
-			{Name: "NF_REG_NAME", Value: identityName},
+			{
+				Name:  "ZITI_ENROLL_TOKEN",
+				Value: identityToken,
+			},
+			{
+				Name:  "NF_REG_NAME",
+				Value: identityName,
+			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
@@ -230,7 +237,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 				ReadOnly:  false,
 			},
 		},
-		SecurityContext: sidecarSecurityContext,
+		SecurityContext: podSecurityContext,
 	})
 
 	containersBytes, err := json.Marshal(&pod.Spec.Containers)
@@ -238,7 +245,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 		klog.Error(err)
 	}
 
-	patch = []JsonPatchEntry{
+	jsonPatch = []JsonPatchEntry{
 
 		{
 			OP:    "add",
@@ -268,7 +275,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 		if err != nil {
 			klog.Error(err)
 		}
-		patch = append(patch, []JsonPatchEntry{
+		jsonPatch = append(jsonPatch, []JsonPatchEntry{
 			{
 				OP:    "replace",
 				Path:  "/spec/securityContext",
@@ -277,7 +284,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 		}...)
 	}
 
-	patchBytes, err := json.Marshal(&patch)
+	patchBytes, err := json.Marshal(&jsonPatch)
 	if err != nil {
 		klog.Error(err)
 	}
@@ -292,11 +299,13 @@ func (zh *zitiHandler) handleDelete(pod *corev1.Pod, response admissionv1.Admiss
 
 	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], zh.Config.Prefix))
 	if ok {
-		if err := zh.ZC.DeleteIdentity(name); err != nil {
+		if err := zh.ZC.deleteIdentity(name); err != nil {
 			return failureResponse(response, err)
 		}
+	} else {
+		klog.Infof("Container %s not found in Pod %s", name, pod.Name)
 	}
-	klog.Infof("OK has a container: %v", ok)
+
 	return successResponse(response)
 }
 
@@ -305,13 +314,13 @@ func (zh *zitiHandler) handleUpdate(pod *corev1.Pod, oldPod *corev1.Pod, respons
 	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], sidecarPrefix))
 	if ok {
 		var roles []string
-		klog.Infof("Pod Annotations are %s", pod.Annotations)
-		newRoles, newOk := zh.ZC.GetIdentityAttributes(
+		// klog.Infof("Pod Annotations are %s", pod.Annotations)
+		newRoles, newOk := zh.ZC.getIdentityAttributes(
 			pod.Annotations,
 			zh.Config.RoleKey,
 		)
-		klog.Infof("OldPod Annotations are %s", oldPod.Annotations)
-		oldRoles, oldOk := zh.ZC.GetIdentityAttributes(
+		// klog.Infof("OldPod Annotations are %s", oldPod.Annotations)
+		oldRoles, oldOk := zh.ZC.getIdentityAttributes(
 			oldPod.Annotations,
 			zh.Config.RoleKey,
 		)
@@ -324,10 +333,10 @@ func (zh *zitiHandler) handleUpdate(pod *corev1.Pod, oldPod *corev1.Pod, respons
 			roles = []string{}
 		}
 
-		klog.Infof("Roles length is %d", len(roles))
+		// klog.Infof("Roles length is %d", len(roles))
 
 		if len(roles) > 0 {
-			if err := zh.ZC.PatchIdentityRoles(name, roles); err != nil {
+			if err := zh.ZC.patchIdentityRoles(name, roles); err != nil {
 				return failureResponse(response, err)
 			}
 		}
@@ -335,9 +344,9 @@ func (zh *zitiHandler) handleUpdate(pod *corev1.Pod, oldPod *corev1.Pod, respons
 	return successResponse(response)
 }
 
-func (c *clusterClient) FindNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error) {
+func (cc *clusterClient) findNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error) {
 
-	namespaces, err := c.Client.CoreV1().Namespaces().List(ctx, opts)
+	namespaces, err := cc.client.CoreV1().Namespaces().List(ctx, opts)
 	if err != nil {
 		return false, err
 	}
@@ -349,22 +358,25 @@ func (c *clusterClient) FindNamespaceByOption(ctx context.Context, name string, 
 	return false, nil
 }
 
-func (c *clusterClient) GetClusterService(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.Service, error) {
-	return c.Client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+func (cc *clusterClient) getClusterService(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.Service, error) {
+	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
-func (c *zitiClient) GetIdentityToken(name string, prefix string, uid types.UID, roles []string) (string, string, error) {
+func (zc *zitiClient) getIdentityToken(name string, prefix string, uid types.UID, roles []string) (string, string, error) {
+
+	if zc.err != nil {
+		return "", "", zc.err
+	}
 
 	identityName := fmt.Sprintf("%s-%s%s", trimString(name), prefix, uid)
 
-	identityDetails, err := ze.CreateIdentity(identityName, roles, "Device", c.Client)
+	identityDetails, err := zitiedge.CreateIdentity(identityName, roles, "Device", zc.client)
 	if err != nil {
 		klog.Error(err)
-		// return nil, identityName, err
 		return "", identityName, err
 	}
 
-	identityToken, err := ze.GetIdentityById(identityDetails.GetPayload().Data.ID, c.Client)
+	identityToken, err := zitiedge.GetIdentityById(identityDetails.GetPayload().Data.ID, zc.client)
 	if err != nil {
 		klog.Error(err)
 		return "", identityName, err
@@ -372,7 +384,7 @@ func (c *zitiClient) GetIdentityToken(name string, prefix string, uid types.UID,
 	return identityToken.GetPayload().Data.Enrollment.Ott.JWT, identityName, nil
 }
 
-func (c *zitiClient) GetIdentityAttributes(roles map[string]string, key string) ([]string, bool) {
+func (zc *zitiClient) getIdentityAttributes(roles map[string]string, key string) ([]string, bool) {
 
 	value, ok := roles[key]
 	if ok {
@@ -383,9 +395,13 @@ func (c *zitiClient) GetIdentityAttributes(roles map[string]string, key string) 
 	return []string{}, false
 }
 
-func (c *zitiClient) FindIdentity(name string) (string, error) {
+func (zc *zitiClient) findIdentity(name string) (string, error) {
 
-	identityDetails, err := ze.GetIdentityByName(name, c.Client)
+	if zc.err != nil {
+		return "", zc.err
+	}
+
+	identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
 	if err != nil {
 		return "", err
 	}
@@ -396,27 +412,36 @@ func (c *zitiClient) FindIdentity(name string) (string, error) {
 	return "", nil
 }
 
-func (z *zitiClient) DeleteIdentity(name string) error {
-	id, err := z.FindIdentity(name)
+func (zc *zitiClient) deleteIdentity(name string) error {
+
+	if zc.err != nil {
+		return zc.err
+	}
+
+	id, err := zc.findIdentity(name)
 	if err != nil {
 		return err
 	}
 	if id != "" {
-		if err := ze.DeleteIdentity(id, z.Client); err != nil {
+		if err := zitiedge.DeleteIdentity(id, zc.client); err != nil {
 			return err
 		}
-		klog.Info("Deleting Identity: ", id)
 	}
 	return nil
 }
 
-func (z *zitiClient) PatchIdentityRoles(name string, roles []string) error {
-	id, err := z.FindIdentity(name)
+func (zc *zitiClient) patchIdentityRoles(name string, roles []string) error {
+
+	if zc.err != nil {
+		return zc.err
+	}
+
+	id, err := zc.findIdentity(name)
 	if err != nil {
 		return err
 	}
 	if id != "" {
-		if _, err := ze.PatchIdentity(id, roles, z.Client); err != nil {
+		if _, err := zitiedge.PatchIdentity(id, roles, zc.client); err != nil {
 			return err
 		}
 	}
@@ -424,10 +449,10 @@ func (z *zitiClient) PatchIdentityRoles(name string, roles []string) error {
 }
 
 // NewZitiHandler creates a new Ziti Handler.
-func NewZitiHandler(config *ZitiConfig, zc *ZitiClient, kc *ClusterClient) *zitiHandler {
+func newZitiHandler(cc *clusterClient, zc *zitiClient, config *zitiConfig) *zitiHandler {
 	return &zitiHandler{
-		KC:     &clusterClient{},
-		ZC:     &zitiClient{},
+		KC:     cc,
+		ZC:     zc,
 		Config: config,
 	}
 }

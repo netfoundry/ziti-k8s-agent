@@ -37,8 +37,9 @@ func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.A
 	klog.Error(err)
 	ar.Allowed = false
 	ar.Result = &metav1.Status{
-		Status: "Failure",
-		Reason: metav1.StatusReason(fmt.Sprintf("Ziti Controller -  %s", err)),
+		Status:  "Failure",
+		Message: err.Error(),
+		Reason:  metav1.StatusReason(fmt.Sprintf("Ziti Controller -  %s", err)),
 	}
 	return &ar
 }
