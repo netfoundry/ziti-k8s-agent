@@ -6,7 +6,6 @@ import (
 
 	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/openziti/edge-api/rest_util"
-	"k8s.io/klog/v2"
 )
 
 type Config struct {
@@ -28,7 +27,6 @@ func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error)
 
 	ok, err := rest_util.VerifyController(cfg.ApiEndpoint, caPool)
 	if !ok {
-		klog.Errorf("Ziti Controller failed CA validation - %s", err)
 		return nil, err
 	}
 

@@ -8,7 +8,6 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
 )
 
 type JsonPatchEntry struct {
@@ -26,6 +25,17 @@ func hasContainer(containers []corev1.Container, prefix string) (string, bool) {
 	return "", false
 }
 
+func filterMapValuesByKey(values map[string]string, key string) ([]string, bool) {
+
+	value, ok := values[key]
+	if ok {
+		if len(value) > 0 {
+			return strings.Split(value, ","), true
+		}
+	}
+	return []string{}, false
+}
+
 func trimString(input string) string {
 	if len(input) > 24 {
 		return input[:24]
@@ -34,7 +44,6 @@ func trimString(input string) string {
 }
 
 func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.AdmissionResponse {
-	klog.Error(err)
 	ar.Allowed = false
 	ar.Result = &metav1.Status{
 		Status:  "Failure",

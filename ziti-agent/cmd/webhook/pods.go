@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -42,11 +41,10 @@ type zitiClient struct {
 }
 
 type zitiClientIntf interface {
-	deleteIdentity(id string) error
-	findIdentity(name string) (string, error)
-	getIdentityAttributes(roles map[string]string, key string) ([]string, bool)
-	getIdentityToken(name string, prefix string, uid types.UID, roles []string) (string, string, error)
-	patchIdentityRoles(id string, roles []string) error
+	createIdentity(ctx context.Context, uid types.UID, prefix string, key string, pod *corev1.Pod) (string, string, error)
+	deleteIdentity(ctx context.Context, id string) error
+	getIdentityToken(ctx context.Context, name string, id string) (string, error)
+	patchIdentityRoleAttributes(ctx context.Context, id string, key string, newPod *corev1.Pod, oldPod *corev1.Pod) error
 }
 
 type zitiConfig struct {
@@ -67,9 +65,7 @@ type zitiHandler struct {
 	Config *zitiConfig
 }
 
-type ZitiHandler interface {
-	handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
-}
+type ZitiHandlerIntf interface{}
 
 // HandleAdmissionRequest handles the admission request for old pod types, i.e. tunnel, router, etc.
 func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
@@ -107,36 +103,52 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 	case "CREATE":
 		if !deleteLabelFound {
 			// klog.Infof("Creating: delete action %v", deleteLabelFound)
-			return zh.handleCreate(pod, ar.Request.UID, reviewResponse)
+			return zh.handleCreate(
+				context.Background(),
+				pod,
+				ar.Request.UID,
+				reviewResponse,
+			)
 		}
 	case "DELETE":
 		// klog.Infof("Deleting: delete action %v", deleteLabelFound)
-		return zh.handleDelete(oldPod, reviewResponse)
+		return zh.handleDelete(
+			context.Background(),
+			oldPod,
+			reviewResponse,
+		)
 	case "UPDATE":
 		if !deleteLabelFound {
 			// klog.Infof("Updating: delete action %v", deleteLabelFound)
-			return zh.handleUpdate(pod, oldPod, reviewResponse)
+			return zh.handleUpdate(
+				context.Background(),
+				pod,
+				oldPod,
+				reviewResponse,
+			)
 		}
 	}
 
 	return successResponse(reviewResponse)
 }
 
-func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	roles, ok := zh.ZC.getIdentityAttributes(
-		pod.Annotations,
+	identityName, identityId, err := zh.ZC.createIdentity(
+		context.Background(),
+		uid,
+		zh.Config.Prefix,
 		zh.Config.RoleKey,
+		pod,
 	)
-	if !ok {
-		roles = []string{pod.Labels["app"]}
+	if err != nil {
+		return failureResponse(response, err)
 	}
 
-	identityToken, identityName, err := zh.ZC.getIdentityToken(
-		pod.Labels["app"],
-		zh.Config.Prefix,
-		uid,
-		roles,
+	identityToken, err := zh.ZC.getIdentityToken(
+		context.Background(),
+		identityName,
+		identityId,
 	)
 	if err != nil {
 		return failureResponse(response, err)
@@ -232,7 +244,7 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      volumeMountName,
+				Name:      zh.Config.VolumeMountName,
 				MountPath: "/netfoundry",
 				ReadOnly:  false,
 			},
@@ -295,11 +307,11 @@ func (zh *zitiHandler) handleCreate(pod *corev1.Pod, uid types.UID, response adm
 	return successResponse(response)
 }
 
-func (zh *zitiHandler) handleDelete(pod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
 	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], zh.Config.Prefix))
 	if ok {
-		if err := zh.ZC.deleteIdentity(name); err != nil {
+		if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
 			return failureResponse(response, err)
 		}
 	} else {
@@ -309,36 +321,12 @@ func (zh *zitiHandler) handleDelete(pod *corev1.Pod, response admissionv1.Admiss
 	return successResponse(response)
 }
 
-func (zh *zitiHandler) handleUpdate(pod *corev1.Pod, oldPod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], sidecarPrefix))
+	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", trimString(pod.Labels["app"]), zh.Config.Prefix))
 	if ok {
-		var roles []string
-		// klog.Infof("Pod Annotations are %s", pod.Annotations)
-		newRoles, newOk := zh.ZC.getIdentityAttributes(
-			pod.Annotations,
-			zh.Config.RoleKey,
-		)
-		// klog.Infof("OldPod Annotations are %s", oldPod.Annotations)
-		oldRoles, oldOk := zh.ZC.getIdentityAttributes(
-			oldPod.Annotations,
-			zh.Config.RoleKey,
-		)
-
-		if !newOk && oldOk {
-			roles = []string{pod.Labels["app"]}
-		} else if newOk && !reflect.DeepEqual(newRoles, oldRoles) {
-			roles = newRoles
-		} else {
-			roles = []string{}
-		}
-
-		// klog.Infof("Roles length is %d", len(roles))
-
-		if len(roles) > 0 {
-			if err := zh.ZC.patchIdentityRoles(name, roles); err != nil {
-				return failureResponse(response, err)
-			}
+		if err := zh.ZC.patchIdentityRoleAttributes(context.Background(), name, zh.Config.RoleKey, pod, oldPod); err != nil {
+			return failureResponse(response, err)
 		}
 	}
 	return successResponse(response)
@@ -362,66 +350,76 @@ func (cc *clusterClient) getClusterService(ctx context.Context, namespace string
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
-func (zc *zitiClient) getIdentityToken(name string, prefix string, uid types.UID, roles []string) (string, string, error) {
+func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix string, key string, pod *corev1.Pod) (string, string, error) {
 
 	if zc.err != nil {
 		return "", "", zc.err
 	}
+	name := fmt.Sprintf("%s-%s-%s", trimString(pod.Labels["app"]), prefix, uid)
 
-	identityName := fmt.Sprintf("%s-%s%s", trimString(name), prefix, uid)
-
-	identityDetails, err := zitiedge.CreateIdentity(identityName, roles, "Device", zc.client)
-	if err != nil {
-		klog.Error(err)
-		return "", identityName, err
+	roles, ok := filterMapValuesByKey(
+		pod.Annotations,
+		key,
+	)
+	if !ok {
+		roles = []string{pod.Labels["app"]}
 	}
 
-	identityToken, err := zitiedge.GetIdentityById(identityDetails.GetPayload().Data.ID, zc.client)
+	identityDetails, err := zitiedge.CreateIdentity(
+		name,
+		roles,
+		"Device",
+		zc.client,
+	)
 	if err != nil {
-		klog.Error(err)
-		return "", identityName, err
+		return "", "", err
 	}
-	return identityToken.GetPayload().Data.Enrollment.Ott.JWT, identityName, nil
+
+	return name, identityDetails.GetPayload().Data.ID, nil
 }
 
-func (zc *zitiClient) getIdentityAttributes(roles map[string]string, key string) ([]string, bool) {
-
-	value, ok := roles[key]
-	if ok {
-		if len(value) > 0 {
-			return strings.Split(value, ","), true
-		}
-	}
-	return []string{}, false
-}
-
-func (zc *zitiClient) findIdentity(name string) (string, error) {
+func (zc *zitiClient) getIdentityToken(ctx context.Context, name string, id string) (string, error) {
 
 	if zc.err != nil {
 		return "", zc.err
 	}
 
-	identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
+	if id == "" {
+
+		identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
+		if err != nil {
+			return "", err
+		}
+
+		for _, identityItem := range identityDetails.GetPayload().Data {
+			id = *identityItem.ID
+		}
+	}
+
+	detailsById, err := zitiedge.GetIdentityById(id, zc.client)
 	if err != nil {
 		return "", err
 	}
 
-	for _, identityItem := range identityDetails.GetPayload().Data {
-		return *identityItem.ID, nil
-	}
-	return "", nil
+	return detailsById.GetPayload().Data.Enrollment.Ott.JWT, nil
 }
 
-func (zc *zitiClient) deleteIdentity(name string) error {
+func (zc *zitiClient) deleteIdentity(ctx context.Context, name string) error {
 
 	if zc.err != nil {
 		return zc.err
 	}
 
-	id, err := zc.findIdentity(name)
+	id := ""
+	identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
 	if err != nil {
 		return err
 	}
+
+	for _, identityItem := range identityDetails.GetPayload().Data {
+		id = *identityItem.ID
+	}
+
 	if id != "" {
 		if err := zitiedge.DeleteIdentity(id, zc.client); err != nil {
 			return err
@@ -430,16 +428,42 @@ func (zc *zitiClient) deleteIdentity(name string) error {
 	return nil
 }
 
-func (zc *zitiClient) patchIdentityRoles(name string, roles []string) error {
+func (zc *zitiClient) patchIdentityRoleAttributes(ctx context.Context, name string, key string, newPod *corev1.Pod, oldPod *corev1.Pod) error {
+
+	var roles []string
+	id := ""
 
 	if zc.err != nil {
 		return zc.err
 	}
 
-	id, err := zc.findIdentity(name)
+	newRoles, newOk := filterMapValuesByKey(
+		newPod.Annotations,
+		key,
+	)
+
+	oldRoles, oldOk := filterMapValuesByKey(
+		oldPod.Annotations,
+		key,
+	)
+
+	if !newOk && oldOk {
+		roles = []string{newPod.Labels["app"]}
+	} else if newOk && !reflect.DeepEqual(newRoles, oldRoles) {
+		roles = newRoles
+	} else {
+		roles = []string{}
+	}
+
+	identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
 	if err != nil {
 		return err
 	}
+
+	for _, identityItem := range identityDetails.GetPayload().Data {
+		id = *identityItem.ID
+	}
+
 	if id != "" {
 		if _, err := zitiedge.PatchIdentity(id, roles, zc.client); err != nil {
 			return err
