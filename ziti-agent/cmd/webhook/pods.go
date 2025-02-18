@@ -336,7 +336,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 
 	case "DELETE":
 		pod := corev1.Pod{}
-		if err := json.Unmarshal(ar.Request.Object.Raw, &pod); err != nil {
+		if err := json.Unmarshal(ar.Request.OldObject.Raw, &pod); err != nil {
 			reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 		}
 
