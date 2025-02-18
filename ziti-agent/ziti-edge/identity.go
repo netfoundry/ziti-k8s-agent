@@ -85,7 +85,7 @@ func GetIdentityEnrollmentJWT(zId string, edge *rest_management_api_client.ZitiE
 	if err != nil {
 		klog.Warningf("failed to marshal JWT claims to JSON: %v", err)
 	} else {
-		klog.V(4).Infof("Parsed token '%s' with claims:\n%s\nfor Ziti identity '%v'", jwt.Raw, string(claimsJSON), zId)
+		klog.V(5).Infof("Parsed token '%s' with claims:\n%s\nfor Ziti identity '%v'", jwt.Raw, string(claimsJSON), zId)
 	}
 	return &jwt.Raw, nil
 }

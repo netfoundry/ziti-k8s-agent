@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/kubernetes"
 	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/ziti-edge"
 
 	"github.com/openziti/edge-api/rest_management_api_client"
@@ -19,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
 )
 
 const (
@@ -63,27 +65,26 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 	zitiAdminIdentity, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
 	if err != nil {
 		klog.Error(err)
-		return toV1AdmissionResponse(err)
+		reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 	}
 	if len(zitiAdminIdentity.Certificate) == 0 {
 		err := fmt.Errorf("no certificates found in TLS key pair")
 		klog.Error(err)
-		return toV1AdmissionResponse(err)
+		reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 	}
 	parsedCert, err := x509.ParseCertificate(zitiAdminIdentity.Certificate[0])
 	if err != nil {
 		klog.Error(err)
-		return toV1AdmissionResponse(err)
+		reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 	}
 	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
 	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
 	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
 	certPool := x509.NewCertPool()
 	if !certPool.AppendCertsFromPEM(zitiCtrlCaBundle) {
-		klog.V(2).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
 		err := fmt.Errorf("failed to append CA certificates from PEM")
 		klog.Error(err)
-		return toV1AdmissionResponse(err)
+		reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 	}
 
 	zecfg := ze.Config{
@@ -92,6 +93,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		PrivateKey:  zitiAdminIdentity.PrivateKey,
 		CAS:         *certPool,
 	}
+	zecfg.CABundle = zitiCtrlCaBundle
 
 	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
 	switch ar.Request.Operation {
@@ -131,7 +133,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 		}
 
-		klog.V(4).Infof("pod.Name is %s, pod.Namespace is %s", pod.Name, pod.Namespace)
+		klog.V(4).Infof("pod.Name is '%s', pod.Namespace is '%s'", pod.Name, pod.Namespace)
 		identityDetails, err := ze.CreateIdentity(identityName, roles, "Device", zec)
 		if err != nil {
 			klog.Errorf("failed to create identity %s: %v", identityName, err)
@@ -145,7 +147,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 		}
 		klog.V(4).Infof("successfully created identity '%s'", identityName)
-		klog.V(5).Infof("identity '%s' has JWT: '%s'", identityName, *identityJwt)
+		klog.V(5).Infof("enrollment token is '%s'", *identityJwt)
 
 		// add identity dir empty dir volume to pod
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
@@ -168,6 +170,10 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 
 		// create container env vars
 		var containerEnv []corev1.EnvVar
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "ZITI_IDENTITY_DIR",
+			Value: sidecarIdentityDir,
+		})
 		if identityJwt != nil {
 			containerEnv = append(containerEnv, corev1.EnvVar{
 				Name:  "ZITI_ENROLL_TOKEN",
@@ -184,16 +190,39 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 		}
 
+		// kubernetes client
+		kc, err := k.Client()
+		if err != nil {
+			klog.Error(err)
+			reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
+		}
+
+		// get cluster dns ip
+		defaultClusterDnsServiceIP := "10.96.0.10"
+		clusterDnsServiceIP, err := k.GetClusterDNSIP(kc)
+		if err != nil {
+			klog.Warningf("Failed to detect cluster DNS: %v, using default %s", err, defaultClusterDnsServiceIP)
+			clusterDnsServiceIP = defaultClusterDnsServiceIP // Fallback to common default
+		}
+
 		// update pod dns config and policy
 		if len(searchDomains) == 0 {
 			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
 				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
 				Searches:    []string{"cluster.local", fmt.Sprintf("%s.svc", pod.Namespace)},
+				Options: []corev1.PodDNSConfigOption{
+					{Name: "ndots", Value: pointer.String("5")},
+					{Name: "timeout", Value: pointer.String("2")},
+				},
 			}
 		} else {
 			pod.Spec.DNSConfig = &corev1.PodDNSConfig{
 				Nameservers: []string{"127.0.0.1", clusterDnsServiceIP},
 				Searches:    searchDomains,
+				Options: []corev1.PodDNSConfigOption{
+					{Name: "ndots", Value: pointer.String("5")},
+					{Name: "timeout", Value: pointer.String("2")},
+				},
 			}
 		}
 		dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
@@ -201,7 +230,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			klog.Error(err)
 			reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 		}
-		pod.Spec.DNSPolicy = "None"
+		pod.Spec.DNSPolicy = corev1.DNSNone
 		dnsPolicyBytes, err := json.Marshal(&pod.Spec.DNSPolicy)
 		if err != nil {
 			klog.Error(err)
@@ -210,20 +239,14 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 
 		var podSecurityContextBytes []byte
 		var patch []JsonPatchEntry
-		var rootUser int64 = 0
 		var isNotTrue bool = false
-		var isPrivileged = false  // this should always be false because the sidecar does not require privileges on the node outside its kernel namespace - kb - 2025-01-16
-		var sidecarSecurityContext *corev1.SecurityContext
 
-		if pod.Spec.SecurityContext != nil && pod.Spec.SecurityContext.RunAsUser != nil {
-			sidecarSecurityContext = &corev1.SecurityContext{
-				Capabilities: &corev1.Capabilities{
-					Add:  []corev1.Capability{"NET_ADMIN"},  // pruned net_bind because it's only required to bind privileged low ports in proxy mode which is never used by the sidecar - kb - 2025-01-16
-					Drop: []corev1.Capability{"ALL"},
-				},
-				RunAsUser:  &rootUser,
-				Privileged: &isPrivileged,
-			}
+		// Always set the minimal security context needed for tproxy functionality
+		sidecarSecurityContext := &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add:  []corev1.Capability{"NET_ADMIN"},
+				Drop: []corev1.Capability{"ALL"},
+			},
 		}
 
 		// Set container args based on log verbosity
@@ -239,6 +262,7 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			Env:            containerEnv,
 			VolumeMounts:    []corev1.VolumeMount{{Name: volumeMountName, MountPath: sidecarIdentityDir}},
 			SecurityContext: sidecarSecurityContext,
+			ImagePullPolicy: corev1.PullPolicy(sidecarImagePullPolicy),
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceEphemeralStorage: resource.MustParse("10Mi"),
@@ -286,8 +310,9 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			pod.Spec.SecurityContext.RunAsNonRoot = &isNotTrue
 			podSecurityContextBytes, err = json.Marshal(&pod.Spec.SecurityContext)
 			if err != nil {
+				err = errors.Errorf("failed to marshal pod security context: %v", err)
 				klog.Error(err)
-				return failureResponse(reviewResponse, err)
+				reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 			}
 			patch = append(patch, []JsonPatchEntry{
 				{
@@ -300,12 +325,12 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 
 		patchBytes, err := json.Marshal(&patch)
 		if err != nil {
+			err = errors.Errorf("failed to marshal patch: %v", err)
 			klog.Error(err)
-			return failureResponse(reviewResponse, err)
+			reviewResponse.Warnings = append(reviewResponse.Warnings, err.Error())
 		}
 
 		reviewResponse.Patch = patchBytes
-		// klog.Infof(fmt.Sprintf("Patch bytes: %s", reviewResponse.Patch))
 		pt := admissionv1.PatchTypeJSONPatch
 		reviewResponse.PatchType = &pt
 
@@ -413,6 +438,12 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 			klog.Errorf("Identity '%s' not found during pod update operation", identityName)
 		}
 	}
+	reviewResponseJSON, err := json.Marshal(reviewResponse)
+	if err != nil {
+		klog.Warningf("failed to marshal review response to JSON: %v", err)
+	} else {
+		klog.V(5).Infof("Review response before passing to admission handler:\n%s", string(reviewResponseJSON))
+	}
 	return successResponse(reviewResponse)
 }
 
@@ -433,6 +464,10 @@ func findIdentity(name string, zec *rest_management_api_client.ZitiEdgeManagemen
 		return "", false, err
 	}
 	data := identityDetails.GetPayload().Data
+	if len(data) == 0 {
+		klog.Warningf("No identities found with name %s", name)
+		return "", false, nil
+	}
 	if len(data) > 1 {
 		klog.Warningf("Multiple identities found with name %s. Using first match.", name)
 	}

@@ -28,7 +28,9 @@ var (
 	searchDomainList       string
 	searchDomains          []string
 	zitiRoleKey            string
+	sidecarImagePullPolicy string
 	err                    error
+	defaultImagePullPolicy = "IfNotPresent"
 )
 
 func NewWebhookCmd() *cobra.Command {
@@ -72,6 +74,8 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"A list of DNS search domains as space seperated string i.e. 'value1 value2'")
 	webhookCmd.Flags().StringVar(&zitiRoleKey, "ziti-role-key", "",
 		"Ziti Identity Role Key used in pod annotation")
+	webhookCmd.Flags().StringVar(&sidecarImagePullPolicy, "sidecar-image-pull-policy", string(defaultImagePullPolicy),
+		"Image pull policy for sidecar container. One of: Always, IfNotPresent, Never")
 
 	return webhookCmd
 }

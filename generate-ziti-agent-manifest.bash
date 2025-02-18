@@ -20,23 +20,22 @@ for BIN in sed awk jq base64; do
 done
 
 # Function to handle base64 encoding consistently across platforms
-base64_encode() {
+base64_encode_pem() {
     if [[ "$(uname -o)" == "Darwin" ]]; then
-        base64 -b 0
+        sed -E 's/^pem://' | base64 -b 0
     else
-        base64 -w 0
+        sed -E 's/^pem://' | base64 -w 0
     fi
 }
 
 ZITI_MGMT_API=$(jq -r '.ztAPI' "$IDENTITY_FILE" | sed -E 's|/edge/client/v1|/edge/management/v1|')
 
 # Base64 encode the certificates and keys
-IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64_encode)
-IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64_encode)
-IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | sed -E 's/^pem://' | base64_encode)
+IDENTITY_CERT=$(jq -r '.id.cert' "$IDENTITY_FILE" | base64_encode_pem)
+IDENTITY_KEY=$(jq -r '.id.key' "$IDENTITY_FILE" | base64_encode_pem)
+IDENTITY_CA=$(jq -r '.id.ca' "$IDENTITY_FILE" | base64_encode_pem)
 
 cat <<YAML
-
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -124,6 +123,7 @@ spec:
             - --v=${ZITI_AGENT_LOG_LEVEL:-2}
             - --sidecar-image=${SIDECAR_IMAGE:-docker.io/openziti/ziti-tunnel}
             - --sidecar-image-version=${SIDECAR_IMAGE_VERSION:-latest}
+            - --sidecar-image-pull-policy=${SIDECAR_IMAGE_PULL_POLICY:-IfNotPresent}
           env:
             - name: TLS_CERT
               valueFrom:
@@ -203,14 +203,14 @@ for SELECTOR in "${SELECTORS[@]}"; do
       cat <<SEL
     namespaceSelector:
       matchLabels:
-        openziti/tunnel-enabled: "true"
+        tunnel.openziti.io/enabled: "true"
 SEL
     ;;
     pod)
       cat <<SEL
     objectSelector:
       matchLabels:
-        openziti/tunnel-enabled: "true"
+        tunnel.openziti.io/enabled: "true"
 SEL
     ;;
     *)
@@ -275,7 +275,7 @@ type: kubernetes.io/tls
 data:
   tls.crt: $IDENTITY_CERT
   tls.key: $IDENTITY_KEY
-  tls.ca:  $IDENTITY_CA
+  tls.ca: $IDENTITY_CA
 
 ---
 apiVersion: v1

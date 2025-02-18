@@ -656,7 +656,7 @@ jobs:
           # wait for pods to be ready
           kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=240s --context $GKE_CLUSTER
           kubectl get deployments -n test2 -l 'app in (details,productpage,ratings,reviews)' -o name --context $GKE_CLUSTER \
-          | xargs -I DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"openziti/tunnel-enabled":"true"}}}}}' --context $GKE_CLUSTER -n test2
+          | xargs -I DEPLOYMENT kubectl patch DEPLOYMENT -p '{"spec":{"template":{"metadata":{"labels":{"tunnel.openziti.io/enabled":"true"}}}}}' --context $GKE_CLUSTER -n test2
           sleep 5  # Wait for rollout to start (pods to be terminated)
           if kubectl rollout status deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=240s --context $GKE_CLUSTER; then
             kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=240s --context $GKE_CLUSTER
@@ -670,7 +670,7 @@ jobs:
 
           # test the AWS cluster with a namespace selector
           kubectl create namespace test1 --context $AWS_CLUSTER
-          kubectl label namespace test1 "openziti/tunnel-enabled=true" --context $AWS_CLUSTER
+          kubectl label namespace test1 "tunnel.openziti.io/enabled=true" --context $AWS_CLUSTER
           kubectl apply -f ./test/bookinfo.yaml --context $AWS_CLUSTER -n test1
           # wait for pods to be ready
           kubectl wait --for=condition=Available deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=240s --context $AWS_CLUSTER

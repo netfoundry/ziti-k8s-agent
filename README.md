@@ -12,10 +12,10 @@ Choose a method to select the pods: namespace, pod, or both. The sidecar is inje
 
 ### Select by Namespace
 
-Select all pods in namespaces labeled `openziti/tunnel-enabled="true"`.
+Select all pods in namespaces labeled `tunnel.openziti.io/enabled="true"`.
 
 ```bash
-kubectl label namespace {name} openziti/tunnel-enabled="true"
+kubectl label namespace {name} tunnel.openziti.io/enabled="true"
 ```
 
 The agent manifest must reflect your choice to select by namespace. Setting `SIDECAR_SELECTORS="namespace"` in the script's environment before generating the manifest will configure the mutating webhook with a `namespaceSelector`.
@@ -24,22 +24,22 @@ The `kube-system` namespace is excluded based on the advice in this [Kubernetes 
 
 ### Select by Pod
 
-Select pods labeled `openziti/tunnel-enabled="true"` in any namespace.
+Select pods labeled `tunnel.openziti.io/enabled="true"` in any namespace.
 
 ```bash
-kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"openziti/tunnel-enabled":"true"}}}}}'
+kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"tunnel.openziti.io/enabled":"true"}}}}}'
 ```
 
 The agent manifest must reflect your choice to select by pod. Setting `SIDECAR_SELECTORS="pod"` in the script's environment before generating the manifest will configure the mutating webhook with an `objectSelector`.
 
 ### Select by Namespace and Pod
 
-Select pods labeled `openziti/tunnel-enabled="true"` only in namespaces labeled `openziti/tunnel-enabled="true"`.
+Select pods labeled `tunnel.openziti.io/enabled="true"` only in namespaces labeled `tunnel.openziti.io/enabled="true"`.
 
 The agent manifest must reflect your choice to select by pod. Setting `SIDECAR_SELECTORS="namespace,pod"` in the script's environment before generating the manifest will configure the mutating webhook with both `namespaceSelector` and `objectSelector`. Both selectors must match for a pod to be selected.
 
 ```bash
-kubectl label namespace "default" openziti/tunnel-enabled="true"
+kubectl label namespace "default" tunnel.openziti.io/enabled="true"
 ```
 
 ## Specify Ziti roles for Pod Identities

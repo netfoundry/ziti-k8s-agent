@@ -87,7 +87,12 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response = admit.admissionv1beta1(*requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
-		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
+		responseJSON, err := json.Marshal(responseAdmissionReview)
+		if err != nil {
+			klog.Warningf("failed to marshal review response to JSON: %v", err)
+		} else {
+			klog.V(5).Infof("Review response:\n%s", string(responseJSON))
+		}
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)
@@ -100,7 +105,12 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response = admit.admissionv1(*requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
-		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
+		responseJSON, err := json.Marshal(responseAdmissionReview)
+		if err != nil {
+			klog.Warningf("failed to marshal review response to JSON: %v", err)
+		} else {
+			klog.V(5).Infof("Review response:\n%s", string(responseJSON))
+		}
 
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
@@ -109,16 +119,21 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		return
 	}
 
-	klog.V(5).Infof("Admission Response: %s", responseObj)
-	respBytes, err := json.Marshal(responseObj)
+	responseBytes, err := json.Marshal(responseObj)
 	if err != nil {
+		err = fmt.Errorf("failed to marshal review response to JSON: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	} else {
+		klog.V(5).Infof("Review response:\n%s", string(responseBytes))
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(respBytes); err != nil {
+	if _, err := w.Write(responseBytes); err != nil {
+		err = fmt.Errorf("failed to write response: %v", err)
 		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 

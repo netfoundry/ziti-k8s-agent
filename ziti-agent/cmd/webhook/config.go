@@ -100,6 +100,16 @@ func lookupEnvVars() {
 		klog.V(4).Infof("sidecarPrefix: %s", sidecarPrefix)
 	}
 
+	value, ok = os.LookupEnv("SIDECAR_IMAGE_PULL_POLICY")
+	if ok && len(value) > 0 {
+		sidecarImagePullPolicy = value
+	}
+	if len(sidecarImagePullPolicy) == 0 {
+		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE_PULL_POLICY"})
+		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_PULL_POLICY"})
+		sidecarImagePullPolicy = defaultImagePullPolicy
+	}
+
 	value, ok = os.LookupEnv("ZITI_MGMT_API")
 	if ok && len(value) > 0 {
 		zitiCtrlMgmtApi = value
