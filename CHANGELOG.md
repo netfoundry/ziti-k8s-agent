@@ -4,7 +4,12 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [0.2.0] - 2025-01-16
 
-- TODO
+- https://github.com/netfoundry/ziti-k8s-agent/issues/31
+- https://github.com/netfoundry/ziti-k8s-agent/issues/30
+- https://github.com/netfoundry/ziti-k8s-agent/issues/28
+- https://github.com/netfoundry/ziti-k8s-agent/issues/24
+- https://github.com/netfoundry/ziti-k8s-agent/issues/14
+- https://github.com/netfoundry/ziti-k8s-agent/issues/11
 
 ## [0.1.2] - 2024-11-22
 
