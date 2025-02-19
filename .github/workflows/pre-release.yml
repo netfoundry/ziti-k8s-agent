@@ -11,10 +11,10 @@ env:
   IMAGE_REPO: ${{ vars.ZITI_AGENT_IMAGE_REPO || 'netfoundry/ziti-k8s-agent' }}
 
 jobs:
-  build_deploy:
+  pre-release:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: write  # need write to create release
       # remainder are needed if registry is ghcr.io
       #packages: write
       #id-token: write
