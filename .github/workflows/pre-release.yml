@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write  # need write to create release
+      id-token: write  # need write to get OIDC token for generating attestations
       # remainder are needed if registry is ghcr.io
       #packages: write
-      #id-token: write
       #attestations: write
     steps:
       - name: Checkout
