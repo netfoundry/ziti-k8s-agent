@@ -726,11 +726,11 @@ jobs:
 
           # in the GKE test2 cluster, scale the frontend deployments to 0
           kubectl scale deployment -l app=productpage --replicas=0 -n test2 --context $GKE_CLUSTER
-          kubectl wait --for=jsonpath='{.status.replicas}'=0 deployment -l app=productpage -n test2 --timeout=120s --context $GKE_CLUSTER
+          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l app=productpage -n test2 --timeout=120s --context $GKE_CLUSTER
 
           # in the EKS test1 cluster, scale the backend deployments to 0
           kubectl scale deployment -l 'app in (ratings,reviews,details)' --replicas=0 -n test1 --context $AWS_CLUSTER
-          kubectl wait --for=jsonpath='{.status.replicas}'=0 deployment -l 'app in (ratings,reviews,details)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l 'app in (ratings,reviews,details)' -n test1 --timeout=120s --context $AWS_CLUSTER
 
       # this verifies the result has not changed since the last test, despite a radical change of stack topology,
       # relying on Ziti to adapt to the loss of frontend and backend pods
