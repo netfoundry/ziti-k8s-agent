@@ -1,0 +1,37 @@
+version: 2
+updates:
+- package-ecosystem: gomod
+  directory: "/"
+  schedule:
+    interval: daily
+  open-pull-requests-limit: 10
+  groups:
+    openziti:
+      applies-to: version-updates
+      update-types:
+        - "minor"
+        - "patch"
+      patterns:
+        - "*openziti*"
+
+    third-party:
+      applies-to: version-updates
+      update-types:
+        - "minor"
+        - "patch"
+      exclude-patterns:
+        - "*openziti*"
+
+  # bump the ziti-cli container image version on which the agent's image is based
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 20
+    groups:
+      all:
+        applies-to: version-updates
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
