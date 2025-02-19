@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/kubernetes"
-	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/ziti-edge"
+	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/kubernetes"
+	ze "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
 
 	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/pkg/errors"
