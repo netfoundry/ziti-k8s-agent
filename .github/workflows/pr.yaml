@@ -34,11 +34,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY}}
-          # TODO: delete the "DOCKERHUB_*" variants after migrating to openziti org
-          # username: ${{ vars.DOCKER_HUB_API_USER || secrets.DOCKER_HUB_API_USER || secrets.DOCKERHUB_USERNAME }}
-          # password: ${{ secrets.DOCKER_HUB_API_TOKEN || secrets.DOCKERHUB_TOKEN }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ vars.DOCKER_HUB_API_USER || secrets.DOCKER_HUB_API_USER }}
+          password: ${{ secrets.DOCKER_HUB_API_TOKEN }}
 
       - name: Check Run ID
         run: echo ${{ github.run_id }}
