@@ -16,9 +16,9 @@ jobs:
     permissions:
       contents: write  # need write to create release
       id-token: write  # need write to get OIDC token for generating attestations
+      attestations: write  # need write to create attestations
       # remainder are needed if registry is ghcr.io
       #packages: write
-      #attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
