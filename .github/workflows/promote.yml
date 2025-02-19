@@ -1,4 +1,4 @@
-name: release
+name: Promote Stable Release
 
 on:
   release:
@@ -10,7 +10,7 @@ env:
   IMAGE_REPO: ${{ vars.ZITI_AGENT_IMAGE_REPO || 'netfoundry/ziti-k8s-agent' }}
 
 jobs:
-  build_deploy:
+  promote:
     runs-on: ubuntu-latest
     steps:
       - name: Parse Release Version
@@ -50,11 +50,12 @@ jobs:
             type=raw,value=latest,enable=${{startsWith(github.ref_name, 'v')}}
 
             # set (e.g., "v1") major version tag on releases
-            type=match,pattern=v\d+\..*,group=1,enable=${{startsWith(github.ref_name, 'v')}}
+            type=match,pattern=v(\d+)\..*,group=1,enable=${{startsWith(github.ref_name, 'v')}}
 
       - name: Promote Container Image Tags
         shell: bash
         run: |
+          set -o xtrace
           # Convert comma-separated tags to array
           IFS=',' read -ra TAGS <<< "${{ steps.meta.outputs.tags }}"
           
