@@ -50,7 +50,7 @@ jobs:
             type=raw,value=latest,enable=${{startsWith(github.ref_name, 'v')}}
 
             # set (e.g., "v1") major version tag on releases
-            type=match,pattern=v(\d+)\..*,group=1,enable=${{startsWith(github.ref_name, 'v')}}
+            type=match,pattern=(v\d+)\..*,group=1,enable=${{startsWith(github.ref_name, 'v')}}
 
       - name: Promote Container Image Tags
         shell: bash
@@ -66,6 +66,6 @@ jobs:
           for TAG in "${TAGS[@]}"; do
             echo "Creating tag for $TAG -> $VERSION"
             docker buildx imagetools create \
-              --tag ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${TAG} \
+              --tag ${TAG} \
               ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${VERSION}
           done
