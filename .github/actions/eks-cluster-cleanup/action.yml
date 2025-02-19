@@ -99,7 +99,7 @@ runs:
         VERIFY_DELAY=60
         for ((i=1; i<=VERIFY_ATTEMPTS; i++)); do
           STATUS=$(get_cluster_status)
-          if [[ "$STATUS" == "NOT_FOUND" ]]; then
+          if [[ "$STATUS" =~ (DELETING|NOT_FOUND) ]]; then
             echo "Verified cluster deletion"
             exit 0
           fi

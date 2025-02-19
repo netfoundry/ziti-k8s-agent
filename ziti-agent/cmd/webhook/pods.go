@@ -244,7 +244,9 @@ func handleZitiTunnelAdmission(ar admissionv1.AdmissionReview) *admissionv1.Admi
 		// Always set the minimal security context needed for tproxy functionality
 		sidecarSecurityContext := &corev1.SecurityContext{
 			Capabilities: &corev1.Capabilities{
-				Add:  []corev1.Capability{"NET_ADMIN"},
+				// NET_ADMIN is required for tproxy to manipulate firewall rules, and NET_BIND_SERVICE is required to
+				// bind to port 53/UDP
+				Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
 				Drop: []corev1.Capability{"ALL"},
 			},
 		}
