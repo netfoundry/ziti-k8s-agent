@@ -134,15 +134,17 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 		&clusterClient{client: k.Client()},
 		&zitiClient{client: client, err: err},
 		&zitiConfig{
+			ZitiType:        zitiTypeTunnel,
 			VolumeMountName: "sidecar-ziti-identity",
 			LabelKey:        "openziti/tunnel-inject",
 			RoleKey:         zitiRoleKey,
-			Image:           sidecarImage,
-			ImageVersion:    sidecarImageVersion,
-			Prefix:          sidecarPrefix,
-			labelDelValue:   "disable",
-			labelCrValue:    "enable",
-			resolverIp:      clusterDnsServiceIP,
+			Image:           tunnelImage,
+			ImageVersion:    tunnelImageVersion,
+			Prefix:          zitiPrefix,
+			LabelDelValue:   "disable",
+			LabelCrValue:    "enable",
+			ResolverIp:      clusterDnsServiceIP,
+			RouterConfig:    routerConfig{},
 		},
 	)
 	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))
@@ -155,7 +157,21 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 	zh := newZitiHandler(
 		&clusterClient{client: k.Client()},
 		&zitiClient{client: client, err: err},
-		&zitiConfig{},
+		&zitiConfig{
+			ZitiType:      zitiTypeRouter,
+			LabelKey:      "openziti/router-manage",
+			AnnotationKey: "openziti/router-name",
+			LabelDelValue: "disable",
+			LabelCrValue:  "enable",
+			Prefix:        zitiPrefix,
+			ResolverIp:    clusterDnsServiceIP,
+			RouterConfig: routerConfig{
+				Cost:              0,
+				Disabled:          false,
+				IsTunnelerEnabled: false,
+				RoleAttributes:    []string{"router"},
+			},
+		},
 	)
 	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))
 

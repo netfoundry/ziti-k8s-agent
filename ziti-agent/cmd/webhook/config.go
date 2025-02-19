@@ -70,9 +70,9 @@ func lookupEnvVars() {
 
 	value, ok = os.LookupEnv("SIDECAR_IMAGE")
 	if ok && len(value) > 0 {
-		sidecarImage = value
+		tunnelImage = value
 	} else {
-		if len(sidecarImage) == 0 {
+		if len(tunnelImage) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "SIDECAR_IMAGE"})
 			klog.Error(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE"})
 		}
@@ -80,9 +80,9 @@ func lookupEnvVars() {
 
 	value, ok = os.LookupEnv("SIDECAR_IMAGE_VERSION")
 	if ok && len(value) > 0 {
-		sidecarImageVersion = value
+		tunnelImageVersion = value
 	} else {
-		if len(sidecarImageVersion) == 0 {
+		if len(tunnelImageVersion) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "SIDECAR_IMAGE_VERSION"})
 			klog.Error(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_VERSION"})
 		}
@@ -90,9 +90,9 @@ func lookupEnvVars() {
 
 	value, ok = os.LookupEnv("SIDECAR_PREFIX")
 	if ok && len(value) > 0 {
-		sidecarPrefix = value
+		zitiPrefix = value
 	} else {
-		if len(sidecarPrefix) == 0 {
+		if len(zitiPrefix) == 0 {
 			klog.Error(&MissingEnvVarError{variable: "SIDECAR_PREFIX"})
 			klog.Error(&MissingCmdLineVarError{variable: "SIDECAR_PREFIX"})
 		}

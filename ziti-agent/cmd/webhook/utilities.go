@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -11,9 +10,10 @@ import (
 )
 
 type JsonPatchEntry struct {
-	OP    string          `json:"op"`
-	Path  string          `json:"path"`
-	Value json.RawMessage `json:"value,omitempty"`
+	OP    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
+	From  string      `json:"from,omitempty"`
 }
 
 func hasContainer(containers []corev1.Container, prefix string) (string, bool) {

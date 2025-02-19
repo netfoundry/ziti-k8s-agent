@@ -14,9 +14,9 @@ var (
 	zitiAdminCert          []byte
 	zitiAdminKey           []byte
 	port                   int
-	sidecarImage           string
-	sidecarImageVersion    string
-	sidecarPrefix          string
+	tunnelImage            string
+	tunnelImageVersion     string
+	zitiPrefix             string
 	zitiCtrlMgmtApi        string
 	zitiCtrlClientCertFile string
 	zitiCtrlClientKeyFile  string
@@ -48,11 +48,11 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"File containing the default x509 private key matching --tls-cert-file.")
 	webhookCmd.Flags().IntVar(&port, "port", 9443,
 		"Secure port that the webhook listens on")
-	webhookCmd.Flags().StringVar(&sidecarImage, "sidecar-image", "openziti/ziti-tunnel",
+	webhookCmd.Flags().StringVar(&tunnelImage, "sidecar-image", "openziti/ziti-tunnel",
 		"Image of sidecar")
-	webhookCmd.Flags().StringVar(&sidecarImageVersion, "sidecar-image-version", "latest",
+	webhookCmd.Flags().StringVar(&tunnelImageVersion, "sidecar-image-version", "latest",
 		"Image Varsion of sidecar")
-	webhookCmd.Flags().StringVar(&sidecarPrefix, "sidecar-prefix", "zt",
+	webhookCmd.Flags().StringVar(&zitiPrefix, "sidecar-prefix", "zt",
 		"Used in creation of ContainerName to be used as injected sidecar")
 	webhookCmd.Flags().StringVar(&zitiCtrlMgmtApi, "ziti-ctrl-addr", "",
 		"Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1 ")

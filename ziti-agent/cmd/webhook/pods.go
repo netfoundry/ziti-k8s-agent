@@ -10,6 +10,8 @@ import (
 
 	zitiedge "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
 	"github.com/openziti/edge-api/rest_management_api_client"
+	"github.com/openziti/edge-api/rest_management_api_client/edge_router"
+	rest_model_edge "github.com/openziti/edge-api/rest_model"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,12 +20,17 @@ import (
 )
 
 var (
-	rootUser                int64 = 0
-	isNotTrue               bool  = false
-	isPrivileged            bool  = false
-	podSecurityContextBytes []byte
-	jsonPatch               []JsonPatchEntry
-	podSecurityContext      *corev1.SecurityContext
+	rootUser     int64 = 0
+	isNotTrue    bool  = false
+	isPrivileged bool  = false
+	jsonPatch    []JsonPatchEntry
+)
+
+type zitiType string
+
+const (
+	zitiTypeRouter zitiType = "router"
+	zitiTypeTunnel zitiType = "tunnel"
 )
 
 type clusterClient struct {
@@ -43,8 +50,12 @@ type zitiClient struct {
 type zitiClientIntf interface {
 	createIdentity(ctx context.Context, uid types.UID, prefix string, key string, pod *corev1.Pod) (string, string, error)
 	deleteIdentity(ctx context.Context, id string) error
+	deleteZitiRouter(ctx context.Context, name string) error
 	getIdentityToken(ctx context.Context, name string, id string) (string, error)
+	getZitiRouterToken(ctx context.Context, name string) (string, error)
+	findIdentityId(ctx context.Context, name string) (string, error)
 	patchIdentityRoleAttributes(ctx context.Context, id string, key string, newPod *corev1.Pod, oldPod *corev1.Pod) error
+	updateZitiRouter(ctx context.Context, name string, options *rest_model_edge.EdgeRouterCreate) (*edge_router.CreateEdgeRouterCreated, error)
 }
 
 type zitiConfig struct {
@@ -54,9 +65,19 @@ type zitiConfig struct {
 	Prefix          string
 	RoleKey         string
 	LabelKey        string
-	labelDelValue   string
-	labelCrValue    string
-	resolverIp      string
+	LabelDelValue   string
+	LabelCrValue    string
+	ResolverIp      string
+	ZitiType        zitiType
+	AnnotationKey   string
+	RouterConfig    routerConfig
+}
+
+type routerConfig struct {
+	Cost              int64
+	Disabled          bool
+	IsTunnelerEnabled bool
+	RoleAttributes    rest_model_edge.Attributes
 }
 
 type zitiHandler struct {
@@ -65,7 +86,13 @@ type zitiHandler struct {
 	Config *zitiConfig
 }
 
-type ZitiHandlerIntf interface{}
+type ZitiHandler interface {
+	handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
+	handleTunnelCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse
+	handleRouterCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse
+	handleDelete(ctx context.Context, pod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse
+	handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse
+}
 
 // HandleAdmissionRequest handles the admission request for old pod types, i.e. tunnel, router, etc.
 func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
@@ -90,7 +117,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 		context.Background(),
 		pod.Namespace,
 		metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", zh.Config.LabelKey, zh.Config.labelDelValue),
+			LabelSelector: fmt.Sprintf("%s=%s", zh.Config.LabelKey, zh.Config.LabelDelValue),
 		},
 	)
 	if err != nil {
@@ -103,12 +130,30 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 	case "CREATE":
 		if !deleteLabelFound {
 			// klog.Infof("Creating: delete action %v", deleteLabelFound)
-			return zh.handleCreate(
-				context.Background(),
-				pod,
-				ar.Request.UID,
-				reviewResponse,
-			)
+			switch zh.Config.ZitiType {
+			case zitiTypeTunnel:
+
+				return zh.handleTunnelCreate(
+					context.Background(),
+					pod,
+					ar.Request.UID,
+					reviewResponse,
+				)
+
+			case zitiTypeRouter:
+
+				return zh.handleRouterCreate(
+					context.Background(),
+					pod,
+					ar.Request.UID,
+					reviewResponse,
+				)
+
+			default:
+
+				err := fmt.Errorf("ziti type %s not supported", zh.Config.ZitiType)
+				return failureResponse(reviewResponse, err)
+			}
 		}
 	case "DELETE":
 		// klog.Infof("Deleting: delete action %v", deleteLabelFound)
@@ -132,7 +177,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 	return successResponse(reviewResponse)
 }
 
-func (zh *zitiHandler) handleCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
 	identityName, identityId, err := zh.ZC.createIdentity(
 		context.Background(),
@@ -154,7 +199,7 @@ func (zh *zitiHandler) handleCreate(ctx context.Context, pod *corev1.Pod, uid ty
 		return failureResponse(response, err)
 	}
 
-	if len(zh.Config.resolverIp) == 0 {
+	if len(zh.Config.ResolverIp) == 0 {
 		service, err := zh.KC.getClusterService(
 			context.Background(),
 			"kube-system", "kube-dns",
@@ -164,29 +209,18 @@ func (zh *zitiHandler) handleCreate(ctx context.Context, pod *corev1.Pod, uid ty
 			klog.Error(err)
 		}
 		if len(service.Spec.ClusterIP) != 0 {
-			zh.Config.resolverIp = service.Spec.ClusterIP
+			zh.Config.ResolverIp = service.Spec.ClusterIP
 		} else {
 			klog.Info("Looked up DNS SVC ClusterIP and is not found")
 		}
 	}
 
-	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-		Name: zh.Config.VolumeMountName,
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	})
-
-	volumesBytes, err := json.Marshal(&pod.Spec.Volumes)
-	if err != nil {
-		klog.Error(err)
-	}
-
+	dnsConfig := &corev1.PodDNSConfig{}
 	if len(searchDomains) == 0 {
-		pod.Spec.DNSConfig = &corev1.PodDNSConfig{
+		dnsConfig = &corev1.PodDNSConfig{
 			Nameservers: []string{
 				"127.0.0.1",
-				zh.Config.resolverIp,
+				zh.Config.ResolverIp,
 			},
 			Searches: []string{
 				"cluster.local",
@@ -194,104 +228,84 @@ func (zh *zitiHandler) handleCreate(ctx context.Context, pod *corev1.Pod, uid ty
 			},
 		}
 	} else {
-		pod.Spec.DNSConfig = &corev1.PodDNSConfig{
+		dnsConfig = &corev1.PodDNSConfig{
 			Nameservers: []string{
 				"127.0.0.1",
-				zh.Config.resolverIp,
+				zh.Config.ResolverIp,
 			},
 			Searches: searchDomains,
 		}
 	}
 
-	dnsConfigBytes, err := json.Marshal(&pod.Spec.DNSConfig)
-	if err != nil {
-		klog.Error(err)
-	}
-
-	pod.Spec.DNSPolicy = "None"
-	dnsPolicyBytes, err := json.Marshal(&pod.Spec.DNSPolicy)
-	if err != nil {
-		klog.Error(err)
-	}
-
-	podSecurityContext = &corev1.SecurityContext{
-		Capabilities: &corev1.Capabilities{
-			Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
-			Drop: []corev1.Capability{"ALL"},
-		},
-		RunAsUser:  &rootUser,
-		Privileged: &isPrivileged,
-	}
-
-	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
-		Name:            identityName,
-		Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
-		ImagePullPolicy: corev1.PullIfNotPresent,
-		Args: []string{
-			"tproxy",
-			"-i",
-			fmt.Sprintf("%v.json", identityName),
-		},
-		Env: []corev1.EnvVar{
-			{
-				Name:  "ZITI_ENROLL_TOKEN",
-				Value: identityToken,
-			},
-			{
-				Name:  "NF_REG_NAME",
-				Value: identityName,
-			},
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      zh.Config.VolumeMountName,
-				MountPath: "/netfoundry",
-				ReadOnly:  false,
-			},
-		},
-		SecurityContext: podSecurityContext,
-	})
-
-	containersBytes, err := json.Marshal(&pod.Spec.Containers)
-	if err != nil {
-		klog.Error(err)
-	}
-
 	jsonPatch = []JsonPatchEntry{
 
 		{
-			OP:    "add",
-			Path:  "/spec/containers",
-			Value: containersBytes,
+			OP:   "add",
+			Path: "/spec/containers/-",
+			Value: corev1.Container{
+				Name:            identityName,
+				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				Args: []string{
+					"tproxy",
+					"-i",
+					fmt.Sprintf("%v.json", identityName),
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name:  "ZITI_ENROLL_TOKEN",
+						Value: identityToken,
+					},
+					{
+						Name:  "NF_REG_NAME",
+						Value: identityName,
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      zh.Config.VolumeMountName,
+						MountPath: "/netfoundry",
+						ReadOnly:  false,
+					},
+				},
+				SecurityContext: &corev1.SecurityContext{
+					Capabilities: &corev1.Capabilities{
+						Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+						Drop: []corev1.Capability{"ALL"},
+					},
+					RunAsUser:  &rootUser,
+					Privileged: &isPrivileged,
+				},
+			},
 		},
 		{
-			OP:    "add",
-			Path:  "/spec/volumes",
-			Value: volumesBytes,
+			OP:   "add",
+			Path: "/spec/volumes/-",
+			Value: corev1.Volume{
+				Name: zh.Config.VolumeMountName,
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
 		},
 		{
 			OP:    "replace",
 			Path:  "/spec/dnsPolicy",
-			Value: dnsPolicyBytes,
+			Value: "None",
 		},
 		{
 			OP:    "add",
 			Path:  "/spec/dnsConfig",
-			Value: dnsConfigBytes,
+			Value: dnsConfig,
 		},
 	}
 
 	if podSecurityOverride {
-		pod.Spec.SecurityContext.RunAsNonRoot = &isNotTrue
-		podSecurityContextBytes, err = json.Marshal(&pod.Spec.SecurityContext)
-		if err != nil {
-			klog.Error(err)
-		}
 		jsonPatch = append(jsonPatch, []JsonPatchEntry{
 			{
 				OP:    "replace",
 				Path:  "/spec/securityContext",
-				Value: podSecurityContextBytes,
+				Value: &isNotTrue,
 			},
 		}...)
 	}
@@ -307,15 +321,76 @@ func (zh *zitiHandler) handleCreate(ctx context.Context, pod *corev1.Pod, uid ty
 	return successResponse(response)
 }
 
+func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+
+	options := &rest_model_edge.EdgeRouterCreate{
+		AppData:           nil,
+		Cost:              &zh.Config.RouterConfig.Cost,
+		Disabled:          &zh.Config.RouterConfig.Disabled,
+		IsTunnelerEnabled: zh.Config.RouterConfig.IsTunnelerEnabled,
+		Name:              &pod.Name,
+		RoleAttributes:    &zh.Config.RouterConfig.RoleAttributes,
+		Tags:              nil,
+	}
+
+	_, err = zh.ZC.updateZitiRouter(
+		context.Background(),
+		pod.Name,
+		options,
+	)
+	if err != nil {
+		return failureResponse(response, err)
+	}
+
+	identityToken, err := zh.ZC.getZitiRouterToken(
+		context.Background(),
+		pod.Name,
+	)
+	if err != nil {
+		return failureResponse(response, err)
+	}
+
+	jsonPatch = []JsonPatchEntry{
+		{
+			OP:   "add",
+			Path: "/spec/containers/0/env/-",
+			Value: corev1.EnvVar{
+				Name:  "ZITI_ENROLL_TOKEN",
+				Value: identityToken,
+			},
+		},
+	}
+
+	patchBytes, err := json.Marshal(&jsonPatch)
+	if err != nil {
+		klog.Error(err)
+	}
+
+	response.Patch = patchBytes
+	pt := admissionv1.PatchTypeJSONPatch
+	response.PatchType = &pt
+	return successResponse(response)
+}
+
 func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], zh.Config.Prefix))
-	if ok {
-		if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
+	if zh.Config.ZitiType == zitiTypeRouter {
+
+		if err := zh.ZC.deleteZitiRouter(context.Background(), pod.Name); err != nil {
 			return failureResponse(response, err)
 		}
+
 	} else {
-		klog.Infof("Container %s not found in Pod %s", name, pod.Name)
+
+		name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], zh.Config.Prefix))
+		if ok {
+			if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
+				return failureResponse(response, err)
+			}
+		} else {
+			klog.Infof("Container %s not found in Pod %s", name, pod.Name)
+		}
+
 	}
 
 	return successResponse(response)
@@ -355,6 +430,7 @@ func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix 
 	if zc.err != nil {
 		return "", "", zc.err
 	}
+
 	name := fmt.Sprintf("%s-%s-%s", trimString(pod.Labels["app"]), prefix, uid)
 
 	roles, ok := filterMapValuesByKey(
@@ -428,14 +504,33 @@ func (zc *zitiClient) deleteIdentity(ctx context.Context, name string) error {
 	return nil
 }
 
-func (zc *zitiClient) patchIdentityRoleAttributes(ctx context.Context, name string, key string, newPod *corev1.Pod, oldPod *corev1.Pod) error {
+func (zc *zitiClient) findIdentityId(ctx context.Context, name string) (string, error) {
 
-	var roles []string
+	if zc.err != nil {
+		return "", zc.err
+	}
+
 	id := ""
+	identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
+	if err != nil {
+		return "", err
+	}
+
+	for _, identityItem := range identityDetails.GetPayload().Data {
+		id = *identityItem.ID
+	}
+
+	return id, nil
+}
+
+func (zc *zitiClient) patchIdentityRoleAttributes(ctx context.Context, name string, key string, newPod *corev1.Pod, oldPod *corev1.Pod) error {
 
 	if zc.err != nil {
 		return zc.err
 	}
+
+	var roles []string
+	id := ""
 
 	newRoles, newOk := filterMapValuesByKey(
 		newPod.Annotations,
@@ -467,6 +562,74 @@ func (zc *zitiClient) patchIdentityRoleAttributes(ctx context.Context, name stri
 	if id != "" {
 		if _, err := zitiedge.PatchIdentity(id, roles, zc.client); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (zc *zitiClient) getZitiRouterToken(ctx context.Context, name string) (string, error) {
+
+	if zc.err != nil {
+		return "", zc.err
+	}
+
+	routerDetails, err := zitiedge.GetEdgeRouterByName(name, zc.client)
+	if err != nil {
+		return "", err
+	}
+	if len(routerDetails.GetPayload().Data) > 0 {
+		for _, routerItem := range routerDetails.GetPayload().Data {
+			if *routerItem.EnrollmentJWT != "" {
+				return *routerItem.EnrollmentJWT, nil
+			} else {
+				_, err := zitiedge.ReEnrollEdgeRouter(*routerItem.ID, zc.client)
+				if err != nil {
+					return "", err
+				}
+
+			}
+		}
+	}
+	return "", nil
+}
+
+func (zc *zitiClient) updateZitiRouter(ctx context.Context, name string, options *rest_model_edge.EdgeRouterCreate) (*edge_router.CreateEdgeRouterCreated, error) {
+
+	if zc.err != nil {
+		return nil, zc.err
+	}
+
+	routerDetails, err := zitiedge.GetEdgeRouterByName(name, zc.client)
+	if err != nil {
+		return nil, err
+	}
+	if len(routerDetails.GetPayload().Data) == 0 {
+		routerDetails, err := zitiedge.CreateEdgeRouter(name, options, zc.client)
+		if err != nil {
+			return nil, err
+		}
+		return routerDetails, nil
+	}
+	return nil, nil
+}
+
+func (zc *zitiClient) deleteZitiRouter(ctx context.Context, name string) error {
+
+	if zc.err != nil {
+		return zc.err
+	}
+
+	routerDetails, err := zitiedge.GetEdgeRouterByName(name, zc.client)
+	if err != nil {
+		return err
+	}
+	for _, routerItem := range routerDetails.GetPayload().Data {
+		if *routerItem.ID != "" {
+			err = zitiedge.DeleteEdgeRouter(*routerItem.ID, zc.client)
+			if err != nil {
+				return err
+			}
+			break
 		}
 	}
 	return nil
