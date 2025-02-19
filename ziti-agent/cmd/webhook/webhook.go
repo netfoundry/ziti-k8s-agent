@@ -85,8 +85,12 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		responseAdmissionReview.Response = admit.admissionv1(*requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
-
-		klog.Infof("Admission Response UID: %s", responseAdmissionReview.Response.UID)
+		responseJSON, err := json.Marshal(responseAdmissionReview)
+		if err != nil {
+			klog.Warningf("failed to marshal review response to JSON: %v", err)
+		} else {
+			klog.V(5).Infof("Review response:\n%s", string(responseJSON))
+		}
 
 	default:
 		msg := fmt.Sprintf("Unsupported group version kind: %v", gvk)
@@ -95,15 +99,21 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		return
 	}
 
-	respBytes, err := json.Marshal(responseObj)
+	responseBytes, err := json.Marshal(responseObj)
 	if err != nil {
+		err = fmt.Errorf("failed to marshal review response to JSON: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	} else {
+		klog.V(5).Infof("Review response:\n%s", string(responseBytes))
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(respBytes); err != nil {
+	if _, err := w.Write(responseBytes); err != nil {
+		err = fmt.Errorf("failed to write response: %v", err)
 		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
@@ -179,7 +189,12 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 
 func webhook(cmd *cobra.Command, args []string) {
 
-	klog.Infof("Current version is %s", common.Version)
+	// load env vars to override the command line vars if any
+	lookupEnvVars()
+
+	klog.Infof("Running version is %s", common.Version)
+
+	// process certs passed from the file through the command line
 	if certFile != "" && keyFile != "" {
 		cert, err = os.ReadFile(certFile)
 		if err != nil {
@@ -191,9 +206,12 @@ func webhook(cmd *cobra.Command, args []string) {
 			klog.Info(err)
 		}
 	}
+	if cert == nil || key == nil {
+		klog.Fatal("Cert and key required, but one or both are missing")
+	}
 
-	// process ziti admin user certs passed from the file through the command line
-	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" {
+	// process ziti admin user identity passed as separate file paths instead of env vars
+	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" && zitiCtrlCaBundleFile != "" {
 		zitiAdminCert, err = os.ReadFile(zitiCtrlClientCertFile)
 		if err != nil {
 			klog.Info(err)
@@ -203,10 +221,16 @@ func webhook(cmd *cobra.Command, args []string) {
 		if err != nil {
 			klog.Info(err)
 		}
+
+		zitiCtrlCaBundle, err = os.ReadFile(zitiCtrlCaBundleFile)
+		if err != nil {
+			klog.Info(err)
+		}
 	}
 
-	// load env vars to override the command line vars if any
-	lookupEnvVars()
+	if zitiAdminCert == nil || zitiAdminKey == nil || zitiCtrlCaBundle == nil {
+		klog.Fatal("ziti admin cert, key, and root ca bundle are required as env var or run parameter, but at least one is missing")
+	}
 
 	// klog.Infof("AC WH Server is listening on port %d", port)
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnel)
@@ -217,6 +241,7 @@ func webhook(cmd *cobra.Command, args []string) {
 	}
 	err := server.ListenAndServeTLS("", "")
 	if err != nil {
-		panic(err)
+		klog.Fatal(err)
 	}
+	klog.Infof("ziti agent webhook server is listening on port %d", port)
 }

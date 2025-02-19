@@ -26,6 +26,23 @@ var (
 	jsonPatch    []JsonPatchEntry
 )
 
+const (
+	volumeMountName string = "sidecar-ziti-identity"
+
+	// Annotation key for explicitly setting identity name
+	annotationIdentityName = "identity.openziti.io/name"
+
+	// Label keys in order of precedence
+	labelApp          = "app"
+	labelAppName      = "app.kubernetes.io/name"
+	labelAppInstance  = "app.kubernetes.io/instance"
+	labelAppComponent = "app.kubernetes.io/component"
+
+	warnEmptyJWT            = "pod created without ziti enrollment token"
+	warnIdentityNameExtract = "ziti identity name not found in pod annotations"
+	warnIdentityListFailed  = "ziti identity list operation failed in ziti edge"
+)
+
 type zitiType string
 
 const (
@@ -173,7 +190,12 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 			)
 		}
 	}
-
+	reviewResponseJSON, err := json.Marshal(reviewResponse)
+	if err != nil {
+		klog.Warningf("failed to marshal review response to JSON: %v", err)
+	} else {
+		klog.V(5).Infof("Review response before passing to admission handler:\n%s", string(reviewResponseJSON))
+	}
 	return successResponse(reviewResponse)
 }
 

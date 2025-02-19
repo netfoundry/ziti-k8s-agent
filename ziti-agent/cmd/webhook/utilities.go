@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -43,6 +44,14 @@ func trimString(input string) string {
 	return input
 }
 
+func validateSubdomain(input string) error {
+	_, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, input)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.AdmissionResponse {
 	ar.Allowed = false
 	ar.Result = &metav1.Status{
@@ -53,6 +62,16 @@ func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.A
 	return &ar
 }
 
+// successResponse sets the admission response as a success.
+//
+// Args:
+//
+//	ar: The admissionv1.AdmissionResponse to be updated.
+//
+// Returns:
+//
+//	A pointer to the updated admissionv1.AdmissionResponse with Allowed set to true,
+//	and the Result status set to "Success".
 func successResponse(ar admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 	ar.Allowed = true
 	ar.Result = &metav1.Status{

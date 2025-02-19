@@ -18,10 +18,12 @@
 # vendor/
 
 # Go workspace file
-go.work
+/go.work
 
 # build dir
-build
+/build
 
-#config files
-
+# local temp files
+/ziti-agent.yaml
+/ziti-client.yaml
+/test-admin.j*
