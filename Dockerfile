@@ -4,9 +4,13 @@ WORKDIR /app
 
 # Version can be passed as --build-arg VERSION=$(git describe --tags --always)
 ARG VERSION=v0.0.0
-COPY . .
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+
+RUN go env -w GOMODCACHE=/root/.cache/go-build
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/root/.cache/go-build go mod download
+
+COPY ./ziti-agent/ ./ziti-agent/
+RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -x -v -ldflags="-X 'github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common.Version=${VERSION}'" -o build/ ./...
 
 #
