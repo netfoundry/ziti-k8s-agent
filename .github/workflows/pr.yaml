@@ -37,9 +37,6 @@ jobs:
           username: ${{ vars.DOCKER_HUB_API_USER || secrets.DOCKER_HUB_API_USER }}
           password: ${{ secrets.DOCKER_HUB_API_TOKEN }}
 
-      - name: Check Run ID
-        run: echo ${{ github.run_id }}
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -198,9 +195,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Check Run ID
-        run: echo ${{ github.run_id }}
 
       - name: install-kubectl
         uses: azure/setup-kubectl@v3

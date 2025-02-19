@@ -59,6 +59,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_REPO }}:build,mode=max
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
+          build-args: VERSION=${{ github.ref_name }}
           push: true
 
       - name: Generate artifact attestation

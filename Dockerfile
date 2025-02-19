@@ -3,7 +3,7 @@ FROM golang:1.23 AS build-stage
 WORKDIR /app
 
 # Version can be passed as --build-arg VERSION=$(git describe --tags --always)
-ARG VERSION=development
+ARG VERSION=v0.0.0
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
