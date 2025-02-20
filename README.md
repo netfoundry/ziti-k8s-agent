@@ -79,16 +79,41 @@ Pods authorized to bind a Ziti service require that service to have a host addre
 These optional variables will override defaults.
 
 ```bash
-export ZITI_AGENT_NAMESPACE="default"
-export CLUSTER_DNS_ZONE="cluster.local"
+# Namespace configuration
+export ZITI_AGENT_NAMESPACE="default"      # Namespace to deploy the agent
+export CLUSTER_DNS_ZONE="cluster.local"    # Kubernetes cluster DNS zone
+
+# Agent image configuration
+export ZITI_AGENT_IMAGE="docker.io/netfoundry/ziti-k8s-agent"  # Agent container image
+export ZITI_AGENT_IMAGE_PULL_POLICY="IfNotPresent"             # Pull policy for agent image
+export ZITI_AGENT_LOG_LEVEL="2"                                # Log level for agent (0-4)
+
+# Sidecar configuration
+export SIDECAR_IMAGE="docker.io/openziti/ziti-tunnel"         # Sidecar container image
+export SIDECAR_IMAGE_VERSION="latest"                         # Sidecar image version
+export SIDECAR_IMAGE_PULL_POLICY="IfNotPresent"              # Pull policy for sidecar image
+
+# Resource configuration
+export ZITI_AGENT_CPU="100m"              # CPU request for agent
+export ZITI_AGENT_MEMORY="128Mi"          # Memory request for agent
+export ZITI_AGENT_CPU_LIMIT="500m"        # CPU limit for agent
+export ZITI_AGENT_MEMORY_LIMIT="512Mi"    # Memory limit for agent
+
+# Webhook configuration
+export ZITI_AGENT_WEBHOOK_FAILURE_POLICY="Fail"  # How webhook failures are handled (Fail or Ignore)
+
+# DNS configuration
+export SEARCH_DOMAINS=""                   # Space-separated list of DNS search domains
 ```
 
 You may replace the cluster's default DNS search domains for selected pods by exporting `SEARCH_DOMAINS` as a space separated list of domain name suffixes. This may be useful if the selected pods never need to resolve the names of cluster services, but do need to resolve short names in a DNS zone that you control outside of the cluster, e.g., `ziti.internal ziti.example.com`.
 
 ### Generate a Manifest
 
-- `IDENTITY_FILE` is the path to the JSON file from the enrollment step.
-- `SIDECAR_SELECTORS` is a comma-separated list of methods by which pods are selected for sidecar injection: `namespace`, `pod`, or both (see [Select Pods for Sidecar Injection](#select-pods-for-sidecar-injection) above).
+Required environment variables:
+
+- `IDENTITY_FILE` - path to the JSON file from the admin identity enrollment step
+- `SIDECAR_SELECTORS` - comma-separated list of methods by which pods are selected for sidecar injection: `namespace`, `pod`, or both (see [Select Pods for Sidecar Injection](#select-pods-for-sidecar-injection) above)
 
 ```bash
 IDENTITY_FILE="ziti-k8s-agent.json" SIDECAR_SELECTORS="namespace,pod" ./generate-ziti-agent-manifest.bash > ./ziti-agent.yaml

@@ -23,7 +23,5 @@
 # build dir
 /build
 
-# local temp files
-/ziti-agent.yaml
-/ziti-client.yaml
-/test-admin.j*
+# local test files
+/test-*

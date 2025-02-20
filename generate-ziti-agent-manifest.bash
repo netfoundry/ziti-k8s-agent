@@ -189,6 +189,13 @@ webhooks:
   - name: tunnel.ziti.webhook
     admissionReviewVersions: ["v1"]
     matchPolicy: Equivalent
+    failurePolicy: ${ZITI_AGENT_WEBHOOK_FAILURE_POLICY:-Fail}
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
 $(
 IFS=',' read -ra SELECTORS <<< "$SIDECAR_SELECTORS"
 for SELECTOR in "${SELECTORS[@]}"; do

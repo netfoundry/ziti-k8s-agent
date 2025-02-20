@@ -113,5 +113,6 @@ func DeleteIdentity(zId string, edge *rest_management_api_client.ZitiEdgeManagem
 	if err != nil {
 		return err
 	}
+	klog.Infof("Ziti identity '%v' was deleted", zId)
 	return nil
 }

@@ -183,7 +183,7 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 		&zitiClient{client: zc},
 		&zitiConfig{
 			ZitiType:        zitiTypeTunnel,
-			VolumeMountName: "sidecar-ziti-identity",
+			VolumeMountName: "ziti-identity",
 			LabelKey:        "tunnel.openziti.io/enabled",
 			RoleKey:         zitiRoleKey,
 			Image:           sidecarImage,

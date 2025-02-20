@@ -27,6 +27,7 @@ var (
 )
 
 const (
+	volumeMountName string = "ziti-identity"
 
 	// Annotation key for explicitly setting identity name
 	annotationIdentityName = "identity.openziti.io/name"
@@ -131,11 +132,11 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 
 	if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, pod); err != nil {
 		klog.Error(err)
-		return failureResponse(reviewResponse, err)
+		return failureResponse(reviewResponse, fmt.Errorf("failed to decode pod object: %v", err))
 	}
 	if _, _, err := deserializer.Decode(ar.Request.OldObject.Raw, nil, oldPod); err != nil {
 		klog.Error(err)
-		return failureResponse(reviewResponse, err)
+		return failureResponse(reviewResponse, fmt.Errorf("failed to decode old pod object: %v", err))
 	}
 
 	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
@@ -247,6 +248,8 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 		return failureResponse(response, err)
 	}
 
+	// get cluster dns ip
+	defaultClusterDnsServiceIP := "10.96.0.10"
 	if len(zh.Config.ResolverIp) == 0 {
 		service, err := zh.KC.getClusterService(
 			context.Background(),
@@ -259,7 +262,8 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 		if len(service.Spec.ClusterIP) != 0 {
 			zh.Config.ResolverIp = service.Spec.ClusterIP
 		} else {
-			klog.Info("Looked up DNS SVC ClusterIP and is not found")
+			zh.Config.ResolverIp = defaultClusterDnsServiceIP
+			klog.Warningf("Failed to look up DNS SVC ClusterIP, using default: %s", defaultClusterDnsServiceIP)
 		}
 	}
 
@@ -294,19 +298,11 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 				Name:            identityName,
 				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
 				ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
-				Args: []string{
-					"tproxy",
-					"-i",
-					fmt.Sprintf("%v.json", identityName),
-				},
+				Args: []string{"tproxy"},
 				Env: []corev1.EnvVar{
 					{
 						Name:  "ZITI_ENROLL_TOKEN",
 						Value: identityToken,
-					},
-					{
-						Name:  "NF_REG_NAME",
-						Value: identityName,
 					},
 					{
 						Name:  "ZITI_IDENTITY_DIR",
@@ -436,13 +432,13 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	} else {
 
-		name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], zh.Config.Prefix))
+		name, ok := hasContainer(pod.Spec.Containers, zh.Config.Prefix)
 		if ok {
 			if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
 				return failureResponse(response, err)
 			}
 		} else {
-			klog.Infof("Container %s not found in Pod %s", name, pod.Name)
+			klog.Errorf("Not trying to delete ziti identity because there are no containers with prefix '%s'", zh.Config.Prefix)
 		}
 
 	}
