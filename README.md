@@ -86,7 +86,7 @@ export CLUSTER_DNS_ZONE="cluster.local"    # Kubernetes cluster DNS zone
 # Agent image configuration
 export ZITI_AGENT_IMAGE="docker.io/netfoundry/ziti-k8s-agent"  # Agent container image
 export ZITI_AGENT_IMAGE_PULL_POLICY="IfNotPresent"             # Pull policy for agent image
-export ZITI_AGENT_LOG_LEVEL="2"                                # Log level for agent (0-4)
+export ZITI_AGENT_LOG_LEVEL="2"                                # Log level for agent (0-5)
 
 # Sidecar configuration
 export SIDECAR_IMAGE="docker.io/openziti/ziti-tunnel"         # Sidecar container image
