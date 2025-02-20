@@ -27,7 +27,6 @@ var (
 )
 
 const (
-	volumeMountName string = "sidecar-ziti-identity"
 
 	// Annotation key for explicitly setting identity name
 	annotationIdentityName = "identity.openziti.io/name"
@@ -41,17 +40,16 @@ const (
 	warnEmptyJWT            = "pod created without ziti enrollment token"
 	warnIdentityNameExtract = "ziti identity name not found in pod annotations"
 	warnIdentityListFailed  = "ziti identity list operation failed in ziti edge"
-)
 
-type zitiType string
-
-const (
 	zitiTypeRouter zitiType = "router"
 	zitiTypeTunnel zitiType = "tunnel"
 )
 
+type zitiType string
+
 type clusterClient struct {
 	client *kubernetes.Clientset
+	err    error
 }
 
 type clusterClientIntf interface {
@@ -78,7 +76,9 @@ type zitiClientIntf interface {
 type zitiConfig struct {
 	Image           string
 	ImageVersion    string
+	ImagePullPolicy string
 	VolumeMountName string
+	IdentityDir     string
 	Prefix          string
 	RoleKey         string
 	LabelKey        string
@@ -111,11 +111,25 @@ type ZitiHandler interface {
 	handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse
 }
 
-// HandleAdmissionRequest handles the admission request for old pod types, i.e. tunnel, router, etc.
+// handleAdmissionRequest handles Kubernetes admission requests for pod operations.
+// It processes "CREATE", "DELETE", and "UPDATE" operations to manage Ziti identities
+// and associated Kubernetes resources based on pod annotations and labels.
+//
+// Args:
+//
+//	ar: AdmissionReview object containing the admission request details.
+//
+// Returns:
+//
+//	A pointer to the AdmissionResponse indicating success or failure
+//	of the admission request processing.
 func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	reviewResponse := admissionv1.AdmissionResponse{}
 	pod := &corev1.Pod{}
 	oldPod := &corev1.Pod{}
+
+	klog.V(5).Infof("Object: %s", ar.Request.Object.Raw)
+	klog.V(5).Infof("OldObject: %s", ar.Request.OldObject.Raw)
 
 	if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, pod); err != nil {
 		klog.Error(err)
@@ -126,9 +140,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 		return failureResponse(reviewResponse, err)
 	}
 
-	// klog.Infof("Admission Request UID: %s", ar.Request.UID)
-	// klog.Infof("Admission Request Operation: %s", ar.Request.Operation)
-	// klog.Infof("Admission Request App Name %s, OldApp Name: %s", pod.Labels["app"], oldPod.Labels["app"])
+	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
 
 	deleteLabelFound, err := zh.KC.findNamespaceByOption(
 		context.Background(),
@@ -144,10 +156,16 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 
 	// Handle admission operations.
 	switch ar.Request.Operation {
+
 	case "CREATE":
+
+		klog.V(4).Infof("Starting webhook operation: %s", ar.Request.Operation)
+		klog.V(4).Infof("Updating: delete action %v", deleteLabelFound)
+
 		if !deleteLabelFound {
-			// klog.Infof("Creating: delete action %v", deleteLabelFound)
+
 			switch zh.Config.ZitiType {
+
 			case zitiTypeTunnel:
 
 				return zh.handleTunnelCreate(
@@ -171,25 +189,35 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 				err := fmt.Errorf("ziti type %s not supported", zh.Config.ZitiType)
 				return failureResponse(reviewResponse, err)
 			}
+
 		}
 	case "DELETE":
-		// klog.Infof("Deleting: delete action %v", deleteLabelFound)
+
+		klog.V(4).Infof("Starting webhook operation: %s", ar.Request.Operation)
+		klog.V(4).Infof("Updating: delete action %v", deleteLabelFound)
+
 		return zh.handleDelete(
 			context.Background(),
 			oldPod,
 			reviewResponse,
 		)
 	case "UPDATE":
+
+		klog.V(4).Infof("Starting webhook operation: %s", ar.Request.Operation)
+		klog.V(4).Infof("Updating: delete action %v", deleteLabelFound)
+
 		if !deleteLabelFound {
-			// klog.Infof("Updating: delete action %v", deleteLabelFound)
+
 			return zh.handleUpdate(
 				context.Background(),
 				pod,
 				oldPod,
 				reviewResponse,
 			)
+
 		}
 	}
+
 	reviewResponseJSON, err := json.Marshal(reviewResponse)
 	if err != nil {
 		klog.Warningf("failed to marshal review response to JSON: %v", err)
@@ -267,7 +295,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 			Value: corev1.Container{
 				Name:            identityName,
 				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
-				ImagePullPolicy: corev1.PullIfNotPresent,
+				ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
 				Args: []string{
 					"tproxy",
 					"-i",
@@ -282,11 +310,15 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 						Name:  "NF_REG_NAME",
 						Value: identityName,
 					},
+					{
+						Name:  "ZITI_IDENTITY_DIR",
+						Value: zh.Config.IdentityDir,
+					},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						Name:      zh.Config.VolumeMountName,
-						MountPath: "/netfoundry",
+						MountPath: zh.Config.IdentityDir,
 						ReadOnly:  false,
 					},
 				},
@@ -325,9 +357,11 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 	if podSecurityOverride {
 		jsonPatch = append(jsonPatch, []JsonPatchEntry{
 			{
-				OP:    "replace",
-				Path:  "/spec/securityContext",
-				Value: &isNotTrue,
+				OP:   "replace",
+				Path: "/spec/securityContext",
+				Value: &corev1.SecurityContext{
+					RunAsNonRoot: &isNotTrue,
+				},
 			},
 		}...)
 	}
@@ -431,6 +465,10 @@ func (zh *zitiHandler) handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod
 
 func (cc *clusterClient) findNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error) {
 
+	if cc.err != nil {
+		return false, cc.err
+	}
+
 	namespaces, err := cc.client.CoreV1().Namespaces().List(ctx, opts)
 	if err != nil {
 		return false, err
@@ -444,6 +482,9 @@ func (cc *clusterClient) findNamespaceByOption(ctx context.Context, name string,
 }
 
 func (cc *clusterClient) getClusterService(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.Service, error) {
+	if cc.err != nil {
+		return nil, cc.err
+	}
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 

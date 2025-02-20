@@ -118,39 +118,63 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 }
 
 func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
-	// initialize ziti client
-	tlsCertificate, _ := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
+
+	// parse ziti admin certs to synchronously (blocking) create a ziti identity
+	zitiAdminIdentity, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
 	if err != nil {
 		return nil, err
 	}
 
-	parsedCert, err := x509.ParseCertificate(tlsCertificate.Certificate[0])
+	if len(zitiAdminIdentity.Certificate) == 0 {
+		err := fmt.Errorf("no certificates found in TLS key pair")
+		return nil, err
+	}
+
+	parsedCert, err := x509.ParseCertificate(zitiAdminIdentity.Certificate[0])
 	if err != nil {
+		return nil, err
+	}
+
+	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
+	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
+	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(zitiCtrlCaBundle) {
+		err := fmt.Errorf("failed to append CA certificates from PEM")
 		return nil, err
 	}
 
 	cfg := zitiedge.Config{ApiEndpoint: zitiCtrlMgmtApi,
 		Cert:       parsedCert,
-		PrivateKey: tlsCertificate.PrivateKey}
+		PrivateKey: zitiAdminIdentity.PrivateKey,
+		CAS:        *certPool,
+	}
+
+	cfg.CABundle = zitiCtrlCaBundle
 	zc, err := zitiedge.Client(&cfg)
 
 	return zc, err
+
 }
 
 func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 
-	client, err := zitiClientImpl()
+	kc, errk := k.Client()
+	zc, errz := zitiClientImpl()
 	zh := newZitiHandler(
-		&clusterClient{client: k.Client()},
-		&zitiClient{client: client, err: err},
+		&clusterClient{client: kc, err: errk},
+		&zitiClient{client: zc, err: errz},
 		&zitiConfig{
 			ZitiType:        zitiTypeTunnel,
 			VolumeMountName: "sidecar-ziti-identity",
 			LabelKey:        "openziti/tunnel-inject",
 			RoleKey:         zitiRoleKey,
-			Image:           tunnelImage,
-			ImageVersion:    tunnelImageVersion,
-			Prefix:          zitiPrefix,
+			Image:           sidecarImage,
+			ImageVersion:    sidecarImageVersion,
+			ImagePullPolicy: sidecarImagePullPolicy,
+			IdentityDir:     sidecarIdentityDir,
+			Prefix:          sidecarPrefix,
 			LabelDelValue:   "disable",
 			LabelCrValue:    "enable",
 			ResolverIp:      clusterDnsServiceIP,
@@ -163,17 +187,18 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 
 func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 
-	client, err := zitiClientImpl()
+	kc, errk := k.Client()
+	zc, errz := zitiClientImpl()
 	zh := newZitiHandler(
-		&clusterClient{client: k.Client()},
-		&zitiClient{client: client, err: err},
+		&clusterClient{client: kc, err: errk},
+		&zitiClient{client: zc, err: errz},
 		&zitiConfig{
 			ZitiType:      zitiTypeRouter,
 			LabelKey:      "openziti/router-manage",
 			AnnotationKey: "openziti/router-name",
 			LabelDelValue: "disable",
 			LabelCrValue:  "enable",
-			Prefix:        zitiPrefix,
+			Prefix:        sidecarPrefix,
 			ResolverIp:    clusterDnsServiceIP,
 			RouterConfig: routerConfig{
 				Cost:              0,

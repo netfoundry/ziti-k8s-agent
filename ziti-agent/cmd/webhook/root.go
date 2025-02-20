@@ -15,9 +15,6 @@ var (
 	zitiAdminKey           []byte
 	zitiCtrlCaBundle       []byte
 	port                   int
-	tunnelImage            string
-	tunnelImageVersion     string
-	zitiPrefix             string
 	sidecarImage           string
 	sidecarImageVersion    string
 	sidecarPrefix          string
@@ -53,11 +50,11 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"File containing the default x509 private key matching --tls-cert-file.")
 	webhookCmd.Flags().IntVar(&port, "port", 9443,
 		"Secure port that the webhook listens on")
-	webhookCmd.Flags().StringVar(&tunnelImage, "sidecar-image", "openziti/ziti-tunnel",
+	webhookCmd.Flags().StringVar(&sidecarImage, "sidecar-image", "openziti/ziti-tunnel",
 		"Image of sidecar")
-	webhookCmd.Flags().StringVar(&tunnelImageVersion, "sidecar-image-version", "latest",
+	webhookCmd.Flags().StringVar(&sidecarImageVersion, "sidecar-image-version", "latest",
 		"Image Varsion of sidecar")
-	webhookCmd.Flags().StringVar(&zitiPrefix, "sidecar-prefix", "zt",
+	webhookCmd.Flags().StringVar(&sidecarPrefix, "sidecar-prefix", "zt",
 		"Used in creation of ContainerName to be used as injected sidecar")
 	webhookCmd.Flags().StringVar(&sidecarIdentityDir, "sidecar-identity-dir", "/ziti-tunnel",
 		"Directory where sidecar container will store identity files")

@@ -37,6 +37,9 @@ func filterMapValuesByKey(values map[string]string, key string) ([]string, bool)
 	return []string{}, false
 }
 
+// trimString is called when creating Ziti identity names and trims input to a maximum of 24 characters in length. If
+// the string is longer than 24 characters, the first 24 characters are returned. Otherwise, the original string is
+// returned.
 func trimString(input string) string {
 	if len(input) > 24 {
 		return input[:24]
@@ -52,6 +55,17 @@ func validateSubdomain(input string) error {
 	return nil
 }
 
+// failureResponse sets the admission response as a failure with the provided error.
+//
+// Args:
+//
+//	ar: The admissionv1.AdmissionResponse to be updated.
+//	err: The error that occurred, which will be logged and included in the response reason.
+//
+// Returns:
+//
+//	A pointer to the updated admissionv1.AdmissionResponse with Allowed set to false,
+//	and the Result status set to "Failure" with a reason including the error message.
 func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.AdmissionResponse {
 	ar.Allowed = false
 	ar.Result = &metav1.Status{
