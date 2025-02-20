@@ -160,23 +160,39 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 
 func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 
-	kc, errk := k.Client()
-	zc, errz := zitiClientImpl()
+	kc, err := k.Client()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initilize cluster client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	zc, err := zitiClientImpl()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initilize ziti client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	zh := newZitiHandler(
-		&clusterClient{client: kc, err: errk},
-		&zitiClient{client: zc, err: errz},
+		&clusterClient{client: kc},
+		&zitiClient{client: zc},
 		&zitiConfig{
 			ZitiType:        zitiTypeTunnel,
 			VolumeMountName: "sidecar-ziti-identity",
-			LabelKey:        "openziti/tunnel-inject",
+			LabelKey:        "tunnel.openziti.io/enabled",
 			RoleKey:         zitiRoleKey,
 			Image:           sidecarImage,
 			ImageVersion:    sidecarImageVersion,
 			ImagePullPolicy: sidecarImagePullPolicy,
 			IdentityDir:     sidecarIdentityDir,
 			Prefix:          sidecarPrefix,
-			LabelDelValue:   "disable",
-			LabelCrValue:    "enable",
+			LabelDelValue:   "false",
+			LabelCrValue:    "true",
 			ResolverIp:      clusterDnsServiceIP,
 			RouterConfig:    routerConfig{},
 		},
@@ -187,17 +203,33 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 
 func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 
-	kc, errk := k.Client()
-	zc, errz := zitiClientImpl()
+	kc, err := k.Client()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initilize cluster client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	zc, err := zitiClientImpl()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initilize ziti client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	zh := newZitiHandler(
-		&clusterClient{client: kc, err: errk},
-		&zitiClient{client: zc, err: errz},
+		&clusterClient{client: kc},
+		&zitiClient{client: zc},
 		&zitiConfig{
 			ZitiType:      zitiTypeRouter,
-			LabelKey:      "openziti/router-manage",
+			LabelKey:      "router.openziti.io/enabled",
 			AnnotationKey: "openziti/router-name",
-			LabelDelValue: "disable",
-			LabelCrValue:  "enable",
+			LabelDelValue: "false",
+			LabelCrValue:  "true",
 			Prefix:        sidecarPrefix,
 			ResolverIp:    clusterDnsServiceIP,
 			RouterConfig: routerConfig{

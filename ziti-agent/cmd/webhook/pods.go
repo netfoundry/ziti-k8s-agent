@@ -49,7 +49,6 @@ type zitiType string
 
 type clusterClient struct {
 	client *kubernetes.Clientset
-	err    error
 }
 
 type clusterClientIntf interface {
@@ -59,7 +58,6 @@ type clusterClientIntf interface {
 
 type zitiClient struct {
 	client *rest_management_api_client.ZitiEdgeManagement
-	err    error
 }
 
 type zitiClientIntf interface {
@@ -465,10 +463,6 @@ func (zh *zitiHandler) handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod
 
 func (cc *clusterClient) findNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error) {
 
-	if cc.err != nil {
-		return false, cc.err
-	}
-
 	namespaces, err := cc.client.CoreV1().Namespaces().List(ctx, opts)
 	if err != nil {
 		return false, err
@@ -482,17 +476,10 @@ func (cc *clusterClient) findNamespaceByOption(ctx context.Context, name string,
 }
 
 func (cc *clusterClient) getClusterService(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.Service, error) {
-	if cc.err != nil {
-		return nil, cc.err
-	}
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
 func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix string, key string, pod *corev1.Pod) (string, string, error) {
-
-	if zc.err != nil {
-		return "", "", zc.err
-	}
 
 	name := fmt.Sprintf("%s-%s-%s", trimString(pod.Labels["app"]), prefix, uid)
 
@@ -519,10 +506,6 @@ func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix 
 
 func (zc *zitiClient) getIdentityToken(ctx context.Context, name string, id string) (string, error) {
 
-	if zc.err != nil {
-		return "", zc.err
-	}
-
 	if id == "" {
 
 		identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
@@ -545,10 +528,6 @@ func (zc *zitiClient) getIdentityToken(ctx context.Context, name string, id stri
 
 func (zc *zitiClient) deleteIdentity(ctx context.Context, name string) error {
 
-	if zc.err != nil {
-		return zc.err
-	}
-
 	id := ""
 	identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
 	if err != nil {
@@ -569,10 +548,6 @@ func (zc *zitiClient) deleteIdentity(ctx context.Context, name string) error {
 
 func (zc *zitiClient) findIdentityId(ctx context.Context, name string) (string, error) {
 
-	if zc.err != nil {
-		return "", zc.err
-	}
-
 	id := ""
 	identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
 	if err != nil {
@@ -587,10 +562,6 @@ func (zc *zitiClient) findIdentityId(ctx context.Context, name string) (string, 
 }
 
 func (zc *zitiClient) patchIdentityRoleAttributes(ctx context.Context, name string, key string, newPod *corev1.Pod, oldPod *corev1.Pod) error {
-
-	if zc.err != nil {
-		return zc.err
-	}
 
 	var roles []string
 	id := ""
@@ -632,10 +603,6 @@ func (zc *zitiClient) patchIdentityRoleAttributes(ctx context.Context, name stri
 
 func (zc *zitiClient) getZitiRouterToken(ctx context.Context, name string) (string, error) {
 
-	if zc.err != nil {
-		return "", zc.err
-	}
-
 	routerDetails, err := zitiedge.GetEdgeRouterByName(name, zc.client)
 	if err != nil {
 		return "", err
@@ -658,10 +625,6 @@ func (zc *zitiClient) getZitiRouterToken(ctx context.Context, name string) (stri
 
 func (zc *zitiClient) updateZitiRouter(ctx context.Context, name string, options *rest_model_edge.EdgeRouterCreate) (*edge_router.CreateEdgeRouterCreated, error) {
 
-	if zc.err != nil {
-		return nil, zc.err
-	}
-
 	routerDetails, err := zitiedge.GetEdgeRouterByName(name, zc.client)
 	if err != nil {
 		return nil, err
@@ -677,10 +640,6 @@ func (zc *zitiClient) updateZitiRouter(ctx context.Context, name string, options
 }
 
 func (zc *zitiClient) deleteZitiRouter(ctx context.Context, name string) error {
-
-	if zc.err != nil {
-		return zc.err
-	}
 
 	routerDetails, err := zitiedge.GetEdgeRouterByName(name, zc.client)
 	if err != nil {

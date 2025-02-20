@@ -197,11 +197,11 @@ for SELECTOR in "${SELECTORS[@]}"; do
       cat <<SEL
     namespaceSelector:
       matchExpressions:
-      - key: openziti/tunnel-inject
+      - key: tunnel.openziti.io/enabled
         operator: In
         values:
-        - "enable"
-        - "disable"
+        - "true"
+        - "false"
 SEL
     ;;
     pod)
@@ -209,11 +209,11 @@ SEL
     objectSelector:
       namespaceSelector:
       matchExpressions:
-      - key: openziti/tunnel-inject
+      - key: tunnel.openziti.io/enabled
         operator: In
         values:
-        - "enable"
-        - "disable"
+        - "true"
+        - "false"
 SEL
     ;;
     *)
