@@ -144,8 +144,11 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 
 	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
 
+	// create a context to pass to subsequent functions allowing cancellations to propagate
+	ctx := context.Background()
+
 	deleteLabelFound, err := zh.KC.findNamespaceByOption(
-		context.Background(),
+		ctx,
 		pod.Namespace,
 		metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("%s=%s", zh.Config.LabelKey, zh.Config.LabelDelValue),
@@ -171,7 +174,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 			case zitiTypeTunnel:
 
 				return zh.handleTunnelCreate(
-					context.Background(),
+					ctx,
 					pod,
 					ar.Request.UID,
 					reviewResponse,
@@ -180,7 +183,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 			case zitiTypeRouter:
 
 				return zh.handleRouterCreate(
-					context.Background(),
+					ctx,
 					pod,
 					ar.Request.UID,
 					reviewResponse,
@@ -199,7 +202,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 		klog.V(4).Infof("Updating: delete action %v", deleteLabelFound)
 
 		return zh.handleDelete(
-			context.Background(),
+			ctx,
 			oldPod,
 			reviewResponse,
 		)
@@ -211,7 +214,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 		if !deleteLabelFound {
 
 			return zh.handleUpdate(
-				context.Background(),
+				ctx,
 				pod,
 				oldPod,
 				reviewResponse,
@@ -232,7 +235,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
 	identityName, identityId, err := zh.ZC.createIdentity(
-		context.Background(),
+		ctx,
 		uid,
 		zh.Config.Prefix,
 		zh.Config.RoleKey,
@@ -243,7 +246,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 	}
 
 	identityToken, err := zh.ZC.getIdentityToken(
-		context.Background(),
+		ctx,
 		identityName,
 		identityId,
 	)
@@ -255,7 +258,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 	defaultClusterDnsServiceIP := "10.96.0.10"
 	if len(zh.Config.ResolverIp) == 0 {
 		service, err := zh.KC.getClusterService(
-			context.Background(),
+			ctx,
 			"kube-system", "kube-dns",
 			metav1.GetOptions{},
 		)
@@ -387,7 +390,7 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 	}
 
 	_, err = zh.ZC.updateZitiRouter(
-		context.Background(),
+		ctx,
 		pod.Name,
 		options,
 	)
@@ -396,7 +399,7 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 	}
 
 	identityToken, err := zh.ZC.getZitiRouterToken(
-		context.Background(),
+		ctx,
 		pod.Name,
 	)
 	if err != nil {
@@ -429,7 +432,7 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	if zh.Config.ZitiType == zitiTypeRouter {
 
-		if err := zh.ZC.deleteZitiRouter(context.Background(), pod.Name); err != nil {
+		if err := zh.ZC.deleteZitiRouter(ctx, pod.Name); err != nil {
 			return failureResponse(response, err)
 		}
 
@@ -437,7 +440,7 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 		name, ok := hasContainer(pod.Spec.Containers, zh.Config.Prefix)
 		if ok {
-			if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
+			if err := zh.ZC.deleteIdentity(ctx, name); err != nil {
 				return failureResponse(response, err)
 			}
 		} else {
@@ -451,9 +454,9 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 func (zh *zitiHandler) handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", trimString(pod.Labels["app"]), zh.Config.Prefix))
+	name, ok := hasContainer(pod.Spec.Containers, zh.Config.Prefix)
 	if ok {
-		if err := zh.ZC.patchIdentityRoleAttributes(context.Background(), name, zh.Config.RoleKey, pod, oldPod); err != nil {
+		if err := zh.ZC.patchIdentityRoleAttributes(ctx, name, zh.Config.RoleKey, pod, oldPod); err != nil {
 			return failureResponse(response, err)
 		}
 	}
