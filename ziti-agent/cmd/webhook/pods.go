@@ -2,9 +2,12 @@ package webhook
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -475,13 +478,61 @@ func (cc *clusterClient) getClusterService(ctx context.Context, namespace string
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
-func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix string, key string, pod *corev1.Pod) (string, string, error) {
+func buildZitiIdentityName(prefix string, pod *corev1.Pod, uid types.UID) (string, error) {
+	var name string
 
-	name := fmt.Sprintf("%s-%s-%s", trimString(pod.Labels["app"]), prefix, uid)
+	// Check for explicit annotation first
+	if annotatedName, exists := pod.Annotations[annotationIdentityName]; exists && annotatedName != "" {
+		name = annotatedName
+	} else {
+		// Check labels in order of precedence
+		labels := []string{labelApp, labelAppName, labelAppInstance, labelAppComponent}
+		for _, label := range labels {
+			if labelName, exists := pod.Labels[label]; exists && labelName != "" {
+				name = labelName
+				break
+			}
+		}
+	}
 
+	if name == "" {
+		return "", fmt.Errorf("failed to build identity name: no valid name found in annotations or labels")
+	}
+
+	// Build base name with prefix, name and namespace
+	baseName := fmt.Sprintf("%s-%s-%s", prefix, name, pod.Namespace)
+
+	// Truncate to 50 characters if needed
+	if len(baseName) > 50 {
+		baseName = baseName[:50]
+	}
+
+	// Create SHA256 hash of UID and truncate to 10 characters
+	hasher := sha256.New()
+	hasher.Write([]byte(string(uid)))
+	hash := hex.EncodeToString(hasher.Sum(nil))[:10]
+
+	// Build final identity name with hash suffix
+	identityName := fmt.Sprintf("%s-%s", baseName, hash)
+
+	// Validate the final name
+	valid, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, identityName)
+	if err != nil {
+		return "", fmt.Errorf("error validating identity name: %v", err)
+	}
+	if !valid {
+		return "", fmt.Errorf("invalid identity name format: %s", identityName)
+	}
+
+	return identityName, nil
+}
+
+func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix string, roleKey string, pod *corev1.Pod) (string, string, error) {
+
+	name, err := buildZitiIdentityName(sidecarPrefix, pod, uid)
 	roles, ok := filterMapValuesByKey(
 		pod.Annotations,
-		key,
+		roleKey,
 	)
 	if !ok {
 		roles = []string{pod.Labels["app"]}

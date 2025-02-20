@@ -1,8 +1,6 @@
 package webhook
 
 import (
-	"fmt"
-	"regexp"
 	"strings"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -37,24 +35,6 @@ func filterMapValuesByKey(values map[string]string, key string) ([]string, bool)
 	return []string{}, false
 }
 
-// trimString is called when creating Ziti identity names and trims input to a maximum of 24 characters in length. If
-// the string is longer than 24 characters, the first 24 characters are returned. Otherwise, the original string is
-// returned.
-func trimString(input string) string {
-	if len(input) > 24 {
-		return input[:24]
-	}
-	return input
-}
-
-func validateSubdomain(input string) error {
-	_, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, input)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // failureResponse sets the admission response as a failure with the provided error.
 //
 // Args:
@@ -71,7 +51,6 @@ func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.A
 	ar.Result = &metav1.Status{
 		Status:  "Failure",
 		Message: err.Error(),
-		Reason:  metav1.StatusReason(fmt.Sprintf("Ziti Controller -  %s", err)),
 	}
 	return &ar
 }
