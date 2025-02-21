@@ -67,6 +67,19 @@ func GetIdentityByName(name string, edge *rest_management_api_client.ZitiEdgeMan
 	return resp, nil
 }
 
+func GetIdentityById(zId string, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.DetailIdentityOK, error) {
+	req := &identity.DetailIdentityParams{
+		ID:      zId,
+		Context: context.Background(),
+	}
+	req.SetTimeout(30 * time.Second)
+	resp, err := edge.Identity.DetailIdentity(req, nil)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func GetIdentityEnrollmentJWT(zId string, edge *rest_management_api_client.ZitiEdgeManagement) (*string, error) {
 	p := &identity.DetailIdentityParams{
 		Context: context.Background(),
@@ -100,6 +113,5 @@ func DeleteIdentity(zId string, edge *rest_management_api_client.ZitiEdgeManagem
 	if err != nil {
 		return err
 	}
-	klog.Infof("Ziti identity '%v' was deleted", zId)
 	return nil
 }
