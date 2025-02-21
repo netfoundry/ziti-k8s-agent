@@ -13,7 +13,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func CreateIdentity(name string, roleAttributes rest_model_edge.Attributes, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.CreateIdentityCreated, error) {
+func CreateIdentity(name string, roleAttributes rest_model_edge.Attributes, identityType rest_model_edge.IdentityType, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.CreateIdentityCreated, error) {
 	isAdmin := false
 	req := identity.NewCreateIdentityParams()
 	req.Identity = &rest_model_edge.IdentityCreate{
@@ -25,8 +25,14 @@ func CreateIdentity(name string, roleAttributes rest_model_edge.Attributes, edge
 		ExternalID:          nil,
 		ServiceHostingCosts: nil,
 		Tags:                nil,
+		Type:                &identityType,
 	}
 	req.SetTimeout(30 * time.Second)
+	requestJson, err := json.Marshal(&req)
+	if err != nil {
+		return nil, err
+	}
+	klog.V(5).Infof("Creating Ziti identity with request JSON: %v", string(requestJson))
 	resp, err := edge.Identity.CreateIdentity(req, nil)
 	if err != nil {
 		return nil, err

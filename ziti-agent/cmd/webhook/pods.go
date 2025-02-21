@@ -317,13 +317,6 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 			Path:  "/spec/dnsConfig",
 			Value: dnsConfig,
 		},
-		{
-			OP:   "add",
-			Path: "/metadata/annotations",
-			Value: map[string]string{
-				annotationIdentityName: identityName,
-			},
-		},
 	}
 
 	if podSecurityOverride {
@@ -336,9 +329,31 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 				},
 			},
 		}...)
-
 	}
 
+	if _, ok := podMeta.Annotations[annotationIdentityName]; !ok {
+		jsonPatch = append(jsonPatch, []JsonPatchEntry{
+			{
+				OP:   "add",
+				Path: "/metadata/annotations",
+				Value: map[string]string{
+					annotationIdentityName: identityName,
+				},
+			},
+		}...)
+	} else {
+		jsonPatch = append(jsonPatch, []JsonPatchEntry{
+			{
+				OP:   "replace",
+				Path: "/metadata/annotations",
+				Value: map[string]string{
+					annotationIdentityName: identityName,
+				},
+			},
+		}...)
+	}
+
+	klog.V(5).Infof("JSON Patch: %v", jsonPatch)
 	patchBytes, err := json.Marshal(&jsonPatch)
 	if err != nil {
 		klog.Error(err)
@@ -448,20 +463,29 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	} else {
 
+		name, containerExists := hasContainer(pod.Spec.Containers, zh.Config.Prefix)
+		if containerExists {
+			klog.V(4).Infof("ziti identity name from container spec is %s", name)
+		} else {
+			klog.V(4).Infof("ziti sidecar does not exist in pod")
+		}
 		nameList, annotationExists := filterMapValuesByKey(pod.Annotations, annotationIdentityName)
 		if annotationExists {
-			if err := zh.ZC.deleteIdentity(context.Background(), nameList[0]); err != nil {
-				return failureResponse(response, err)
-			}
 			klog.V(4).Infof("ziti identity name from annotations is %s", nameList[0])
 		} else {
-			name, containerExists := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s-%s", zh.Config.Prefix, pod.Labels[labelApp], pod.Namespace))
-			if containerExists {
-				if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
-					return failureResponse(response, err)
-				}
-				klog.V(4).Infof("ziti identity name from container spec is %s", name)
+			klog.V(4).Infof("ziti identity name annotation missing or empty")
+		}
+
+		if containerExists {
+			if err := zh.ZC.deleteIdentity(ctx, name); err != nil {
+				return failureResponse(response, err)
 			}
+		} else if annotationExists {
+			if err := zh.ZC.deleteIdentity(ctx, nameList[0]); err != nil {
+				return failureResponse(response, err)
+			}
+		} else {
+			klog.V(4).Infof("no ziti identity name annotation or sidecar found for pod name '%s'", pod.Name)
 		}
 	}
 
@@ -472,14 +496,14 @@ func (zh *zitiHandler) handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod
 
 	nameList, annotationExists := filterMapValuesByKey(pod.Annotations, annotationIdentityName)
 	if annotationExists {
-		if err := zh.ZC.patchIdentityRoleAttributes(context.Background(), nameList[0], zh.Config.RoleKey, pod, oldPod); err != nil {
+		if err := zh.ZC.patchIdentityRoleAttributes(ctx, nameList[0], zh.Config.RoleKey, pod, oldPod); err != nil {
 			return failureResponse(response, err)
 		}
 		klog.V(4).Infof("ziti identity name from annotations is %s", nameList[0])
 	} else {
 		name, containerExists := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s-%s", zh.Config.Prefix, pod.Labels[labelApp], pod.Namespace))
 		if containerExists {
-			if err := zh.ZC.patchIdentityRoleAttributes(context.Background(), name, zh.Config.RoleKey, pod, oldPod); err != nil {
+			if err := zh.ZC.patchIdentityRoleAttributes(ctx, name, zh.Config.RoleKey, pod, oldPod); err != nil {
 				return failureResponse(response, err)
 			}
 			klog.V(4).Infof("ziti identity name from container spec is %s", name)
@@ -520,6 +544,7 @@ func (zc *zitiClient) createIdentity(ctx context.Context, name string, roleKey s
 	identityDetails, err := zitiedge.CreateIdentity(
 		name,
 		roles,
+		rest_model_edge.IdentityTypeDevice,
 		zc.client,
 	)
 	if err != nil {

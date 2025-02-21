@@ -1,8 +1,8 @@
 package webhook
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	// "crypto/sha256"
+	// "encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 )
 
 type JsonPatchEntry struct {
@@ -43,19 +44,36 @@ func filterMapValuesByKey(values map[string]string, key string) ([]string, bool)
 
 func buildZitiIdentityName(prefix string, podMeta *metav1.ObjectMeta, uid types.UID) (string, error) {
 	var name string
+	var builtName string
 
-	// Check for explicit annotation first
-	if annotatedName, exists := podMeta.Annotations[annotationIdentityName]; exists && annotatedName != "" {
-		name = annotatedName
-	} else {
-		// Check labels in order of precedence
-		labels := []string{labelApp, labelAppName, labelAppInstance, labelAppComponent}
-		for _, label := range labels {
-			if labelName, exists := podMeta.Labels[label]; exists && labelName != "" {
-				name = labelName
-				break
-			}
-		}
+	// Check labels in order of precedence:
+	// 1. app
+	// 2. app.name 
+	// 3. app.instance
+	// 4. app.component
+	var labelName string
+	var exists bool
+	switch {
+	case func() bool {
+		labelName, exists = podMeta.Labels[labelApp]
+		return exists && labelName != ""
+	}():
+		name = labelName
+	case func() bool {
+		labelName, exists = podMeta.Labels[labelAppName]
+		return exists && labelName != ""
+	}():
+		name = labelName
+	case func() bool {
+		labelName, exists = podMeta.Labels[labelAppInstance]
+		return exists && labelName != ""
+	}():
+		name = labelName
+	case func() bool {
+		labelName, exists = podMeta.Labels[labelAppComponent]
+		return exists && labelName != ""
+	}():
+		name = labelName
 	}
 
 	if name == "" {
@@ -71,23 +89,25 @@ func buildZitiIdentityName(prefix string, podMeta *metav1.ObjectMeta, uid types.
 	}
 
 	// Create SHA256 hash of UID and truncate to 10 characters
-	hasher := sha256.New()
-	hasher.Write([]byte(string(uid)))
-	hash := hex.EncodeToString(hasher.Sum(nil))[:10]
+	// hasher := sha256.New()
+	// hasher.Write([]byte(string(uid)))
+	// hash := hex.EncodeToString(hasher.Sum(nil))[:10]
+	hash := uid[0:8]
 
 	// Build final identity name with hash suffix
-	identityName := fmt.Sprintf("%s-%s", baseName, hash)
+	builtName = fmt.Sprintf("%s-%s", baseName, hash)
 
 	// Validate the final name
-	valid, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, identityName)
+	valid, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, builtName)
 	if err != nil {
-		return "", fmt.Errorf("error validating identity name: %v", err)
+		return "", fmt.Errorf("error trying to validate identity name: %v", err)
 	}
 	if !valid {
-		return "", fmt.Errorf("invalid identity name format: %s", identityName)
+		return "", fmt.Errorf("invalid identity name format: %s", builtName)
 	}
+	klog.V(4).Infof("Built identity name: %s", builtName)
 
-	return identityName, nil
+	return builtName, nil
 }
 
 // failureResponse sets the admission response as a failure with the provided error.
