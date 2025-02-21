@@ -1,6 +1,9 @@
 package webhook
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
 )
 
 type JsonPatchEntry struct {
@@ -39,67 +41,50 @@ func filterMapValuesByKey(values map[string]string, key string) ([]string, bool)
 	return []string{}, false
 }
 
-// trimString is called when creating Ziti identity names and trims input to a maximum of 24 characters in length. If
-// the string is longer than 24 characters, the first 24 characters are returned. Otherwise, the original string is
-// returned.
-func trimString(input string) string {
-	if len(input) > 24 {
-		return input[:24]
-	}
-	return input
-}
-
-func validateSubdomain(input string) error {
-	_, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, input)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func buildZitiIdentityName(prefix string, pod *corev1.Pod, uid types.UID) (string, error) {
+func buildZitiIdentityName(prefix string, podMeta *metav1.ObjectMeta, uid types.UID) (string, error) {
 	var name string
-	var isUID bool
 
 	// Check for explicit annotation first
-	if annotatedName, exists := pod.Annotations[annotationIdentityName]; exists && annotatedName != "" {
+	if annotatedName, exists := podMeta.Annotations[annotationIdentityName]; exists && annotatedName != "" {
 		name = annotatedName
 	} else {
 		// Check labels in order of precedence
 		labels := []string{labelApp, labelAppName, labelAppInstance, labelAppComponent}
 		for _, label := range labels {
-			klog.V(4).Infof("Checking label %s=%s", label, pod.Labels[label])
-			if labelName, exists := pod.Labels[label]; exists && labelName != "" {
+			if labelName, exists := podMeta.Labels[label]; exists && labelName != "" {
 				name = labelName
-				klog.V(4).Infof("Setting pod name from label %s=%s", label, name)
 				break
-			} else {
-				klog.V(4).Infof("Label %s not found", label)
 			}
 		}
-
-		// Check pod name if no label was found
-		if name == "" && pod.Name != "" {
-			name = pod.Name
-		}
-
-		// Fall back to pod UID if nothing else is available
-		if name == "" {
-			return "", fmt.Errorf("failed to build identity name")
-		}
 	}
 
-	// Trim the name if it's too long and not a UID
-	if !isUID {
-		name = trimString(name)
+	if name == "" {
+		return "", errors.New("failed to build identity name: no valid name found in annotations or labels")
 	}
 
-	// Build the full identity name
-	identityName := fmt.Sprintf("%s-%s-%s-%s", prefix, name, pod.Namespace, uid)
+	// Build base name with prefix, name and namespace
+	baseName := fmt.Sprintf("%s-%s-%s", prefix, name, podMeta.Namespace)
+
+	// Truncate to 50 characters if needed
+	if len(baseName) > 50 {
+		baseName = baseName[:50]
+	}
+
+	// Create SHA256 hash of UID and truncate to 10 characters
+	hasher := sha256.New()
+	hasher.Write([]byte(string(uid)))
+	hash := hex.EncodeToString(hasher.Sum(nil))[:10]
+
+	// Build final identity name with hash suffix
+	identityName := fmt.Sprintf("%s-%s", baseName, hash)
 
 	// Validate the final name
-	if err := validateSubdomain(identityName); err != nil {
-		return "", fmt.Errorf("invalid identity name '%s': %v", identityName, err)
+	valid, err := regexp.MatchString(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, identityName)
+	if err != nil {
+		return "", fmt.Errorf("error validating identity name: %v", err)
+	}
+	if !valid {
+		return "", fmt.Errorf("invalid identity name format: %s", identityName)
 	}
 
 	return identityName, nil
@@ -121,7 +106,6 @@ func failureResponse(ar admissionv1.AdmissionResponse, err error) *admissionv1.A
 	ar.Result = &metav1.Status{
 		Status:  "Failure",
 		Message: err.Error(),
-		Reason:  metav1.StatusReason(fmt.Sprintf("Ziti Controller -  %s", err)),
 	}
 	return &ar
 }

@@ -28,13 +28,13 @@ func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error)
 		cfg.Cert.Subject,
 	)
 
-	klog.V(4).Info("Client Certificate Details:")
-	klog.V(4).Infof("  Subject: %v", cfg.Cert.Subject)
-	klog.V(4).Infof("  Issuer: %v", cfg.Cert.Issuer)
-	klog.V(4).Infof("  Valid from: %v to %v", cfg.Cert.NotBefore, cfg.Cert.NotAfter)
-	klog.V(4).Infof("  Key usages: %s", keyUsageString(cfg.Cert.KeyUsage))
-	klog.V(4).Infof("  Extended Key usages: %s", extKeyUsageString(cfg.Cert.ExtKeyUsage))
-	klog.V(4).Info("CA Pool Certificate Details:")
+	klog.V(5).Info("Client Certificate Details:")
+	klog.V(5).Infof("  Subject: %v", cfg.Cert.Subject)
+	klog.V(5).Infof("  Issuer: %v", cfg.Cert.Issuer)
+	klog.V(5).Infof("  Valid from: %v to %v", cfg.Cert.NotBefore, cfg.Cert.NotAfter)
+	klog.V(5).Infof("  Key usages: %s", keyUsageString(cfg.Cert.KeyUsage))
+	klog.V(5).Infof("  Extended Key usages: %s", extKeyUsageString(cfg.Cert.ExtKeyUsage))
+	klog.V(5).Info("CA Pool Certificate Details:")
 	// Log the key usages of the CA certificate
 	block, _ := pem.Decode(cfg.CABundle)
 	if block == nil {
@@ -44,11 +44,11 @@ func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error)
 		if err != nil {
 			klog.Errorf("Error parsing CA certificate: %v", err)
 		} else {
-			klog.V(4).Infof("  CA Subject: %v", parsedCert.Subject)
-			klog.V(4).Infof("  CA Issuer: %v", parsedCert.Issuer)
-			klog.V(4).Infof("  CA Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
-			klog.V(4).Infof("  CA Key usages: %s", keyUsageString(parsedCert.KeyUsage))
-			klog.V(4).Infof("  CA Extended Key usages: %s", extKeyUsageString(parsedCert.ExtKeyUsage))
+			klog.V(5).Infof("  CA Subject: %v", parsedCert.Subject)
+			klog.V(5).Infof("  CA Issuer: %v", parsedCert.Issuer)
+			klog.V(5).Infof("  CA Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
+			klog.V(5).Infof("  CA Key usages: %s", keyUsageString(parsedCert.KeyUsage))
+			klog.V(5).Infof("  CA Extended Key usages: %s", extKeyUsageString(parsedCert.ExtKeyUsage))
 		}
 	}
 	// Check if our client cert is trusted by the CA pool

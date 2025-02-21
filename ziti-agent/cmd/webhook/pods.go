@@ -3,10 +3,9 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
-
-	"k8s.io/apimachinery/pkg/types"
 
 	zitiedge "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
 	"github.com/openziti/edge-api/rest_management_api_client"
@@ -15,6 +14,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
@@ -27,6 +27,7 @@ var (
 )
 
 const (
+	volumeMountName string = "ziti-identity"
 
 	// Annotation key for explicitly setting identity name
 	annotationIdentityName = "identity.openziti.io/name"
@@ -61,7 +62,7 @@ type zitiClient struct {
 }
 
 type zitiClientIntf interface {
-	createIdentity(ctx context.Context, name string, key string, pod *corev1.Pod) (string, error)
+	createIdentity(ctx context.Context, name string, roleKey string, podMeta *metav1.ObjectMeta) (string, error)
 	deleteIdentity(ctx context.Context, id string) error
 	deleteZitiRouter(ctx context.Context, name string) error
 	getIdentityToken(ctx context.Context, name string, id string) (string, error)
@@ -131,17 +132,20 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 
 	if _, _, err := deserializer.Decode(ar.Request.Object.Raw, nil, pod); err != nil {
 		klog.Error(err)
-		return failureResponse(reviewResponse, err)
+		return failureResponse(reviewResponse, fmt.Errorf("failed to decode pod object: %v", err))
 	}
 	if _, _, err := deserializer.Decode(ar.Request.OldObject.Raw, nil, oldPod); err != nil {
 		klog.Error(err)
-		return failureResponse(reviewResponse, err)
+		return failureResponse(reviewResponse, fmt.Errorf("failed to decode old pod object: %v", err))
 	}
 
 	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
 
+	// create a context to pass to subsequent functions allowing cancellations to propagate
+	ctx := context.Background()
+
 	deleteLabelFound, err := zh.KC.findNamespaceByOption(
-		context.Background(),
+		ctx,
 		pod.Namespace,
 		metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("%s=%s", zh.Config.LabelKey, zh.Config.LabelDelValue),
@@ -167,8 +171,8 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 			case zitiTypeTunnel:
 
 				return zh.handleTunnelCreate(
-					context.Background(),
-					pod,
+					ctx,
+					&pod.ObjectMeta,
 					ar.Request.UID,
 					reviewResponse,
 				)
@@ -176,7 +180,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 			case zitiTypeRouter:
 
 				return zh.handleRouterCreate(
-					context.Background(),
+					ctx,
 					pod,
 					ar.Request.UID,
 					reviewResponse,
@@ -195,7 +199,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 		klog.V(4).Infof("Updating: delete action %v", deleteLabelFound)
 
 		return zh.handleDelete(
-			context.Background(),
+			ctx,
 			oldPod,
 			reviewResponse,
 		)
@@ -207,7 +211,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 		if !deleteLabelFound {
 
 			return zh.handleUpdate(
-				context.Background(),
+				ctx,
 				pod,
 				oldPod,
 				reviewResponse,
@@ -225,25 +229,25 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 	return successResponse(reviewResponse)
 }
 
-func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.ObjectMeta, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	identityName, err := buildZitiIdentityName(zh.Config.Prefix, pod, uid)
+	identityName, err := buildZitiIdentityName(zh.Config.Prefix, podMeta, uid)
 	if err != nil {
 		return failureResponse(response, err)
 	}
 
 	identityId, err := zh.ZC.createIdentity(
-		context.Background(),
+		ctx,
 		identityName,
 		zh.Config.RoleKey,
-		pod,
+		podMeta,
 	)
 	if err != nil {
 		return failureResponse(response, err)
 	}
 
 	identityToken, err := zh.ZC.getIdentityToken(
-		context.Background(),
+		ctx,
 		identityName,
 		identityId,
 	)
@@ -251,42 +255,9 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 		return failureResponse(response, err)
 	}
 
-	if len(zh.Config.ResolverIp) == 0 {
-		service, err := zh.KC.getClusterService(
-			context.Background(),
-			"kube-system", "kube-dns",
-			metav1.GetOptions{},
-		)
-		if err != nil {
-			klog.Error(err)
-		}
-		if len(service.Spec.ClusterIP) != 0 {
-			zh.Config.ResolverIp = service.Spec.ClusterIP
-		} else {
-			klog.Info("Looked up DNS SVC ClusterIP and is not found")
-		}
-	}
-
-	dnsConfig := &corev1.PodDNSConfig{}
-	if len(searchDomains) == 0 {
-		dnsConfig = &corev1.PodDNSConfig{
-			Nameservers: []string{
-				"127.0.0.1",
-				zh.Config.ResolverIp,
-			},
-			Searches: []string{
-				"cluster.local",
-				fmt.Sprintf("%s.svc", pod.Namespace),
-			},
-		}
-	} else {
-		dnsConfig = &corev1.PodDNSConfig{
-			Nameservers: []string{
-				"127.0.0.1",
-				zh.Config.ResolverIp,
-			},
-			Searches: searchDomains,
-		}
+	dnsConfig, err := zh.configureDNS(ctx)
+	if err != nil {
+		return failureResponse(response, err)
 	}
 
 	jsonPatch = []JsonPatchEntry{
@@ -298,19 +269,11 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 				Name:            identityName,
 				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
 				ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
-				Args: []string{
-					"tproxy",
-					"-i",
-					fmt.Sprintf("%v.json", identityName),
-				},
+				Args: []string{"tproxy"},
 				Env: []corev1.EnvVar{
 					{
 						Name:  "ZITI_ENROLL_TOKEN",
 						Value: identityToken,
-					},
-					{
-						Name:  "NF_REG_NAME",
-						Value: identityName,
 					},
 					{
 						Name:  "ZITI_IDENTITY_DIR",
@@ -387,6 +350,43 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 	return successResponse(response)
 }
 
+func (zh *zitiHandler) configureDNS(ctx context.Context) (*corev1.PodDNSConfig, error) {
+	// get cluster dns ip if not already configured
+	defaultClusterDnsServiceIP := "10.96.0.10"
+	if len(zh.Config.ResolverIp) == 0 {
+		service, err := zh.KC.getClusterService(
+			ctx,
+			"kube-system", "kube-dns",
+			metav1.GetOptions{},
+		)
+		if err != nil {
+			klog.Warningf("Failed to look up DNS service: %v", err)
+			klog.Warningf("Using default DNS IP: %s", defaultClusterDnsServiceIP)
+			zh.Config.ResolverIp = defaultClusterDnsServiceIP
+		} else if len(service.Spec.ClusterIP) != 0 {
+			zh.Config.ResolverIp = service.Spec.ClusterIP
+			klog.V(4).Infof("Using cluster DNS IP: %s", zh.Config.ResolverIp)
+		} else {
+			zh.Config.ResolverIp = defaultClusterDnsServiceIP
+			klog.Warningf("DNS service has no ClusterIP, using default: %s", defaultClusterDnsServiceIP)
+		}
+	}
+
+	dnsConfig := &corev1.PodDNSConfig{
+		Nameservers: []string{
+			"127.0.0.1",
+			zh.Config.ResolverIp,
+		},
+	}
+
+	if len(searchDomains) > 0 {
+		dnsConfig.Searches = searchDomains
+		klog.V(4).Infof("Using custom search domains: %v", searchDomains)
+	}
+
+	return dnsConfig, nil
+}
+
 func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
 	options := &rest_model_edge.EdgeRouterCreate{
@@ -400,7 +400,7 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 	}
 
 	_, err = zh.ZC.updateZitiRouter(
-		context.Background(),
+		ctx,
 		pod.Name,
 		options,
 	)
@@ -409,7 +409,7 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 	}
 
 	identityToken, err := zh.ZC.getZitiRouterToken(
-		context.Background(),
+		ctx,
 		pod.Name,
 	)
 	if err != nil {
@@ -442,7 +442,7 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	if zh.Config.ZitiType == zitiTypeRouter {
 
-		if err := zh.ZC.deleteZitiRouter(context.Background(), pod.Name); err != nil {
+		if err := zh.ZC.deleteZitiRouter(ctx, pod.Name); err != nil {
 			return failureResponse(response, err)
 		}
 
@@ -507,20 +507,19 @@ func (cc *clusterClient) getClusterService(ctx context.Context, namespace string
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
-func (zc *zitiClient) createIdentity(ctx context.Context, name string, key string, pod *corev1.Pod) (string, error) {
-
+// create a ziti identity with a conventional name from the prefix, pod metadta, and admission request uid
+func (zc *zitiClient) createIdentity(ctx context.Context, name string, roleKey string, podMeta *metav1.ObjectMeta) (string, error) {
 	roles, ok := filterMapValuesByKey(
-		pod.Annotations,
-		key,
+		podMeta.Annotations,
+		roleKey,
 	)
 	if !ok {
-		roles = []string{pod.Labels["app"]}
+		roles = []string{podMeta.Labels["app"]}
 	}
 
 	identityDetails, err := zitiedge.CreateIdentity(
 		name,
 		roles,
-		"Device",
 		zc.client,
 	)
 	if err != nil {
@@ -530,20 +529,28 @@ func (zc *zitiClient) createIdentity(ctx context.Context, name string, key strin
 	return identityDetails.GetPayload().Data.ID, nil
 }
 
+// get the token for the identity by name or id
 func (zc *zitiClient) getIdentityToken(ctx context.Context, name string, id string) (string, error) {
 
-	if id == "" {
+	if id == "" && name != "" {
 
+		// returns nil or list of exactly one identity
 		identityDetails, err := zitiedge.GetIdentityByName(name, zc.client)
 		if err != nil {
 			return "", err
 		}
 
+		// get the id from the list of one identity
 		for _, identityItem := range identityDetails.GetPayload().Data {
 			id = *identityItem.ID
 		}
 	}
 
+	if id == "" {
+		return "", errors.New("need name or id to get identity token")
+	}
+
+	// get the token for the identity by id
 	detailsById, err := zitiedge.GetIdentityById(id, zc.client)
 	if err != nil {
 		return "", err

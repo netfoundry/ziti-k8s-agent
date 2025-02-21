@@ -6,6 +6,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	// Default annotation and label keys
+	defaultZitiRoleAttributesKey = "identity.openziti.io/role-attributes"
+	defaultZitiTunnelLabelKey    = "tunnel.openziti.io/enabled"
+	
+	// Default values
+	defaultImagePullPolicy = "IfNotPresent"
+)
+
 var (
 	certFile               string
 	keyFile                string
@@ -30,8 +39,15 @@ var (
 	zitiRoleKey            string
 	sidecarImagePullPolicy string
 	err                    error
-	defaultImagePullPolicy = "IfNotPresent"
 )
+
+// getValueOrDefault returns the provided value if non-empty, otherwise returns the default
+func getValueOrDefault(value, defaultValue string) string {
+	if value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 func NewWebhookCmd() *cobra.Command {
 	var webhookCmd = &cobra.Command{
@@ -74,7 +90,7 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"A list of DNS search domains as space seperated string i.e. 'value1 value2'")
 	webhookCmd.Flags().StringVar(&zitiRoleKey, "ziti-role-key", "",
 		"Ziti Identity Role Key used in pod annotation")
-	webhookCmd.Flags().StringVar(&sidecarImagePullPolicy, "sidecar-image-pull-policy", string(defaultImagePullPolicy),
+	webhookCmd.Flags().StringVar(&sidecarImagePullPolicy, "sidecar-image-pull-policy", defaultImagePullPolicy,
 		"Image pull policy for sidecar container. One of: Always, IfNotPresent, Never")
 
 	return webhookCmd
