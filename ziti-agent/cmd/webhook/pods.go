@@ -37,9 +37,9 @@ const (
 	labelAppInstance  = "app.kubernetes.io/instance"
 	labelAppComponent = "app.kubernetes.io/component"
 
-	warnEmptyJWT            = "pod created without ziti enrollment token"
-	warnIdentityNameExtract = "ziti identity name not found in pod annotations"
-	warnIdentityListFailed  = "ziti identity list operation failed in ziti edge"
+	// warnEmptyJWT            = "pod created without ziti enrollment token"
+	// warnIdentityNameExtract = "ziti identity name not found in pod annotations"
+	// warnIdentityListFailed  = "ziti identity list operation failed in ziti edge"
 
 	zitiTypeRouter zitiType = "router"
 	zitiTypeTunnel zitiType = "tunnel"
@@ -61,7 +61,7 @@ type zitiClient struct {
 }
 
 type zitiClientIntf interface {
-	createIdentity(ctx context.Context, uid types.UID, prefix string, key string, pod *corev1.Pod) (string, string, error)
+	createIdentity(ctx context.Context, name string, key string, pod *corev1.Pod) (string, error)
 	deleteIdentity(ctx context.Context, id string) error
 	deleteZitiRouter(ctx context.Context, name string) error
 	getIdentityToken(ctx context.Context, name string, id string) (string, error)
@@ -227,10 +227,14 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 
 func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	identityName, identityId, err := zh.ZC.createIdentity(
+	identityName, err := buildZitiIdentityName(zh.Config.Prefix, pod, uid)
+	if err != nil {
+		return failureResponse(response, err)
+	}
+
+	identityId, err := zh.ZC.createIdentity(
 		context.Background(),
-		uid,
-		zh.Config.Prefix,
+		identityName,
 		zh.Config.RoleKey,
 		pod,
 	)
@@ -350,6 +354,13 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 			Path:  "/spec/dnsConfig",
 			Value: dnsConfig,
 		},
+		{
+			OP:   "add",
+			Path: "/metadata/annotations",
+			Value: map[string]string{
+				annotationIdentityName: identityName,
+			},
+		},
 	}
 
 	if podSecurityOverride {
@@ -362,6 +373,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 				},
 			},
 		}...)
+
 	}
 
 	patchBytes, err := json.Marshal(&jsonPatch)
@@ -436,15 +448,21 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	} else {
 
-		name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", pod.Labels["app"], zh.Config.Prefix))
-		if ok {
-			if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
+		nameList, annotationExists := filterMapValuesByKey(pod.Annotations, annotationIdentityName)
+		if annotationExists {
+			if err := zh.ZC.deleteIdentity(context.Background(), nameList[0]); err != nil {
 				return failureResponse(response, err)
 			}
+			klog.V(4).Infof("ziti identity name from annotations is %s", nameList[0])
 		} else {
-			klog.Infof("Container %s not found in Pod %s", name, pod.Name)
+			name, containerExists := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s-%s", zh.Config.Prefix, pod.Labels[labelApp], pod.Namespace))
+			if containerExists {
+				if err := zh.ZC.deleteIdentity(context.Background(), name); err != nil {
+					return failureResponse(response, err)
+				}
+				klog.V(4).Infof("ziti identity name from container spec is %s", name)
+			}
 		}
-
 	}
 
 	return successResponse(response)
@@ -452,12 +470,22 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 func (zh *zitiHandler) handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	name, ok := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s", trimString(pod.Labels["app"]), zh.Config.Prefix))
-	if ok {
-		if err := zh.ZC.patchIdentityRoleAttributes(context.Background(), name, zh.Config.RoleKey, pod, oldPod); err != nil {
+	nameList, annotationExists := filterMapValuesByKey(pod.Annotations, annotationIdentityName)
+	if annotationExists {
+		if err := zh.ZC.patchIdentityRoleAttributes(context.Background(), nameList[0], zh.Config.RoleKey, pod, oldPod); err != nil {
 			return failureResponse(response, err)
 		}
+		klog.V(4).Infof("ziti identity name from annotations is %s", nameList[0])
+	} else {
+		name, containerExists := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s-%s", zh.Config.Prefix, pod.Labels[labelApp], pod.Namespace))
+		if containerExists {
+			if err := zh.ZC.patchIdentityRoleAttributes(context.Background(), name, zh.Config.RoleKey, pod, oldPod); err != nil {
+				return failureResponse(response, err)
+			}
+			klog.V(4).Infof("ziti identity name from container spec is %s", name)
+		}
 	}
+
 	return successResponse(response)
 }
 
@@ -479,9 +507,7 @@ func (cc *clusterClient) getClusterService(ctx context.Context, namespace string
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
-func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix string, key string, pod *corev1.Pod) (string, string, error) {
-
-	name := fmt.Sprintf("%s-%s-%s", trimString(pod.Labels["app"]), prefix, uid)
+func (zc *zitiClient) createIdentity(ctx context.Context, name string, key string, pod *corev1.Pod) (string, error) {
 
 	roles, ok := filterMapValuesByKey(
 		pod.Annotations,
@@ -498,10 +524,10 @@ func (zc *zitiClient) createIdentity(ctx context.Context, uid types.UID, prefix 
 		zc.client,
 	)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
-	return name, identityDetails.GetPayload().Data.ID, nil
+	return identityDetails.GetPayload().Data.ID, nil
 }
 
 func (zc *zitiClient) getIdentityToken(ctx context.Context, name string, id string) (string, error) {

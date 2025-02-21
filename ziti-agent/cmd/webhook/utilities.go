@@ -8,6 +8,8 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 )
 
 type JsonPatchEntry struct {
@@ -53,6 +55,54 @@ func validateSubdomain(input string) error {
 		return err
 	}
 	return nil
+}
+
+func buildZitiIdentityName(prefix string, pod *corev1.Pod, uid types.UID) (string, error) {
+	var name string
+	var isUID bool
+
+	// Check for explicit annotation first
+	if annotatedName, exists := pod.Annotations[annotationIdentityName]; exists && annotatedName != "" {
+		name = annotatedName
+	} else {
+		// Check labels in order of precedence
+		labels := []string{labelApp, labelAppName, labelAppInstance, labelAppComponent}
+		for _, label := range labels {
+			klog.V(4).Infof("Checking label %s=%s", label, pod.Labels[label])
+			if labelName, exists := pod.Labels[label]; exists && labelName != "" {
+				name = labelName
+				klog.V(4).Infof("Setting pod name from label %s=%s", label, name)
+				break
+			} else {
+				klog.V(4).Infof("Label %s not found", label)
+			}
+		}
+
+		// Check pod name if no label was found
+		if name == "" && pod.Name != "" {
+			name = pod.Name
+		}
+
+		// Fall back to pod UID if nothing else is available
+		if name == "" {
+			return "", fmt.Errorf("failed to build identity name")
+		}
+	}
+
+	// Trim the name if it's too long and not a UID
+	if !isUID {
+		name = trimString(name)
+	}
+
+	// Build the full identity name
+	identityName := fmt.Sprintf("%s-%s-%s-%s", prefix, name, pod.Namespace, uid)
+
+	// Validate the final name
+	if err := validateSubdomain(identityName); err != nil {
+		return "", fmt.Errorf("invalid identity name '%s': %v", identityName, err)
+	}
+
+	return identityName, nil
 }
 
 // failureResponse sets the admission response as a failure with the provided error.
