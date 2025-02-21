@@ -77,7 +77,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 		startTime := time.Now()
 		defer func() {
 			duration := time.Since(startTime)
-			klog.Infof("Request ID %s processed in %s", requestedAdmissionReview.Request.UID, duration.Round(time.Millisecond))
+			klog.V(4).Infof("Request ID %s processed in %s", requestedAdmissionReview.Request.UID, duration.Round(time.Millisecond))
 		}()
 
 		responseAdmissionReview := &admissionv1.AdmissionReview{}

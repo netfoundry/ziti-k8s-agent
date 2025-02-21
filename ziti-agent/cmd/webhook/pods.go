@@ -255,45 +255,9 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 		return failureResponse(response, err)
 	}
 
-	// get cluster dns ip
-	defaultClusterDnsServiceIP := "10.96.0.10"
-	if len(zh.Config.ResolverIp) == 0 {
-		service, err := zh.KC.getClusterService(
-			ctx,
-			"kube-system", "kube-dns",
-			metav1.GetOptions{},
-		)
-		if err != nil {
-			klog.Error(err)
-		}
-		if len(service.Spec.ClusterIP) != 0 {
-			zh.Config.ResolverIp = service.Spec.ClusterIP
-		} else {
-			zh.Config.ResolverIp = defaultClusterDnsServiceIP
-			klog.Warningf("Failed to look up DNS SVC ClusterIP, using default: %s", defaultClusterDnsServiceIP)
-		}
-	}
-
-	dnsConfig := &corev1.PodDNSConfig{}
-	if len(searchDomains) == 0 {
-		dnsConfig = &corev1.PodDNSConfig{
-			Nameservers: []string{
-				"127.0.0.1",
-				zh.Config.ResolverIp,
-			},
-			Searches: []string{
-				"cluster.local",
-				fmt.Sprintf("%s.svc", podMeta.Namespace),
-			},
-		}
-	} else {
-		dnsConfig = &corev1.PodDNSConfig{
-			Nameservers: []string{
-				"127.0.0.1",
-				zh.Config.ResolverIp,
-			},
-			Searches: searchDomains,
-		}
+	dnsConfig, err := zh.configureDNS(ctx)
+	if err != nil {
+		return failureResponse(response, err)
 	}
 
 	jsonPatch = []JsonPatchEntry{
@@ -384,6 +348,43 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 	pt := admissionv1.PatchTypeJSONPatch
 	response.PatchType = &pt
 	return successResponse(response)
+}
+
+func (zh *zitiHandler) configureDNS(ctx context.Context) (*corev1.PodDNSConfig, error) {
+	// get cluster dns ip if not already configured
+	defaultClusterDnsServiceIP := "10.96.0.10"
+	if len(zh.Config.ResolverIp) == 0 {
+		service, err := zh.KC.getClusterService(
+			ctx,
+			"kube-system", "kube-dns",
+			metav1.GetOptions{},
+		)
+		if err != nil {
+			klog.Warningf("Failed to look up DNS service: %v", err)
+			klog.Warningf("Using default DNS IP: %s", defaultClusterDnsServiceIP)
+			zh.Config.ResolverIp = defaultClusterDnsServiceIP
+		} else if len(service.Spec.ClusterIP) != 0 {
+			zh.Config.ResolverIp = service.Spec.ClusterIP
+			klog.V(4).Infof("Using cluster DNS IP: %s", zh.Config.ResolverIp)
+		} else {
+			zh.Config.ResolverIp = defaultClusterDnsServiceIP
+			klog.Warningf("DNS service has no ClusterIP, using default: %s", defaultClusterDnsServiceIP)
+		}
+	}
+
+	dnsConfig := &corev1.PodDNSConfig{
+		Nameservers: []string{
+			"127.0.0.1",
+			zh.Config.ResolverIp,
+		},
+	}
+
+	if len(searchDomains) > 0 {
+		dnsConfig.Searches = searchDomains
+		klog.V(4).Infof("Using custom search domains: %v", searchDomains)
+	}
+
+	return dnsConfig, nil
 }
 
 func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
