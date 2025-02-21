@@ -3,7 +3,7 @@ module github.com/netfoundry/ziti-k8s-agent
 go 1.23.2
 
 require (
-	github.com/openziti/edge-api v0.26.22
+	github.com/openziti/edge-api v0.26.38
 	github.com/openziti/sdk-golang v0.23.39
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1

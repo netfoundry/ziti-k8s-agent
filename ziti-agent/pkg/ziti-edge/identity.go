@@ -13,7 +13,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func CreateIdentity(name string, roleAttributes rest_model_edge.Attributes, identityType rest_model_edge.IdentityType, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.CreateIdentityCreated, error) {
+func CreateIdentity(name string, roleAttributes rest_model_edge.Attributes, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.CreateIdentityCreated, error) {
 	isAdmin := false
 	req := identity.NewCreateIdentityParams()
 	req.Identity = &rest_model_edge.IdentityCreate{
@@ -25,7 +25,6 @@ func CreateIdentity(name string, roleAttributes rest_model_edge.Attributes, iden
 		ExternalID:          nil,
 		ServiceHostingCosts: nil,
 		Tags:                nil,
-		Type:                &identityType,
 	}
 	req.SetTimeout(30 * time.Second)
 	resp, err := edge.Identity.CreateIdentity(req, nil)
@@ -49,8 +48,9 @@ func PatchIdentity(zId string, roleAttributes rest_model_edge.Attributes, edge *
 	return resp, err
 }
 
+// get nil or a list of exactly one identity by name
 func GetIdentityByName(name string, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.ListIdentitiesOK, error) {
-	filter := fmt.Sprintf("name=\"%v\"", name)
+	filter := fmt.Sprintf("name=\"%s\"", name)
 	limit := int64(0)
 	offset := int64(0)
 	req := &identity.ListIdentitiesParams{
