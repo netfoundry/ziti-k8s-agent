@@ -189,6 +189,7 @@ webhooks:
   - name: tunnel.ziti.webhook
     admissionReviewVersions: ["v1"]
     matchPolicy: Equivalent
+    failurePolicy: ${ZITI_AGENT_WEBHOOK_FAILURE_POLICY:-Fail}
     namespaceSelector:
       matchExpressions:
         - key: kubernetes.io/metadata.name
@@ -201,16 +202,23 @@ for SELECTOR in "${SELECTORS[@]}"; do
   case "$SELECTOR" in
     namespace)
       cat <<SEL
-    namespaceSelector:
-      matchLabels:
-        tunnel.openziti.io/enabled: "true"
+        - key: tunnel.openziti.io/enabled
+          operator: In
+          values:
+          - "true"
+          - "false"
 SEL
     ;;
     pod)
       cat <<SEL
     objectSelector:
-      matchLabels:
-        tunnel.openziti.io/enabled: "true"
+      namespaceSelector:
+      matchExpressions:
+      - key: tunnel.openziti.io/enabled
+        operator: In
+        values:
+        - "true"
+        - "false"
 SEL
     ;;
     *)
@@ -245,11 +253,8 @@ metadata:
 rules:
   # "" indicates the core API group
   - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "create", "delete"]
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get"]
+    resources: ["services", "namespaces"]
+    verbs: ["get", "list"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

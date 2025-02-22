@@ -23,60 +23,60 @@ type Config struct {
 
 // Create a Ziti Edge API session with a Ziti Identity configuration
 func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error) {
-    klog.V(5).Infof("Creating Ziti Edge Management client with endpoint: %s, cert subject: %s",
-        cfg.ApiEndpoint, 
-        cfg.Cert.Subject, 
-    )
+	klog.V(5).Infof("Creating Ziti Edge Management client with endpoint: %s, cert subject: %s",
+		cfg.ApiEndpoint,
+		cfg.Cert.Subject,
+	)
 
-    klog.V(4).Info("Client Certificate Details:")
-    klog.V(4).Infof("  Subject: %v", cfg.Cert.Subject)
-    klog.V(4).Infof("  Issuer: %v", cfg.Cert.Issuer)
-    klog.V(4).Infof("  Valid from: %v to %v", cfg.Cert.NotBefore, cfg.Cert.NotAfter)
-    klog.V(4).Infof("  Key usages: %s", keyUsageString(cfg.Cert.KeyUsage))
-    klog.V(4).Infof("  Extended Key usages: %s", extKeyUsageString(cfg.Cert.ExtKeyUsage))
-    klog.V(4).Info("CA Pool Certificate Details:")
-    // Log the key usages of the CA certificate
-    block, _ := pem.Decode(cfg.CABundle)
-    if block == nil {
-        klog.Error("Failed to decode PEM data")
-    } else {
-        parsedCert, err := x509.ParseCertificate(block.Bytes)
-        if err != nil {
-            klog.Errorf("Error parsing CA certificate: %v", err)
-        } else {
-            klog.V(4).Infof("  CA Subject: %v", parsedCert.Subject)
-            klog.V(4).Infof("  CA Issuer: %v", parsedCert.Issuer)
-            klog.V(4).Infof("  CA Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
-            klog.V(4).Infof("  CA Key usages: %s", keyUsageString(parsedCert.KeyUsage))
-            klog.V(4).Infof("  CA Extended Key usages: %s", extKeyUsageString(parsedCert.ExtKeyUsage))
-        }
-    }
-    // Check if our client cert is trusted by the CA pool
-    opts := x509.VerifyOptions{
-        Roots: &cfg.CAS,
-    }
-    if _, err := cfg.Cert.Verify(opts); err == nil {
-        klog.V(4).Info("Client certificate is trusted by the CA pool")
-    } else {
-        klog.V(4).Infof("Warning: Client certificate is not trusted by the CA pool: %v", err)
-    }
+	klog.V(5).Info("Client Certificate Details:")
+	klog.V(5).Infof("  Subject: %v", cfg.Cert.Subject)
+	klog.V(5).Infof("  Issuer: %v", cfg.Cert.Issuer)
+	klog.V(5).Infof("  Valid from: %v to %v", cfg.Cert.NotBefore, cfg.Cert.NotAfter)
+	klog.V(5).Infof("  Key usages: %s", keyUsageString(cfg.Cert.KeyUsage))
+	klog.V(5).Infof("  Extended Key usages: %s", extKeyUsageString(cfg.Cert.ExtKeyUsage))
+	klog.V(5).Info("CA Pool Certificate Details:")
+	// Log the key usages of the CA certificate
+	block, _ := pem.Decode(cfg.CABundle)
+	if block == nil {
+		klog.Error("Failed to decode PEM data")
+	} else {
+		parsedCert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			klog.Errorf("Error parsing CA certificate: %v", err)
+		} else {
+			klog.V(5).Infof("  CA Subject: %v", parsedCert.Subject)
+			klog.V(5).Infof("  CA Issuer: %v", parsedCert.Issuer)
+			klog.V(5).Infof("  CA Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
+			klog.V(5).Infof("  CA Key usages: %s", keyUsageString(parsedCert.KeyUsage))
+			klog.V(5).Infof("  CA Extended Key usages: %s", extKeyUsageString(parsedCert.ExtKeyUsage))
+		}
+	}
+	// Check if our client cert is trusted by the CA pool
+	opts := x509.VerifyOptions{
+		Roots: &cfg.CAS,
+	}
+	if _, err := cfg.Cert.Verify(opts); err == nil {
+		klog.V(4).Info("Client certificate is trusted by the CA pool")
+	} else {
+		klog.V(4).Infof("Warning: Client certificate is not trusted by the CA pool: %v", err)
+	}
 
-    klog.V(5).Info("Verifying controller with provided CA pool...")
-    ok, err := rest_util.VerifyController(cfg.ApiEndpoint, &cfg.CAS)
-    if !ok {
-        klog.Errorf("Ziti Controller failed CA validation - %s", err)
-        return nil, errors.Wrap(err, "controller verification failed")
-    }
-    klog.V(5).Info("Controller verification successful")
+	klog.V(5).Info("Verifying controller with provided CA pool...")
+	ok, err := rest_util.VerifyController(cfg.ApiEndpoint, &cfg.CAS)
+	if !ok {
+		klog.Errorf("Ziti Controller failed CA validation - %s", err)
+		return nil, errors.Wrap(err, "controller verification failed")
+	}
+	klog.V(5).Info("Controller verification successful")
 
-    klog.V(5).Info("Creating new Edge Management client with certificate...")
-    client, err := rest_util.NewEdgeManagementClientWithCert(cfg.Cert, cfg.PrivateKey, cfg.ApiEndpoint, &cfg.CAS)
-    if err != nil {
-        return nil, errors.Wrap(err, "failed to create edge management client")
-    }
-    klog.V(5).Info("Successfully created Edge Management client")
+	klog.V(5).Info("Creating new Edge Management client with certificate...")
+	client, err := rest_util.NewEdgeManagementClientWithCert(cfg.Cert, cfg.PrivateKey, cfg.ApiEndpoint, &cfg.CAS)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create edge management client")
+	}
+	klog.V(5).Info("Successfully created Edge Management client")
 
-    return client, nil
+	return client, nil
 }
 
 func keyUsageString(ku x509.KeyUsage) string {

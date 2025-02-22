@@ -169,11 +169,9 @@ func lookupEnvVars() {
 	}
 
 	value, ok = os.LookupEnv("ZITI_ROLE_KEY")
-	if ok && len(value) > 0 {
+	if ok {
 		zitiRoleKey = value
 	}
-	if len(zitiRoleKey) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ROLE_KEY"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ROLE_KEY"})
-	}
+	zitiRoleKey = getValueOrDefault(zitiRoleKey, defaultZitiRoleAttributesKey)
+	klog.V(4).Infof("Using Ziti role key: %s", zitiRoleKey)
 }

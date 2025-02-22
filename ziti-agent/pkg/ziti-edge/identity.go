@@ -28,6 +28,11 @@ func CreateIdentity(name string, roleAttributes rest_model_edge.Attributes, iden
 		Type:                &identityType,
 	}
 	req.SetTimeout(30 * time.Second)
+	requestJson, err := json.Marshal(&req)
+	if err != nil {
+		return nil, err
+	}
+	klog.V(5).Infof("Creating Ziti identity with request JSON: %v", string(requestJson))
 	resp, err := edge.Identity.CreateIdentity(req, nil)
 	if err != nil {
 		return nil, err
@@ -49,8 +54,9 @@ func PatchIdentity(zId string, roleAttributes rest_model_edge.Attributes, edge *
 	return resp, err
 }
 
+// get nil or a list of exactly one identity by name
 func GetIdentityByName(name string, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.ListIdentitiesOK, error) {
-	filter := fmt.Sprintf("name=\"%v\"", name)
+	filter := fmt.Sprintf("name=\"%s\"", name)
 	limit := int64(0)
 	offset := int64(0)
 	req := &identity.ListIdentitiesParams{
@@ -61,6 +67,19 @@ func GetIdentityByName(name string, edge *rest_management_api_client.ZitiEdgeMan
 	}
 	req.SetTimeout(30 * time.Second)
 	resp, err := edge.Identity.ListIdentities(req, nil)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func GetIdentityById(zId string, edge *rest_management_api_client.ZitiEdgeManagement) (*identity.DetailIdentityOK, error) {
+	req := &identity.DetailIdentityParams{
+		ID:      zId,
+		Context: context.Background(),
+	}
+	req.SetTimeout(30 * time.Second)
+	resp, err := edge.Identity.DetailIdentity(req, nil)
 	if err != nil {
 		return nil, err
 	}
