@@ -27,8 +27,6 @@ var (
 )
 
 const (
-	volumeMountName string = "ziti-identity"
-
 	// Annotation key for explicitly setting identity name
 	annotationIdentityName = "identity.openziti.io/name"
 
@@ -255,7 +253,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 		return failureResponse(response, err)
 	}
 
-	dnsConfig, err := zh.configureDNS(ctx)
+	dnsConfig, err := zh.getDnsConfig(ctx)
 	if err != nil {
 		return failureResponse(response, err)
 	}
@@ -269,7 +267,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 				Name:            identityName,
 				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
 				ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
-				Args: []string{"tproxy"},
+				Args:            []string{"tproxy"},
 				Env: []corev1.EnvVar{
 					{
 						Name:  "ZITI_ENROLL_TOKEN",
@@ -365,7 +363,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 	return successResponse(response)
 }
 
-func (zh *zitiHandler) configureDNS(ctx context.Context) (*corev1.PodDNSConfig, error) {
+func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, error) {
 	// get cluster dns ip if not already configured
 	defaultClusterDnsServiceIP := "10.96.0.10"
 	if len(zh.Config.ResolverIp) == 0 {
@@ -463,30 +461,25 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	} else {
 
-		name, containerExists := hasContainer(pod.Spec.Containers, zh.Config.Prefix)
-		if containerExists {
-			klog.V(4).Infof("ziti identity name from container spec is %s", name)
-		} else {
-			klog.V(4).Infof("ziti sidecar does not exist in pod")
-		}
-		nameList, annotationExists := filterMapValuesByKey(pod.Annotations, annotationIdentityName)
-		if annotationExists {
-			klog.V(4).Infof("ziti identity name from annotations is %s", nameList[0])
-		} else {
-			klog.V(4).Infof("ziti identity name annotation missing or empty")
-		}
-
-		if containerExists {
+		// Attempt to find a sidecar container identity first.
+		if name, containerExists := hasContainer(pod.Spec.Containers, zh.Config.Prefix); containerExists && name != "" {
+			klog.V(3).Infof("ziti identity name from container spec is %s", name)
 			if err := zh.ZC.deleteIdentity(ctx, name); err != nil {
 				return failureResponse(response, err)
 			}
-		} else if annotationExists {
-			if err := zh.ZC.deleteIdentity(ctx, nameList[0]); err != nil {
+			return successResponse(response)
+		}
+
+		// Otherwise, look for an annotation-based identity.
+		if name, annotationExists := filterMapValueByKey(pod.Annotations, annotationIdentityName); annotationExists && name != "" {
+			klog.V(3).Infof("ziti identity name from annotations is %s", name)
+			if err := zh.ZC.deleteIdentity(ctx, name); err != nil {
 				return failureResponse(response, err)
 			}
-		} else {
-			klog.V(4).Infof("no ziti identity name annotation or sidecar found for pod name '%s'", pod.Name)
+			return successResponse(response)
 		}
+
+		klog.V(3).Infof("no ziti identity name annotation or tunnel sidecar found for pod name '%s'", pod.Name)
 	}
 
 	return successResponse(response)
@@ -494,21 +487,25 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 func (zh *zitiHandler) handleUpdate(ctx context.Context, pod *corev1.Pod, oldPod *corev1.Pod, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
-	nameList, annotationExists := filterMapValuesByKey(pod.Annotations, annotationIdentityName)
-	if annotationExists {
-		if err := zh.ZC.patchIdentityRoleAttributes(ctx, nameList[0], zh.Config.RoleKey, pod, oldPod); err != nil {
+	// Attempt to find a sidecar container identity first.
+	if name, containerExists := hasContainer(pod.Spec.Containers, zh.Config.Prefix); containerExists && name != "" {
+		klog.V(3).Infof("ziti identity name from container spec is %s", name)
+		if err := zh.ZC.patchIdentityRoleAttributes(ctx, name, zh.Config.RoleKey, pod, oldPod); err != nil {
 			return failureResponse(response, err)
 		}
-		klog.V(4).Infof("ziti identity name from annotations is %s", nameList[0])
-	} else {
-		name, containerExists := hasContainer(pod.Spec.Containers, fmt.Sprintf("%s-%s-%s", zh.Config.Prefix, pod.Labels[labelApp], pod.Namespace))
-		if containerExists {
-			if err := zh.ZC.patchIdentityRoleAttributes(ctx, name, zh.Config.RoleKey, pod, oldPod); err != nil {
-				return failureResponse(response, err)
-			}
-			klog.V(4).Infof("ziti identity name from container spec is %s", name)
-		}
+		return successResponse(response)
 	}
+
+	// Otherwise, look for an annotation-based identity.
+	if name, annotationExists := filterMapValueByKey(pod.Annotations, annotationIdentityName); annotationExists && name != "" {
+		klog.V(3).Infof("ziti identity name from annotations is %s", name)
+		if err := zh.ZC.patchIdentityRoleAttributes(ctx, name, zh.Config.RoleKey, pod, oldPod); err != nil {
+			return failureResponse(response, err)
+		}
+		return successResponse(response)
+	}
+
+	klog.V(3).Infof("no ziti identity name annotation or tunnel sidecar found for pod name '%s'", pod.Name)
 
 	return successResponse(response)
 }
@@ -533,12 +530,12 @@ func (cc *clusterClient) getClusterService(ctx context.Context, namespace string
 
 // create a ziti identity with a conventional name from the prefix, pod metadta, and admission request uid
 func (zc *zitiClient) createIdentity(ctx context.Context, name string, roleKey string, podMeta *metav1.ObjectMeta) (string, error) {
-	roles, ok := filterMapValuesByKey(
+	roles, ok := filterMapValueListByKey(
 		podMeta.Annotations,
 		roleKey,
 	)
 	if !ok {
-		roles = []string{podMeta.Labels["app"]}
+		roles = []string{podMeta.Labels[labelApp]}
 	}
 
 	identityDetails, err := zitiedge.CreateIdentity(
@@ -624,12 +621,12 @@ func (zc *zitiClient) patchIdentityRoleAttributes(ctx context.Context, name stri
 	var roles []string
 	id := ""
 
-	newRoles, newOk := filterMapValuesByKey(
+	newRoles, newOk := filterMapValueListByKey(
 		newPod.Annotations,
 		key,
 	)
 
-	oldRoles, oldOk := filterMapValuesByKey(
+	oldRoles, oldOk := filterMapValueListByKey(
 		oldPod.Annotations,
 		key,
 	)

@@ -31,7 +31,7 @@ func hasContainer(containers []corev1.Container, prefix string) (string, bool) {
 	return "", false
 }
 
-func filterMapValuesByKey(values map[string]string, key string) ([]string, bool) {
+func filterMapValueListByKey(values map[string]string, key string) ([]string, bool) {
 
 	value, ok := values[key]
 	if ok {
@@ -42,13 +42,24 @@ func filterMapValuesByKey(values map[string]string, key string) ([]string, bool)
 	return []string{}, false
 }
 
+func filterMapValueByKey(values map[string]string, key string) (string, bool) {
+
+	value, ok := values[key]
+	if ok {
+		if len(value) > 0 {
+			return value, true
+		}
+	}
+	return "", false
+}
+
 func buildZitiIdentityName(prefix string, podMeta *metav1.ObjectMeta, uid types.UID) (string, error) {
 	var name string
 	var builtName string
 
 	// Check labels in order of precedence:
 	// 1. app
-	// 2. app.name 
+	// 2. app.name
 	// 3. app.instance
 	// 4. app.component
 	var labelName string

@@ -202,13 +202,11 @@ for SELECTOR in "${SELECTORS[@]}"; do
   case "$SELECTOR" in
     namespace)
       cat <<SEL
-    namespaceSelector:
-      matchExpressions:
-      - key: tunnel.openziti.io/enabled
-        operator: In
-        values:
-        - "true"
-        - "false"
+        - key: tunnel.openziti.io/enabled
+          operator: In
+          values:
+          - "true"
+          - "false"
 SEL
     ;;
     pod)
