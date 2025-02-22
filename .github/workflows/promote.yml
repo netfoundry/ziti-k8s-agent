@@ -4,6 +4,9 @@ on:
   release:
     types: [released]  # this release event activity type excludes prereleases
 
+permissions:
+  contents: write  # allow updating the major version and "latest" Git tags
+
 env:
   REGISTRY: docker.io
   # repo only - no registry, no tag
@@ -36,6 +39,11 @@ jobs:
           registry: ${{ env.REGISTRY}}
           username: ${{ vars.DOCKER_HUB_API_USER || secrets.DOCKER_HUB_API_USER }}
           password: ${{ secrets.DOCKER_HUB_API_TOKEN }}
+
+      - uses: Actions-R-Us/actions-tagger@v2
+        with:
+          publish_latest_tag: false
+          prefer_branch_releases: false 
 
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
