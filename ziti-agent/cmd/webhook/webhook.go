@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -28,7 +29,7 @@ func init() {
 	addToScheme(scheme)
 }
 
-type admitv1Func func(admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
+type admitv1Func func(context.Context, admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
 
 type admitHandler struct {
 	admissionv1 admitv1Func
@@ -82,7 +83,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 		responseAdmissionReview := &admissionv1.AdmissionReview{}
 		responseAdmissionReview.SetGroupVersionKind(*gvk)
-		responseAdmissionReview.Response = admit.admissionv1(*requestedAdmissionReview)
+		responseAdmissionReview.Response = admit.admissionv1(context.Background(), *requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
 		responseJSON, err := json.Marshal(responseAdmissionReview)

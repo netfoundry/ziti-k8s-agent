@@ -120,7 +120,7 @@ type ZitiHandler interface {
 //
 //	A pointer to the AdmissionResponse indicating success or failure
 //	of the admission request processing.
-func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleAdmissionRequest(ctx context.Context, ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	reviewResponse := admissionv1.AdmissionResponse{}
 	pod := &corev1.Pod{}
 	oldPod := &corev1.Pod{}
@@ -140,7 +140,6 @@ func (zh *zitiHandler) handleAdmissionRequest(ar admissionv1.AdmissionReview) *a
 	klog.Infof("%s operation admission request UID: %s", ar.Request.Operation, ar.Request.UID)
 
 	// create a context to pass to subsequent functions allowing cancellations to propagate
-	ctx := context.Background()
 
 	deleteLabelFound, err := zh.KC.findNamespaceByOption(
 		ctx,
