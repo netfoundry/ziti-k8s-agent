@@ -13,6 +13,7 @@ import (
 	rest_model_edge "github.com/openziti/edge-api/rest_model"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -27,6 +28,13 @@ var (
 )
 
 const (
+
+	// Container Default Limits
+	defaultRequestsResourceCPU    = "50m"
+	defaultRequestsResourceMemory = "64Mi"
+	defaultLimitsResourceCPU      = "100m"
+	defaultLimitsResourceMemory   = "128Mi"
+
 	// Annotation key for explicitly setting identity name
 	annotationIdentityName = "identity.openziti.io/name"
 
@@ -291,6 +299,16 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 					},
 					RunAsUser:  &rootUser,
 					Privileged: &isPrivileged,
+				},
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse(defaultRequestsResourceCPU),
+						corev1.ResourceMemory: resource.MustParse(defaultRequestsResourceMemory),
+					},
+					Limits: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse(defaultLimitsResourceCPU),
+						corev1.ResourceMemory: resource.MustParse(defaultLimitsResourceMemory),
+					},
 				},
 			},
 		},
