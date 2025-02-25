@@ -679,6 +679,9 @@ jobs:
 
           LOG_EMPTY=0
 
+          # TODO find a better way to wait for the termintors to be ready
+          sleep 60
+
           kubectl get pods -n test1 --field-selector=status.phase=Running --context  $AWS_CLUSTER | tee ./testcase-01_pods.log
           kubectl get pods -n test2 --field-selector=status.phase=Running --context  $GKE_CLUSTER | tee -a ./testcase-01_pods.log
 
@@ -731,6 +734,9 @@ jobs:
           kubectl get pods -n test1 --field-selector=status.phase=Running --context  $AWS_CLUSTER | tee ./testcase-02_pods.log
           kubectl get pods -n test2 --field-selector=status.phase=Running --context  $GKE_CLUSTER | tee -a ./testcase-02_pods.log
           
+          # TODO find a better way to wait for the termintors to be ready
+          sleep 60
+
           LOG_EMPTY=0
           # send enough requests to trigger the terminatorStrategy: random evenly distributing of requests across all
           # pods
