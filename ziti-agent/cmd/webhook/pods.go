@@ -28,7 +28,6 @@ var (
 )
 
 const (
-
 	// Container Default Limits
 	defaultRequestsResourceCPU    = "50m"
 	defaultRequestsResourceMemory = "64Mi"
