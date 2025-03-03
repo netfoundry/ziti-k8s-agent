@@ -1,0 +1,9 @@
+apiVersion: kubernetes.openziti.io/v1alpha1
+kind: ZitiWebhook
+metadata:
+  labels:
+    app.kubernetes.io/name: ziti-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: zitiwebhook-sample
+spec:
+  # TODO(user): Add fields here
