@@ -47,9 +47,17 @@ type ZitiRouterReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ZitiRouterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	log := log.FromContext(ctx)
+	var err error
+	log.Info("ZitiRouter Reconciliation starting")
 
-	// TODO(user): your logic here
+	zitirouter := &kubernetesv1alpha1.ZitiRouter{}
+	if err = r.Get(ctx, req.NamespacedName, zitirouter); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
