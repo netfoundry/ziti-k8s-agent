@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	admissionregistration1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -46,12 +47,10 @@ type ZitiWebhookSpec struct {
 	WebhookSpec WebhookSpec `json:"webhookSpec,omitempty"`
 
 	// Cluster Role Specs
-	// +kubebuilder:validation:MinItems=1
-	// +default:=[{"apiGroups": ["*"],"resources": ["services","namespaces"],"verbs": ["get","list","watch"]}]
-	ClusterRoleSpec []ClusterRoleSpec `json:"clusterRoleSpec"`
+	ClusterRoleSpec ClusterRoleSpec `json:"clusterRoleSpec,omitempty"`
 
 	// Cluster Role Binding Specs
-	ClusterRoleBindingSpec []ClusterRoleBindingSpec `json:"clusterRoleBindingSpec,omitempty"`
+	ClusterRoleBindingSpec ClusterRoleBindingSpec `json:"clusterRoleBindingSpec,omitempty"`
 }
 
 type CertificateSpecs struct {
@@ -218,23 +217,16 @@ type ClientConfigSpec struct {
 }
 
 type ClusterRoleSpec struct {
-	// Api Group List
+	// Cluster Role Rules
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:default:={"*"}
-	ApiGroups []string `json:"apiGroups"`
-
-	// Resources List
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:default:={"services","namespaces"}
-	Resources []string `json:"resources"`
-
-	// Verbs List
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:default:={"get","list","watch"}
-	Verbs []string `json:"verbs"`
+	// +kubebuilder:default:={{"apiGroups":{"*"},"resources":{"services","namespaces"},"verbs":{"get","list","watch"}}}
+	Rules []rbacv1.PolicyRule `json:"rules,omitempty"`
 }
 
 type ClusterRoleBindingSpec struct {
+	// Cluster Role Binding Subjects
+	// +kubebuilder:validation:MinItems=1
+	Subjects []rbacv1.Subject `json:"subjects,omitempty"`
 }
 
 // ZitiWebhookStatus defines the observed state of ZitiWebhook

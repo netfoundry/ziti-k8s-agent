@@ -437,13 +437,7 @@ func (r *ZitiWebhookReconciler) updateClusterRole(ctx context.Context, zitiwebho
 				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
 			},
 		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups: zitiwebhook.Spec.ClusterRoleSpec[0].ApiGroups,
-				Resources: zitiwebhook.Spec.ClusterRoleSpec[0].Resources,
-				Verbs:     zitiwebhook.Spec.ClusterRoleSpec[0].Verbs,
-			},
-		},
+		Rules: zitiwebhook.Spec.ClusterRoleSpec.Rules,
 	}
 	if method == "create" {
 		if err := r.Client.Create(ctx, clusterRole); err != nil {

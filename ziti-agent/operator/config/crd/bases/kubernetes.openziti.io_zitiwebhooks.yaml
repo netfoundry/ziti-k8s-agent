@@ -65,57 +65,107 @@ spec:
                 type: object
               clusterRoleBindingSpec:
                 description: Cluster Role Binding Specs
-                items:
-                  type: object
-                type: array
+                properties:
+                  subjects:
+                    description: Cluster Role Binding Subjects
+                    items:
+                      description: |-
+                        Subject contains a reference to the object or user identities a role binding applies to.  This can either hold a direct API object reference,
+                        or a value for non-objects such as user and group names.
+                      properties:
+                        apiGroup:
+                          description: |-
+                            APIGroup holds the API group of the referenced subject.
+                            Defaults to "" for ServiceAccount subjects.
+                            Defaults to "rbac.authorization.k8s.io" for User and Group subjects.
+                          type: string
+                        kind:
+                          description: |-
+                            Kind of object being referenced. Values defined by this API group are "User", "Group", and "ServiceAccount".
+                            If the Authorizer does not recognized the kind value, the Authorizer should report an error.
+                          type: string
+                        name:
+                          description: Name of the object being referenced.
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace of the referenced object.  If the object kind is non-namespace, such as "User" or "Group", and this value is not empty
+                            the Authorizer should report an error.
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    minItems: 1
+                    type: array
+                type: object
               clusterRoleSpec:
-                default:
-                - apiGroups:
-                  - '*'
-                  resources:
-                  - services
-                  - namespaces
-                  verbs:
-                  - get
-                  - list
-                  - watch
                 description: Cluster Role Specs
-                items:
-                  properties:
-                    apiGroups:
-                      default:
+                properties:
+                  rules:
+                    default:
+                    - apiGroups:
                       - '*'
-                      description: Api Group List
-                      items:
-                        type: string
-                      minItems: 1
-                      type: array
-                    resources:
-                      default:
+                      resources:
                       - services
                       - namespaces
-                      description: Resources List
-                      items:
-                        type: string
-                      minItems: 1
-                      type: array
-                    verbs:
-                      default:
+                      verbs:
                       - get
                       - list
                       - watch
-                      description: Verbs List
-                      items:
-                        type: string
-                      minItems: 1
-                      type: array
-                  required:
-                  - apiGroups
-                  - resources
-                  - verbs
-                  type: object
-                minItems: 1
-                type: array
+                    description: Cluster Role Rules
+                    items:
+                      description: |-
+                        PolicyRule holds information that describes a policy rule, but does not contain information
+                        about who the rule applies to or which namespace the rule applies to.
+                      properties:
+                        apiGroups:
+                          description: |-
+                            APIGroups is the name of the APIGroup that contains the resources.  If multiple API groups are specified, any action requested against one of
+                            the enumerated resources in any API group will be allowed. "" represents the core API group and "*" represents all API groups.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        nonResourceURLs:
+                          description: |-
+                            NonResourceURLs is a set of partial urls that a user should have access to.  *s are allowed, but only as the full, final step in the path
+                            Since non-resource URLs are not namespaced, this field is only applicable for ClusterRoles referenced from a ClusterRoleBinding.
+                            Rules can either apply to API resources (such as "pods" or "secrets") or non-resource URL paths (such as "/api"),  but not both.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        resourceNames:
+                          description: ResourceNames is an optional white list of
+                            names that the rule applies to.  An empty set means that
+                            everything is allowed.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        resources:
+                          description: Resources is a list of resources this rule
+                            applies to. '*' represents all resources.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        verbs:
+                          description: Verbs is a list of Verbs that apply to ALL
+                            the ResourceKinds contained in this rule. '*' represents
+                            all verbs.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - verbs
+                      type: object
+                    minItems: 1
+                    type: array
+                type: object
               deploymentSpec:
                 description: Deployment Specs
                 properties:
@@ -380,8 +430,6 @@ spec:
                       type: string
                     type: array
                 type: object
-            required:
-            - clusterRoleSpec
             type: object
           status:
             description: ZitiWebhookStatus defines the observed state of ZitiWebhook
