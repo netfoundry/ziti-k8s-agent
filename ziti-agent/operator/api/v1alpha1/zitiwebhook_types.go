@@ -56,16 +56,15 @@ type ZitiWebhookSpec struct {
 
 type CertificateSpecs struct {
 	// Cert Duration
-	// +kubebuilder:default:="2160h"
-	Duration string `json:"duration,omitempty"`
+	// +kubebuilder:default:=2160
+	Duration int64 `json:"duration,omitempty"`
 
 	// Cert Renew Before
-	// +kubebuilder:default:="360h"
-	RenewBefore string `json:"renewBefore,omitempty"`
-
+	// +kubebuilder:default:=360
+	RenewBefore int64 `json:"renewBefore,omitempty"`
 	// Cert Organization
-	// +kubebuilder:default:=netfoundry
-	Organization string `json:"organization,omitempty"`
+	// +kubebuilder:default:={"netfoundry"}
+	Organizations []string `json:"organization,omitempty"`
 }
 
 type DeploymentSpec struct {
@@ -74,7 +73,7 @@ type DeploymentSpec struct {
 	Replicas int32 `json:"replicas,omitempty"`
 
 	// Webhook Image
-	// +kubebuilder:default:=openziti/ziti-webhook
+	// +kubebuilder:default:=netfoundry/ziti-k8s-agent
 	Image string `json:"image,omitempty"`
 
 	// Webhook Image Version
@@ -150,7 +149,7 @@ type DeploymentSpec struct {
 	// +kubebuilder:default:=2
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=5
-	LogLevel int `json:"v,omitempty"`
+	LogLevel int32 `json:"logLevel,omitempty"`
 }
 
 type WebhookSpec struct {
@@ -221,17 +220,17 @@ type ClientConfigSpec struct {
 type ClusterRoleSpec struct {
 	// Api Group List
 	// +kubebuilder:validation:MinItems=1
-	// +default:=["*"]
+	// +kubebuilder:default:={"*"}
 	ApiGroups []string `json:"apiGroups"`
 
 	// Resources List
 	// +kubebuilder:validation:MinItems=1
-	// +default:=["services","namespaces"]
+	// +kubebuilder:default:={"services","namespaces"}
 	Resources []string `json:"resources"`
 
 	// Verbs List
 	// +kubebuilder:validation:MinItems=1
-	// +default:=["get","list","watch"]
+	// +kubebuilder:default:={"get","list","watch"}
 	Verbs []string `json:"verbs"`
 }
 

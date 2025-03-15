@@ -22,6 +22,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -168,6 +169,16 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
+	foundServiceAccount := &corev1.ServiceAccount{}
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: zitiwebhook.Namespace,
+		Name:      zitiwebhook.Spec.Name + "-service-account",
+	}, foundServiceAccount); err != nil && apierrors.IsNotFound(err) {
+		if err := r.updateServiceAccount(ctx, zitiwebhook, "create"); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	foundClusterRoleList := &rbacv1.ClusterRoleList{}
 	if err := r.List(ctx, foundClusterRoleList,
 		&client.ListOptions{
@@ -237,6 +248,7 @@ func (r *ZitiWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
+		Owns(&corev1.ServiceAccount{}).
 		Complete(r)
 }
 
@@ -289,10 +301,10 @@ func (r *ZitiWebhookReconciler) updateCertificate(ctx context.Context, zitiwebho
 		},
 		Spec: certmanagerv1.CertificateSpec{
 			SecretName:  zitiwebhook.Spec.Name + "-server-cert",
-			Duration:    &metav1.Duration{Duration: 4 * time.Hour},
-			RenewBefore: &metav1.Duration{Duration: 1 * time.Hour},
+			Duration:    &metav1.Duration{Duration: time.Duration(zitiwebhook.Spec.Cert.Duration) * time.Hour},
+			RenewBefore: &metav1.Duration{Duration: time.Duration(zitiwebhook.Spec.Cert.RenewBefore) * time.Hour},
 			Subject: &certmanagerv1.X509Subject{
-				Organizations: []string{"netfoundry"},
+				Organizations: zitiwebhook.Spec.Cert.Organizations,
 			},
 			CommonName: zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc.cluster.local",
 			IsCA:       false,
@@ -396,6 +408,26 @@ func (r *ZitiWebhookReconciler) updateService(ctx context.Context, zitiwebhook *
 	return nil
 }
 
+func (r *ZitiWebhookReconciler) updateServiceAccount(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
+	serviceAccount := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zitiwebhook.Spec.Name + "-service-account",
+			Namespace: zitiwebhook.Namespace,
+			Labels: map[string]string{
+				"app":                    zitiwebhook.Spec.Name,
+				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
+			},
+		},
+	}
+	if err := controllerutil.SetControllerReference(zitiwebhook, serviceAccount, r.Scheme); err != nil {
+		return err
+	}
+	if err := r.Client.Create(ctx, serviceAccount); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *ZitiWebhookReconciler) updateClusterRole(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
 	clusterRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
@@ -433,7 +465,7 @@ func (r *ZitiWebhookReconciler) updateClusterRoleBinding(ctx context.Context, zi
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      "default",
+				Name:      zitiwebhook.Spec.Name + "-service-account",
 				Namespace: zitiwebhook.Namespace,
 			},
 		},
@@ -568,6 +600,7 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 							},
 							Args: []string{
 								"webhook",
+								"--v=" + strconv.FormatInt(int64(zitiwebhook.Spec.DeploymentSpec.LogLevel), 10),
 							},
 							Env: []corev1.EnvVar{
 								{
@@ -642,8 +675,16 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 									Value: zitiwebhook.Spec.DeploymentSpec.SearchDomainList,
 								},
 								{
+									Name:  "SIDECAR_IMAGE",
+									Value: zitiwebhook.Spec.DeploymentSpec.SidecarImage,
+								},
+								{
 									Name:  "SIDECAR_IMAGE_VERSION",
 									Value: zitiwebhook.Spec.DeploymentSpec.SidecarImageVersion,
+								},
+								{
+									Name:  "SIDECAR_IMAGE_PULL_POLICY",
+									Value: string(zitiwebhook.Spec.DeploymentSpec.SidecarImagePullPolicy),
 								},
 							},
 						},
@@ -658,6 +699,7 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 							corev1.ResourceMemory: zitiwebhook.Spec.DeploymentSpec.ResourceRequest["memory"],
 						},
 					},
+					ServiceAccountName: zitiwebhook.Spec.Name + "-service-account",
 				},
 			},
 		},

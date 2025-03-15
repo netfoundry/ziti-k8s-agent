@@ -46,17 +46,22 @@ spec:
                 description: Webhook Certificate
                 properties:
                   duration:
-                    default: 2160h
+                    default: 2160
                     description: Cert Duration
-                    type: string
+                    format: int64
+                    type: integer
                   organization:
-                    default: netfoundry
+                    default:
+                    - netfoundry
                     description: Cert Organization
-                    type: string
+                    items:
+                      type: string
+                    type: array
                   renewBefore:
-                    default: 360h
+                    default: 360
                     description: Cert Renew Before
-                    type: string
+                    format: int64
+                    type: integer
                 type: object
               clusterRoleBindingSpec:
                 description: Cluster Role Binding Specs
@@ -118,7 +123,7 @@ spec:
                     description: Cluster DNS Service IP
                     type: string
                   image:
-                    default: openziti/ziti-webhook
+                    default: netfoundry/ziti-k8s-agent
                     description: Webhook Image
                     type: string
                   imagePullPolicy:
@@ -129,6 +134,13 @@ spec:
                     default: latest
                     description: Webhook Image Version
                     type: string
+                  logLevel:
+                    default: 2
+                    description: Log Verbose Level
+                    format: int32
+                    maximum: 5
+                    minimum: 0
+                    type: integer
                   podSecurityOverride:
                     default: false
                     description: 'Override the security context at pod level, i.e.
@@ -194,12 +206,6 @@ spec:
                     description: Used in creation of ContainerName to be used as injected
                       sidecar
                     type: string
-                  v:
-                    default: 2
-                    description: Log Verbose Level
-                    maximum: 5
-                    minimum: 0
-                    type: integer
                   zitiCtrlCaBundleFile:
                     description: Ziti Controller CA Bundle
                     type: string
