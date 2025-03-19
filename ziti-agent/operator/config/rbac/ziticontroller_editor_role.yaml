@@ -1,0 +1,27 @@
+# permissions for end users to edit ziticontrollers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: ziti-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: ziticontroller-editor-role
+rules:
+- apiGroups:
+  - kubernetes.openziti.io
+  resources:
+  - ziticontrollers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubernetes.openziti.io
+  resources:
+  - ziticontrollers/status
+  verbs:
+  - get

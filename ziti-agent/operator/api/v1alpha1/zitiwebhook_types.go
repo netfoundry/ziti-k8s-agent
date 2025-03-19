@@ -34,8 +34,8 @@ type ZitiWebhookSpec struct {
 	// Webhook Name
 	Name string `json:"name,omitempty"`
 
-	// Ziti Admin Idetity Token
-	AdminJwt string `json:"adminJwt,omitempty"`
+	// Controller CR Name
+	ZitiControllerName string `json:"zitiControllerName,omitempty"`
 
 	// Webhook Certificate
 	Cert CertificateSpecs `json:"cert,omitempty"`

@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+
 	kubernetesv1alpha1 "github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/api/v1alpha1"
 	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/internal/controller"
 	// +kubebuilder:scaffold:imports
@@ -159,6 +160,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ZitiRouter")
+		os.Exit(1)
+	}
+	if err = (&controller.ZitiControllerReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ZitiController")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -2,4 +2,5 @@
 resources:
 - kubernetes_v1alpha1_zitiwebhook.yaml
 - kubernetes_v1alpha1_zitirouter.yaml
+- kubernetes_v1alpha1_ziticontroller.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

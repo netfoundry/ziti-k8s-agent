@@ -18,19 +18,12 @@ package controller
 
 import (
 	"context"
-	"crypto/x509"
-	"encoding/pem"
-	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/openziti/sdk-golang/ziti"
-	"github.com/openziti/sdk-golang/ziti/enroll"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -59,7 +52,7 @@ type ZitiWebhookReconciler struct {
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitiwebhooks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitiwebhooks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitiwebhooks/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cert-manager.io,resources=issuers,verbs=get;list;watch;create;update;patch;delete
@@ -115,27 +108,6 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 			log.Info("Removed finalizer from ZitiWebhook", "ZitiWebhook.Name", zitiwebhook.Name)
 			return ctrl.Result{}, nil
-		}
-	}
-
-	foundAdminSecret := &corev1.Secret{}
-	if err := r.Get(ctx, client.ObjectKey{
-		Namespace: zitiwebhook.Namespace,
-		Name:      zitiwebhook.Spec.Name + "-secret",
-	}, foundAdminSecret); err != nil && apierrors.IsNotFound(err) {
-		if zitiwebhook.Spec.AdminJwt == "" {
-			return ctrl.Result{}, errors.New("admin jwt is empty")
-		}
-		if err := r.updateAdminSecret(ctx, zitiwebhook, "create"); err != nil {
-			return ctrl.Result{}, err
-		}
-	} else {
-		isOttExpired := verifyOtt(zitiwebhook.Spec.AdminJwt)
-		isCertExpired, _ := checkCertExpiration(foundAdminSecret.Data["tls.crt"])
-		if isCertExpired && !isOttExpired {
-			if err := r.updateAdminSecret(ctx, zitiwebhook, "update"); err != nil {
-				return ctrl.Result{}, err
-			}
 		}
 	}
 
@@ -247,47 +219,46 @@ func (r *ZitiWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&kubernetesv1alpha1.ZitiWebhook{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
-		Owns(&corev1.Secret{}).
 		Owns(&corev1.ServiceAccount{}).
 		Complete(r)
 }
 
-func (r *ZitiWebhookReconciler) updateAdminSecret(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	zitiCfg, err := enrollIdentityWithJwt(zitiwebhook.Spec.AdminJwt)
-	if err != nil {
-		return err
-	}
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      zitiwebhook.Spec.Name + "-secret",
-			Namespace: zitiwebhook.Namespace,
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
-		},
-		Data: map[string][]byte{
-			"tls.key": []byte(strings.TrimPrefix(zitiCfg.ID.Key, "pem:")),
-			"tls.crt": []byte(strings.TrimPrefix(zitiCfg.ID.Cert, "pem:")),
-			"tls.ca":  []byte(strings.TrimPrefix(zitiCfg.ID.CA, "pem:")),
-		},
-		Type: "kubernetes.io/tls",
-	}
-	if err := controllerutil.SetControllerReference(zitiwebhook, secret, r.Scheme); err != nil {
-		return err
-	}
-	if method == "update" {
-		if err := r.Client.Update(ctx, secret); err != nil {
-			return err
-		}
-	}
-	if method == "create" {
-		if err := r.Client.Create(ctx, secret); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// func (r *ZitiWebhookReconciler) updateAdminSecret(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
+// 	zitiCfg, err := enrollIdentityWithJwt(zitiwebhook.Spec.AdminJwt)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	secret := &corev1.Secret{
+// 		ObjectMeta: metav1.ObjectMeta{
+// 			Name:      zitiwebhook.Spec.Name + "-secret",
+// 			Namespace: zitiwebhook.Namespace,
+// 			Labels: map[string]string{
+// 				"app":                    zitiwebhook.Spec.Name,
+// 				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
+// 			},
+// 		},
+// 		Data: map[string][]byte{
+// 			"tls.key": []byte(strings.TrimPrefix(zitiCfg.ID.Key, "pem:")),
+// 			"tls.crt": []byte(strings.TrimPrefix(zitiCfg.ID.Cert, "pem:")),
+// 			"tls.ca":  []byte(strings.TrimPrefix(zitiCfg.ID.CA, "pem:")),
+// 		},
+// 		Type: "kubernetes.io/tls",
+// 	}
+// 	if err := controllerutil.SetControllerReference(zitiwebhook, secret, r.Scheme); err != nil {
+// 		return err
+// 	}
+// 	if method == "update" {
+// 		if err := r.Client.Update(ctx, secret); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	if method == "create" {
+// 		if err := r.Client.Create(ctx, secret); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return nil
+// }
 
 func (r *ZitiWebhookReconciler) updateCertificate(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
 	cert := &certmanagerv1.Certificate{
@@ -628,7 +599,7 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: zitiwebhook.Spec.Name + "-secret",
+												Name: zitiwebhook.Spec.ZitiControllerName + "-secret",
 											},
 											Key: "tls.crt",
 										},
@@ -639,7 +610,7 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: zitiwebhook.Spec.Name + "-secret",
+												Name: zitiwebhook.Spec.ZitiControllerName + "-secret",
 											},
 											Key: "tls.key",
 										},
@@ -650,7 +621,7 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: zitiwebhook.Spec.Name + "-secret",
+												Name: zitiwebhook.Spec.ZitiControllerName + "-secret",
 											},
 											Key: "tls.ca",
 										},
@@ -744,72 +715,4 @@ func (r *ZitiWebhookReconciler) finalizeZitiWebhook(ctx context.Context, zitiweb
 		return err
 	}
 	return nil
-}
-
-func verifyOtt(ott string) bool {
-	// Parse the token without verifying signature
-	token, _, err := new(jwt.Parser).ParseUnverified(ott, jwt.MapClaims{})
-	if err != nil {
-		log.Log.Error(err, "Error parsing token:")
-		return false
-	}
-
-	// Check if the token is valid
-	if claims, ok := token.Claims.(jwt.MapClaims); ok {
-		expirationTime := claims["exp"].(float64)
-		currentTime := time.Now().Unix()
-
-		if currentTime > int64(expirationTime) {
-			return false
-		} else {
-			return true
-		}
-	}
-	return false
-}
-
-func enrollIdentityWithJwt(jwtToken string) (*ziti.Config, error) {
-	tkn, _, err := enroll.ParseToken(jwtToken)
-	if err != nil {
-		return nil, err
-	}
-	flags := enroll.EnrollmentFlags{
-		Token:  tkn,
-		KeyAlg: "RSA",
-	}
-	zitiCfg, err := enroll.Enroll(flags)
-	if err != nil {
-		return nil, err
-	}
-	return zitiCfg, nil
-}
-
-func checkCertExpiration(certData []byte) (bool, error) {
-	cert, err := parseCertificate(certData)
-	if err != nil {
-		return false, fmt.Errorf("failed to parse certificate: %w", err)
-	}
-
-	expirationTime := cert.NotAfter
-	currentTime := time.Now()
-
-	if currentTime.After(expirationTime) {
-		return false, nil
-	} else {
-		return true, nil
-	}
-}
-
-func parseCertificate(certData []byte) (*x509.Certificate, error) {
-	block, _ := pem.Decode(certData)
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM-encoded certificate")
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %w", err)
-	}
-
-	return cert, nil
 }

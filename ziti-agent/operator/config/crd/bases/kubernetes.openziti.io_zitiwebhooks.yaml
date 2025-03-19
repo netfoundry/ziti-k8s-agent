@@ -39,9 +39,6 @@ spec:
           spec:
             description: ZitiWebhookSpec defines the desired state of ZitiWebhook
             properties:
-              adminJwt:
-                description: Ziti Admin Idetity Token
-                type: string
               cert:
                 description: Webhook Certificate
                 properties:
@@ -430,6 +427,9 @@ spec:
                       type: string
                     type: array
                 type: object
+              zitiControllerName:
+                description: Controller CR Name
+                type: string
             type: object
           status:
             description: ZitiWebhookStatus defines the observed state of ZitiWebhook

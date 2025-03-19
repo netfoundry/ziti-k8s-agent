@@ -58,6 +58,7 @@ rules:
 - apiGroups:
   - kubernetes.openziti.io
   resources:
+  - ziticontrollers
   - zitirouters
   - zitiwebhooks
   verbs:
@@ -71,6 +72,7 @@ rules:
 - apiGroups:
   - kubernetes.openziti.io
   resources:
+  - ziticontrollers/finalizers
   - zitirouters/finalizers
   - zitiwebhooks/finalizers
   verbs:
@@ -78,6 +80,7 @@ rules:
 - apiGroups:
   - kubernetes.openziti.io
   resources:
+  - ziticontrollers/status
   - zitirouters/status
   - zitiwebhooks/status
   verbs:

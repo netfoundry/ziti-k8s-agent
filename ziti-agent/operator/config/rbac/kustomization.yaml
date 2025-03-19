@@ -22,6 +22,8 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the Project itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- ziticontroller_editor_role.yaml
+- ziticontroller_viewer_role.yaml
 - zitirouter_editor_role.yaml
 - zitirouter_viewer_role.yaml
 - zitiwebhook_editor_role.yaml
