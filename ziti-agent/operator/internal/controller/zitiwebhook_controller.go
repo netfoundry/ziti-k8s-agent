@@ -223,43 +223,6 @@ func (r *ZitiWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// func (r *ZitiWebhookReconciler) updateAdminSecret(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-// 	zitiCfg, err := enrollIdentityWithJwt(zitiwebhook.Spec.AdminJwt)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	secret := &corev1.Secret{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:      zitiwebhook.Spec.Name + "-secret",
-// 			Namespace: zitiwebhook.Namespace,
-// 			Labels: map[string]string{
-// 				"app":                    zitiwebhook.Spec.Name,
-// 				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-// 			},
-// 		},
-// 		Data: map[string][]byte{
-// 			"tls.key": []byte(strings.TrimPrefix(zitiCfg.ID.Key, "pem:")),
-// 			"tls.crt": []byte(strings.TrimPrefix(zitiCfg.ID.Cert, "pem:")),
-// 			"tls.ca":  []byte(strings.TrimPrefix(zitiCfg.ID.CA, "pem:")),
-// 		},
-// 		Type: "kubernetes.io/tls",
-// 	}
-// 	if err := controllerutil.SetControllerReference(zitiwebhook, secret, r.Scheme); err != nil {
-// 		return err
-// 	}
-// 	if method == "update" {
-// 		if err := r.Client.Update(ctx, secret); err != nil {
-// 			return err
-// 		}
-// 	}
-// 	if method == "create" {
-// 		if err := r.Client.Create(ctx, secret); err != nil {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
-
 func (r *ZitiWebhookReconciler) updateCertificate(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
 	cert := &certmanagerv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{
