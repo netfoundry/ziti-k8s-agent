@@ -49,9 +49,6 @@ type ZitiWebhookSpec struct {
 
 	// Cluster Role Specs
 	ClusterRoleSpec ClusterRoleSpec `json:"clusterRoleSpec,omitempty"`
-
-	// Cluster Role Binding Specs
-	ClusterRoleBindingSpec ClusterRoleBindingSpec `json:"clusterRoleBindingSpec,omitempty"`
 }
 
 type CertificateSpecs struct {
@@ -254,12 +251,6 @@ type ClusterRoleSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:default:={{"apiGroups":{"*"},"resources":{"services","namespaces"},"verbs":{"get","list","watch"}}}
 	Rules []rbacv1.PolicyRule `json:"rules,omitempty"`
-}
-
-type ClusterRoleBindingSpec struct {
-	// Cluster Role Binding Subjects
-	// +kubebuilder:validation:MinItems=1
-	Subjects []rbacv1.Subject `json:"subjects,omitempty"`
 }
 
 // ZitiWebhookStatus defines the observed state of ZitiWebhook

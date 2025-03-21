@@ -152,8 +152,9 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	foundClusterRoleList := &rbacv1.ClusterRoleList{}
-	if err := r.List(ctx, foundClusterRoleList,
+	actualStateClusterRoleList := &rbacv1.ClusterRoleList{}
+	desiredStateClusterRole := r.getDesiredStateClusterRole(ctx, zitiwebhook)
+	if err := r.List(ctx, actualStateClusterRoleList,
 		&client.ListOptions{
 			LabelSelector: labels.SelectorFromSet(map[string]string{
 				"app": zitiwebhook.Spec.Name,
@@ -162,14 +163,25 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	); err != nil {
 		return ctrl.Result{}, err
 	}
-	if len(foundClusterRoleList.Items) == 0 {
-		if err := r.updateClusterRole(ctx, zitiwebhook, "create"); err != nil {
+	if len(actualStateClusterRoleList.Items) == 0 {
+		log.V(4).Info("Creating a new ClusterRole", "ClusterRole.Namespace", desiredStateClusterRole.Namespace, "ClusterRole.Name", desiredStateClusterRole.Name)
+		log.V(5).Info("Creating a new ClusterRole", "ClusterRole.Namespace", desiredStateClusterRole.Namespace, "ClusterRole.Rules", desiredStateClusterRole.Rules)
+		if err := r.Create(ctx, desiredStateClusterRole); err != nil {
 			return ctrl.Result{}, err
+		}
+	} else {
+		if !reflect.DeepEqual(actualStateClusterRoleList.Items[0].Rules, desiredStateClusterRole.Rules) {
+			log.V(4).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Name, "ClusterRole.Desired", desiredStateClusterRole.Name)
+			log.V(5).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Rules, "ClusterRole.Desired", desiredStateClusterRole.Rules)
+			if err := r.Update(ctx, desiredStateClusterRole); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
-	foundClusterRoleBindingList := &rbacv1.ClusterRoleBindingList{}
-	if err := r.List(ctx, foundClusterRoleBindingList,
+	actualStateClusterRoleBindingList := &rbacv1.ClusterRoleBindingList{}
+	desiredStateClusterRoleBinding := r.getDesiredStateClusterRoleBinding(ctx, zitiwebhook)
+	if err := r.List(ctx, actualStateClusterRoleBindingList,
 		&client.ListOptions{
 			LabelSelector: labels.SelectorFromSet(map[string]string{
 				"app": zitiwebhook.Spec.Name,
@@ -178,9 +190,21 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	); err != nil {
 		return ctrl.Result{}, err
 	}
-	if len(foundClusterRoleBindingList.Items) == 0 {
-		if err := r.updateClusterRoleBinding(ctx, zitiwebhook, "create"); err != nil {
+	if len(actualStateClusterRoleBindingList.Items) == 0 {
+		log.V(4).Info("Creating a new ClusterRoleBinding", "ClusterRoleBinding.Namespace", desiredStateClusterRoleBinding.Namespace, "ClusterRoleBinding.Name", desiredStateClusterRoleBinding.Name)
+		log.V(5).Info("Creating a new ClusterRoleBinding", "ClusterRoleBinding.Namespace", desiredStateClusterRoleBinding.Namespace, "ClusterRoleBinding.RoleRef", desiredStateClusterRoleBinding.RoleRef)
+		log.V(5).Info("Creating a new ClusterRoleBinding", "ClusterRoleBinding.Namespace", desiredStateClusterRoleBinding.Namespace, "ClusterRoleBinding.Subjects", desiredStateClusterRoleBinding.Subjects)
+		if err := r.Create(ctx, desiredStateClusterRoleBinding); err != nil {
 			return ctrl.Result{}, err
+		}
+	} else {
+		if !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].RoleRef, desiredStateClusterRoleBinding.RoleRef) || !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].Subjects, desiredStateClusterRoleBinding.Subjects) {
+			log.V(4).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Name, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Name)
+			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].RoleRef, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.RoleRef)
+			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Subjects, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Subjects)
+			if err := r.Update(ctx, desiredStateClusterRoleBinding); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
@@ -432,8 +456,9 @@ func (r *ZitiWebhookReconciler) updateServiceAccount(ctx context.Context, zitiwe
 	return nil
 }
 
-func (r *ZitiWebhookReconciler) updateClusterRole(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	clusterRole := &rbacv1.ClusterRole{
+func (r *ZitiWebhookReconciler) getDesiredStateClusterRole(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *rbacv1.ClusterRole {
+	_ = log.FromContext(ctx)
+	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: zitiwebhook.Spec.Name + "-cluster-role",
 			Labels: map[string]string{
@@ -443,22 +468,22 @@ func (r *ZitiWebhookReconciler) updateClusterRole(ctx context.Context, zitiwebho
 		},
 		Rules: zitiwebhook.Spec.ClusterRoleSpec.Rules,
 	}
-	if method == "create" {
-		if err := r.Client.Create(ctx, clusterRole); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-func (r *ZitiWebhookReconciler) updateClusterRoleBinding(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
+func (r *ZitiWebhookReconciler) getDesiredStateClusterRoleBinding(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *rbacv1.ClusterRoleBinding {
+	_ = log.FromContext(ctx)
+	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: zitiwebhook.Spec.Name + "-cluster-role-binding",
 			Labels: map[string]string{
 				"app":                    zitiwebhook.Spec.Name,
 				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
 			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     zitiwebhook.Spec.Name + "-cluster-role",
 		},
 		Subjects: []rbacv1.Subject{
 			{
@@ -467,18 +492,7 @@ func (r *ZitiWebhookReconciler) updateClusterRoleBinding(ctx context.Context, zi
 				Namespace: zitiwebhook.Namespace,
 			},
 		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     zitiwebhook.Spec.Name + "-cluster-role",
-		},
 	}
-	if method == "create" {
-		if err := r.Client.Create(ctx, clusterRoleBinding); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (r *ZitiWebhookReconciler) getDesiredStateMutatingWebhookConfiguration(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *admissionregistrationv1.MutatingWebhookConfiguration {

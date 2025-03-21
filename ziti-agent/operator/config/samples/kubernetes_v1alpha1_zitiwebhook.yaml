@@ -15,18 +15,11 @@ spec:
       sidecarImageVersion: 1.4.2
     logLevel: 3
     replicas: 2
-  mutatingWebhookSpec:
-    objectSelector:
-      matchExpressions:
-      - key:  tunnel.openziti.io/enabled
-        operator: In
-        values: 
-        - "true"
-        - "false"
-  #   namespaceSelector:
+  # mutatingWebhookSpec:
+  #   objectSelector:
   #     matchExpressions:
-  #     - key: tunnel.openziti.io/enabled
+  #     - key:  tunnel.openziti.io/enabled
   #       operator: In
   #       values: 
   #       - "true"
-        # - "false"
+  #       - "false"
