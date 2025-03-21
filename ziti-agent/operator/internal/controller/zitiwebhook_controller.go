@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -183,8 +184,9 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	foundMutatingWebhookConfigurationList := &admissionregistrationv1.MutatingWebhookConfigurationList{}
-	if err := r.List(ctx, foundMutatingWebhookConfigurationList,
+	actualStateMutatingWebhookConfigurationList := &admissionregistrationv1.MutatingWebhookConfigurationList{}
+	desiredStateMutatingWebhookConfiguration := r.getDesiredStateMutatingWebhookConfiguration(ctx, zitiwebhook)
+	if err := r.List(ctx, actualStateMutatingWebhookConfigurationList,
 		&client.ListOptions{
 			LabelSelector: labels.SelectorFromSet(map[string]string{
 				"app": zitiwebhook.Spec.Name,
@@ -193,24 +195,55 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	); err != nil {
 		return ctrl.Result{}, err
 	}
-	if len(foundMutatingWebhookConfigurationList.Items) == 0 {
-		if err := r.updateMutatingWebhookConfiguration(ctx, zitiwebhook, "create"); err != nil {
+	if len(actualStateMutatingWebhookConfigurationList.Items) == 0 {
+		log.V(4).Info("Creating a new MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Namespace", desiredStateMutatingWebhookConfiguration.Namespace, "MutatingWebhookConfiguration.Name", desiredStateMutatingWebhookConfiguration.Name)
+		log.V(5).Info("Creating a new MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Namespace", desiredStateMutatingWebhookConfiguration.Namespace, "MutatingWebhookConfiguration.Webhook", desiredStateMutatingWebhookConfiguration.Webhooks[0])
+		if err := r.Create(ctx, desiredStateMutatingWebhookConfiguration); err != nil {
 			return ctrl.Result{}, err
+		}
+	} else {
+		if len(desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle) == 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle) > 0 {
+			desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle = actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle
+			log.V(4).Info("Desired MutatingWebhookConfiguration", "CA BUndled", desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle)
+		}
+		desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion = actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.ResourceVersion
+		log.V(4).Info("Desired MutatingWebhookConfiguration", "ResourceVersion", desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion)
+		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]) {
+			log.V(4).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
+			log.V(5).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Webhooks[0])
+			if err := r.Update(ctx, desiredStateMutatingWebhookConfiguration); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
-	foundWebhookDeployment := &appsv1.Deployment{}
+	actualStateWebhookDeployment := &appsv1.Deployment{}
+	desiredStateWebhookDeployment := r.getDesiredStateDeploymentConfiguration(ctx, zitiwebhook)
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: zitiwebhook.Namespace,
 		Name:      zitiwebhook.Spec.Name + "-deployment",
-	}, foundWebhookDeployment); err != nil && apierrors.IsNotFound(err) {
-		if err := r.updateDeployment(ctx, zitiwebhook, "create"); err != nil {
+	}, actualStateWebhookDeployment); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new Deployment", "Deployment.Namespace", desiredStateWebhookDeployment.Namespace, "Deployment.Name", desiredStateWebhookDeployment.Name)
+		log.V(5).Info("Creating a new Deployment", "Deployment.Namespace", desiredStateWebhookDeployment.Namespace, "Deployment.Spec", desiredStateWebhookDeployment.Spec)
+		if err := ctrl.SetControllerReference(zitiwebhook, desiredStateWebhookDeployment, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateWebhookDeployment); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else if !reflect.DeepEqual(actualStateWebhookDeployment.Spec, desiredStateWebhookDeployment.Spec) {
+		log.V(4).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Name, "Deployment.Desired", desiredStateWebhookDeployment.Name)
+		log.V(5).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Spec, "Deployment.Desired", desiredStateWebhookDeployment.Spec)
+		if err := ctrl.SetControllerReference(zitiwebhook, desiredStateWebhookDeployment, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Update(ctx, desiredStateWebhookDeployment); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
 	log.Info("ZitiWebhook Reconciliation finished")
-	return ctrl.Result{RequeueAfter: time.Minute}, nil
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -221,6 +254,43 @@ func (r *ZitiWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ServiceAccount{}).
 		Complete(r)
+}
+
+func (r *ZitiWebhookReconciler) finalizeZitiWebhook(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) error {
+	clusterRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: zitiwebhook.Spec.Name + "-cluster-role",
+		},
+	}
+	if err := r.Delete(ctx, clusterRole); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: zitiwebhook.Spec.Name + "-cluster-role-binding",
+		},
+	}
+	if err := r.Delete(ctx, clusterRoleBinding); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zitiwebhook.Spec.Name + "-server-cert",
+			Namespace: zitiwebhook.Namespace,
+		},
+	}
+	if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	mutatingWebhookConfiguration := &admissionregistrationv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
+		},
+	}
+	if err := r.Delete(ctx, mutatingWebhookConfiguration); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 func (r *ZitiWebhookReconciler) updateCertificate(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
@@ -318,7 +388,7 @@ func (r *ZitiWebhookReconciler) updateService(ctx context.Context, zitiwebhook *
 				{
 					Name:     "https",
 					Protocol: corev1.ProtocolTCP,
-					Port:     zitiwebhook.Spec.WebhookSpec.ClientConfig.Port,
+					Port:     zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Port,
 					TargetPort: intstr.IntOrString{
 						Type:   intstr.Int,
 						IntVal: zitiwebhook.Spec.DeploymentSpec.Port,
@@ -411,8 +481,9 @@ func (r *ZitiWebhookReconciler) updateClusterRoleBinding(ctx context.Context, zi
 	return nil
 }
 
-func (r *ZitiWebhookReconciler) updateMutatingWebhookConfiguration(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	mutatingWebhookConfiguration := &admissionregistrationv1.MutatingWebhookConfiguration{
+func (r *ZitiWebhookReconciler) getDesiredStateMutatingWebhookConfiguration(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *admissionregistrationv1.MutatingWebhookConfiguration {
+	_ = log.FromContext(ctx)
+	return &admissionregistrationv1.MutatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
 			Labels: map[string]string{
@@ -430,68 +501,28 @@ func (r *ZitiWebhookReconciler) updateMutatingWebhookConfiguration(ctx context.C
 					Service: &admissionregistrationv1.ServiceReference{
 						Name:      zitiwebhook.Spec.Name + "-service",
 						Namespace: zitiwebhook.Namespace,
-						Port:      &zitiwebhook.Spec.WebhookSpec.ClientConfig.Port,
-						Path:      &zitiwebhook.Spec.WebhookSpec.ClientConfig.Path,
+						Port:      &zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Port,
+						Path:      &zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Path,
 					},
-					CABundle: []byte(zitiwebhook.Spec.WebhookSpec.ClientConfig.CaBundle),
+					CABundle: []byte(zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.CaBundle),
 				},
-				Rules: []admissionregistrationv1.RuleWithOperations{
-					{
-						Operations: []admissionregistrationv1.OperationType{
-							admissionregistrationv1.Create,
-							admissionregistrationv1.Update,
-							admissionregistrationv1.Delete,
-						},
-						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"*"},
-							APIVersions: []string{"v1", "v1beta1"},
-							Resources:   []string{"pods"},
-						},
-					},
-				},
-				SideEffects:    &zitiwebhook.Spec.WebhookSpec.SideEffectType,
-				TimeoutSeconds: &zitiwebhook.Spec.WebhookSpec.TimeoutSeconds,
-				MatchPolicy:    &zitiwebhook.Spec.WebhookSpec.MatchPolicy,
-				FailurePolicy:  &zitiwebhook.Spec.WebhookSpec.FailurePolicy,
-				AdmissionReviewVersions: []string{
-					"v1",
-				},
-				// ObjectSelector: &metav1.LabelSelector{
-				// 	MatchExpressions: []metav1.LabelSelectorRequirement{
-				// 		{
-				// 			Key:      zitiwebhook.Spec.WebhookSpec.TunnelSelectorKey,
-				// 			Operator: metav1.LabelSelectorOpIn,
-				// 			Values:   zitiwebhook.Spec.WebhookSpec.SelectorValues,
-				// 		},
-				// 	},
-				// },
-				NamespaceSelector: &metav1.LabelSelector{
-					MatchExpressions: []metav1.LabelSelectorRequirement{
-						{
-							Key:      "kubernetes.io/metadata.name",
-							Operator: metav1.LabelSelectorOpNotIn,
-							Values:   []string{"kube-system"},
-						},
-						{
-							Key:      zitiwebhook.Spec.WebhookSpec.TunnelSelectorKey,
-							Operator: metav1.LabelSelectorOpIn,
-							Values:   zitiwebhook.Spec.WebhookSpec.SelectorValues,
-						},
-					},
-				},
+				Rules:                   zitiwebhook.Spec.MutatingWebhookSpec.Rules,
+				ObjectSelector:          zitiwebhook.Spec.MutatingWebhookSpec.ObjectSelector,
+				NamespaceSelector:       zitiwebhook.Spec.MutatingWebhookSpec.NamespaceSelector,
+				SideEffects:             zitiwebhook.Spec.MutatingWebhookSpec.SideEffectType,
+				TimeoutSeconds:          zitiwebhook.Spec.MutatingWebhookSpec.TimeoutSeconds,
+				MatchPolicy:             zitiwebhook.Spec.MutatingWebhookSpec.MatchPolicy,
+				FailurePolicy:           zitiwebhook.Spec.MutatingWebhookSpec.FailurePolicy,
+				AdmissionReviewVersions: zitiwebhook.Spec.MutatingWebhookSpec.AdmissionReviewVersions,
+				ReinvocationPolicy:      zitiwebhook.Spec.MutatingWebhookSpec.ReinvocationPolicy,
 			},
 		},
 	}
-	if method == "create" {
-		if err := r.Client.Create(ctx, mutatingWebhookConfiguration); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	deployment := &appsv1.Deployment{
+func (r *ZitiWebhookReconciler) getDesiredStateDeploymentConfiguration(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *appsv1.Deployment {
+	_ = log.FromContext(ctx)
+	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-deployment",
 			Namespace: zitiwebhook.Namespace,
@@ -524,6 +555,7 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 							Ports: []corev1.ContainerPort{
 								{
 									ContainerPort: zitiwebhook.Spec.DeploymentSpec.Port,
+									Protocol:      corev1.ProtocolTCP,
 								},
 							},
 							Args: []string{
@@ -552,10 +584,6 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 											Key: "tls.key",
 										},
 									},
-								},
-								{
-									Name:  "ZITI_MGMT_API",
-									Value: zitiwebhook.Spec.DeploymentSpec.ZitiCtrlMgmtApi,
 								},
 								{
 									Name: "ZITI_ADMIN_CERT",
@@ -591,91 +619,84 @@ func (r *ZitiWebhookReconciler) updateDeployment(ctx context.Context, zitiwebhoo
 									},
 								},
 								{
-									Name:  "ZITI_ROLE_KEY",
-									Value: zitiwebhook.Spec.DeploymentSpec.ZitiRoleKey,
-								},
-								{
-									Name:  "POD_SECURITY_CONTEXT_OVERRIDE",
-									Value: fmt.Sprintf("%t", zitiwebhook.Spec.DeploymentSpec.PodSecurityOverride),
-								},
-								{
-									Name:  "SEARCH_DOMAIN_LIST",
-									Value: zitiwebhook.Spec.DeploymentSpec.SearchDomainList,
-								},
-								{
 									Name:  "SIDECAR_IMAGE",
-									Value: zitiwebhook.Spec.DeploymentSpec.SidecarImage,
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.SidecarImage,
 								},
 								{
 									Name:  "SIDECAR_IMAGE_VERSION",
-									Value: zitiwebhook.Spec.DeploymentSpec.SidecarImageVersion,
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.SidecarImageVersion,
 								},
 								{
 									Name:  "SIDECAR_IMAGE_PULL_POLICY",
-									Value: string(zitiwebhook.Spec.DeploymentSpec.SidecarImagePullPolicy),
+									Value: string(zitiwebhook.Spec.DeploymentSpec.Env.SidecarImagePullPolicy),
+								},
+								{
+									Name:  "SIDECAR_PREFIX",
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.SidecarPrefix,
+								},
+								{
+									Name:  "SIDECAR_IDENTITY_DIR",
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.SidecarIdentityDir,
+								},
+								{
+									Name:  "ZITI_MGMT_API",
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi,
+								},
+								{
+									Name:  "POD_SECURITY_CONTEXT_OVERRIDE",
+									Value: fmt.Sprintf("%t", zitiwebhook.Spec.DeploymentSpec.Env.PodSecurityOverride),
+								},
+								{
+									Name:  "CLUSTER_DNS_SERVICE_IP",
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.ClusterDnsServiceIP,
+								},
+								{
+									Name:  "SEARCH_DOMAIN_LIST",
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.SearchDomainList,
+								},
+								{
+									Name:  "ZITI_ROLE_KEY",
+									Value: zitiwebhook.Spec.DeploymentSpec.Env.ZitiRoleKey,
 								},
 							},
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    zitiwebhook.Spec.DeploymentSpec.ResourceLimit["cpu"],
+									corev1.ResourceMemory: zitiwebhook.Spec.DeploymentSpec.ResourceLimit["memory"],
+								},
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    zitiwebhook.Spec.DeploymentSpec.ResourceRequest["cpu"],
+									corev1.ResourceMemory: zitiwebhook.Spec.DeploymentSpec.ResourceRequest["memory"],
+								},
+							},
+							TerminationMessagePath:   "/dev/termination-log",
+							TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 						},
 					},
-					Resources: &corev1.ResourceRequirements{
-						Limits: corev1.ResourceList{
-							corev1.ResourceCPU:    zitiwebhook.Spec.DeploymentSpec.ResourceLimit["cpu"],
-							corev1.ResourceMemory: zitiwebhook.Spec.DeploymentSpec.ResourceLimit["memory"],
-						},
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU:    zitiwebhook.Spec.DeploymentSpec.ResourceRequest["cpu"],
-							corev1.ResourceMemory: zitiwebhook.Spec.DeploymentSpec.ResourceRequest["memory"],
-						},
-					},
-					ServiceAccountName: zitiwebhook.Spec.Name + "-service-account",
+					ServiceAccountName:            zitiwebhook.Spec.Name + "-service-account",
+					DeprecatedServiceAccount:      zitiwebhook.Spec.Name + "-service-account",
+					RestartPolicy:                 corev1.RestartPolicyAlways,
+					DNSPolicy:                     corev1.DNSClusterFirst,
+					SecurityContext:               &corev1.PodSecurityContext{},
+					SchedulerName:                 corev1.DefaultSchedulerName,
+					TerminationGracePeriodSeconds: &zitiwebhook.Spec.DeploymentSpec.TerminationGracePeriodSeconds,
 				},
 			},
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &intstr.IntOrString{
+						Type:   intstr.String,
+						StrVal: zitiwebhook.Spec.DeploymentSpec.MaxUnavailable,
+					},
+					MaxSurge: &intstr.IntOrString{
+						Type:   intstr.String,
+						StrVal: zitiwebhook.Spec.DeploymentSpec.MaxSurge,
+					},
+				},
+			},
+			ProgressDeadlineSeconds: &zitiwebhook.Spec.DeploymentSpec.ProgressDeadlineSeconds,
+			RevisionHistoryLimit:    &zitiwebhook.Spec.DeploymentSpec.RevisionHistoryLimit,
 		},
 	}
-	if err := ctrl.SetControllerReference(zitiwebhook, deployment, r.Scheme); err != nil {
-		return err
-	}
-	if method == "create" {
-		if err := r.Create(ctx, deployment); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *ZitiWebhookReconciler) finalizeZitiWebhook(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) error {
-	clusterRole := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: zitiwebhook.Spec.Name + "-cluster-role",
-		},
-	}
-	if err := r.Delete(ctx, clusterRole); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: zitiwebhook.Spec.Name + "-cluster-role-binding",
-		},
-	}
-	if err := r.Delete(ctx, clusterRoleBinding); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      zitiwebhook.Spec.Name + "-server-cert",
-			Namespace: zitiwebhook.Namespace,
-		},
-	}
-	if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	mutatingWebhookConfiguration := &admissionregistrationv1.MutatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
-		},
-	}
-	if err := r.Delete(ctx, mutatingWebhookConfiguration); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
 }

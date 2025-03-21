@@ -166,9 +166,61 @@ spec:
               deploymentSpec:
                 description: Deployment Specs
                 properties:
-                  clusterDnsServiceIP:
-                    description: Cluster DNS Service IP
-                    type: string
+                  env:
+                    description: Environment Variables
+                    properties:
+                      clusterDnsServiceIP:
+                        description: Cluster DNS Service IP
+                        type: string
+                      podSecurityOverride:
+                        default: false
+                        description: 'Override the security context at pod level,
+                          i.e. runAsNonRoot: false'
+                        type: boolean
+                      searchDomainList:
+                        description: A list of DNS search domains as space seperated
+                          string i.e. 'value1 value2'
+                        type: string
+                      sidecarIdentityDir:
+                        default: /ziti-tunnel
+                        description: Directory where sidecar container will store
+                          identity files
+                        type: string
+                      sidecarImage:
+                        default: openziti/ziti-tunnel
+                        description: Sidecar container image
+                        type: string
+                      sidecarImagePullPolicy:
+                        default: IfNotPresent
+                        description: Image pull policy for sidecar container
+                        type: string
+                      sidecarImageVersion:
+                        default: latest
+                        description: Sidecar container image version
+                        type: string
+                      sidecarPrefix:
+                        default: zt
+                        description: Used in creation of ContainerName to be used
+                          as injected sidecar
+                        type: string
+                      zitiCtrlCaBundleFile:
+                        description: Ziti Controller CA Bundle
+                        type: string
+                      zitiCtrlClientCertFile:
+                        description: Ziti Controller Client Certificate
+                        type: string
+                      zitiCtrlClientKeyFile:
+                        description: Ziti Controller Client Key
+                        type: string
+                      zitiCtrlMgmtApi:
+                        default: https://ziti-controller:1280/edge/management/v1
+                        description: Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1
+                        type: string
+                      zitiRoleKey:
+                        default: identity.openziti.io/role-attributes
+                        description: Ziti Identity Role Key used in pod annotation
+                        type: string
+                    type: object
                   image:
                     default: netfoundry/ziti-k8s-agent
                     description: Webhook Image
@@ -188,15 +240,26 @@ spec:
                     maximum: 5
                     minimum: 0
                     type: integer
-                  podSecurityOverride:
-                    default: false
-                    description: 'Override the security context at pod level, i.e.
-                      runAsNonRoot: false'
-                    type: boolean
+                  maxSurge:
+                    default: 25%
+                    description: Max Surge
+                    pattern: ^[0-9]+%$
+                    type: string
+                  maxUnavailable:
+                    default: 25%
+                    description: Max Unavailable
+                    pattern: ^[0-9]+%$
+                    type: string
                   port:
                     default: 9443
                     description: Secure port that the webhook listens on
                     format: int32
+                    type: integer
+                  progressDeadlineSeconds:
+                    default: 600
+                    description: Progress Deadline
+                    format: int32
+                    minimum: 0
                     type: integer
                   replicas:
                     default: 1
@@ -227,56 +290,29 @@ spec:
                       memory: 128Mi
                     description: Resource Request
                     type: object
-                  searchDomainList:
-                    description: A list of DNS search domains as space seperated string
-                      i.e. 'value1 value2'
-                    type: string
-                  sidecarIdentityDir:
-                    default: /ziti-tunnel
-                    description: Directory where sidecar container will store identity
-                      files
-                    type: string
-                  sidecarImage:
-                    default: openziti/ziti-tunnel
-                    description: Sidecar container image
-                    type: string
-                  sidecarImagePullPolicy:
-                    default: IfNotPresent
-                    description: Image pull policy for sidecar container
-                    type: string
-                  sidecarImageVersion:
-                    default: latest
-                    description: Sidecar container image version
-                    type: string
-                  sidecarPrefix:
-                    default: zt
-                    description: Used in creation of ContainerName to be used as injected
-                      sidecar
-                    type: string
-                  zitiCtrlCaBundleFile:
-                    description: Ziti Controller CA Bundle
-                    type: string
-                  zitiCtrlClientCertFile:
-                    description: Ziti Controller Client Certificate
-                    type: string
-                  zitiCtrlClientKeyFile:
-                    description: Ziti Controller Client Key
-                    type: string
-                  zitiCtrlMgmtApi:
-                    default: https://ziti-controller:1280/edge/management/v1
-                    description: Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1
-                    type: string
-                  zitiRoleKey:
-                    default: identity.openziti.io/role-attributes
-                    description: Ziti Identity Role Key used in pod annotation
-                    type: string
+                  revisionHistoryLimit:
+                    default: 10
+                    description: Revision History Limit
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  terminationGracePeriodSeconds:
+                    default: 30
+                    description: Termination Grace Period
+                    format: int64
+                    type: integer
                 type: object
-              name:
-                description: Webhook Name
-                type: string
-              webhookSpec:
-                description: Webhook Specs
+              mutatingWebhookSpec:
+                description: Mutating Webhook Specs
                 properties:
+                  admissionReviewVersions:
+                    default:
+                    - v1
+                    description: Wenhoo Admission Review Versions
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
                   clientConfig:
                     description: Webhook Client Config
                     properties:
@@ -314,12 +350,130 @@ spec:
                     - Exact
                     - Equivalent
                     type: string
-                  routerSelectorKey:
-                    default: router.openziti.io/enabled
-                    description: Namespace / Pod Label Selector Key to enable the
-                      sidecar injection
+                  namespaceSelector:
+                    default:
+                      matchExpressions:
+                      - key: kubernetes.io/metadata.name
+                        operator: NotIn
+                        values:
+                        - kube-system
+                      - key: tunnel.openziti.io/enabled
+                        operator: In
+                        values:
+                        - "true"
+                        - "false"
+                    description: Namespace Selector
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  objectSelector:
+                    description: Object Selector
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  reinvocationPolicy:
+                    default: Never
+                    description: Webhook Reinvocation Policy
+                    enum:
+                    - Never
+                    - IfNeeded
                     type: string
                   rules:
+                    default:
+                    - apiGroups:
+                      - '*'
+                      apiVersions:
+                      - v1
+                      - v1beta1
+                      operations:
+                      - CREATE
+                      - UPDATE
+                      - DELETE
+                      resources:
+                      - pods
+                      scope: '*'
                     description: Webhook Rules
                     items:
                       description: |-
@@ -391,13 +545,6 @@ spec:
                       type: object
                     minItems: 1
                     type: array
-                  selectorType:
-                    default: Namespace
-                    description: Selector Type
-                    enum:
-                    - Namespace
-                    - Pod
-                    type: string
                   sideEffectType:
                     default: None
                     description: Webhook Side EfFect
@@ -412,21 +559,10 @@ spec:
                     description: Webhook Timeout
                     format: int32
                     type: integer
-                  tunnelSelectorKey:
-                    default: tunnel.openziti.io/enabled
-                    description: Namespace / Pod Label Selector Key to enable the
-                      sidecar injection
-                    type: string
-                  webhookSelectorValues:
-                    default:
-                    - "true"
-                    - "false"
-                    description: PodMutatorSelectorValues is the list of values used
-                      to select the pod mutator
-                    items:
-                      type: string
-                    type: array
                 type: object
+              name:
+                description: Webhook Name
+                type: string
               zitiControllerName:
                 description: Controller CR Name
                 type: string

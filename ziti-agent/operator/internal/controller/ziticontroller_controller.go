@@ -185,12 +185,15 @@ func checkCertExpiration(certData []byte) (bool, error) {
 	}
 
 	expirationTime := cert.NotAfter
-	currentTime := time.Now()
-
-	if currentTime.After(expirationTime) {
-		return false, nil
-	} else {
+	currentTime := time.Now().UTC()
+	// log.Log.Info("Checking Experation time", "Time: ", expirationTime)
+	// log.Log.Info("Checking Current time", "Time: ", currentTime)
+	if currentTime.After(expirationTime.UTC()) {
+		// log.Log.Info("Certificate is expired")
 		return true, nil
+	} else {
+		// log.Log.Info("Certificate is not expired")
+		return false, nil
 	}
 }
 

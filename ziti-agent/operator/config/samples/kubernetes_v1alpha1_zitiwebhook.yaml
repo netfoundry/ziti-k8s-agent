@@ -10,8 +10,23 @@ spec:
   name: zitiwebhook-sample
   zitiControllerName: ziticontroller-sample
   deploymentSpec:
-    zitiCtrlMgmtApi: https://8ed15bea-5603-485e-8579-a2971d2da684.production.netfoundry.io:443/edge/management/v1
-    sidecarImageVersion: 1.4.2
-    logLevel: 2
-    replicas: 1
-
+    env:
+      zitiCtrlMgmtApi: https://8ed15bea-5603-485e-8579-a2971d2da684.production.netfoundry.io:443/edge/management/v1
+      sidecarImageVersion: 1.4.2
+    logLevel: 3
+    replicas: 2
+  mutatingWebhookSpec:
+    objectSelector:
+      matchExpressions:
+      - key:  tunnel.openziti.io/enabled
+        operator: In
+        values: 
+        - "true"
+        - "false"
+  #   namespaceSelector:
+  #     matchExpressions:
+  #     - key: tunnel.openziti.io/enabled
+  #       operator: In
+  #       values: 
+  #       - "true"
+        # - "false"

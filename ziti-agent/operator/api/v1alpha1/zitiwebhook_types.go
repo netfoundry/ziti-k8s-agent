@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	admissionregistration1 "k8s.io/api/admissionregistration/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,8 +44,8 @@ type ZitiWebhookSpec struct {
 	// Deployment Specs
 	DeploymentSpec DeploymentSpec `json:"deploymentSpec,omitempty"`
 
-	// Webhook Specs
-	WebhookSpec WebhookSpec `json:"webhookSpec,omitempty"`
+	// Mutating Webhook Specs
+	MutatingWebhookSpec MutatingWebhookSpec `json:"mutatingWebhookSpec,omitempty"`
 
 	// Cluster Role Specs
 	ClusterRoleSpec ClusterRoleSpec `json:"clusterRoleSpec,omitempty"`
@@ -88,6 +89,9 @@ type DeploymentSpec struct {
 	// +kubebuilder:default:=9443
 	Port int32 `json:"port,omitempty"`
 
+	// Environment Variables
+	Env DeploymentEnvVars `json:"env,omitempty"`
+
 	// Resource Request
 	// +kubebuilder:default:={"cpu":"100m","memory":"128Mi"}
 	ResourceRequest corev1.ResourceList `json:"resourceRequest,omitempty"`
@@ -96,6 +100,39 @@ type DeploymentSpec struct {
 	// +kubebuilder:default:={"cpu":"500m","memory":"512Mi"}
 	ResourceLimit corev1.ResourceList `json:"resourceLimit,omitempty"`
 
+	// Max Unavailable
+	// +kubebuilder:validation:Pattern:="^[0-9]+%$"
+	// +kubebuilder:default:="25%"
+	MaxUnavailable string `json:"maxUnavailable,omitempty"`
+
+	// Max Surge
+	// +kubebuilder:validation:Pattern:="^[0-9]+%$"
+	// +kubebuilder:default:="25%"
+	MaxSurge string `json:"maxSurge,omitempty"`
+
+	// Termination Grace Period
+	// +kubebuilder:default:=30
+	TerminationGracePeriodSeconds int64 `json:"terminationGracePeriodSeconds,omitempty"`
+
+	// Progress Deadline
+	// +kubebuilder:default:=600
+	// +kubebuilder:validation:Minimum=0
+	ProgressDeadlineSeconds int32 `json:"progressDeadlineSeconds,omitempty"`
+
+	// Revision History Limit
+	// +kubebuilder:default:=10
+	// +kubebuilder:validation:Minimum=0
+	RevisionHistoryLimit int32 `json:"revisionHistoryLimit,omitempty"`
+
+	// Log Verbose Level
+	// +kubebuilder:default:=2
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=5
+	LogLevel int32 `json:"logLevel,omitempty"`
+}
+
+type DeploymentEnvVars struct {
+
 	// Sidecar container image
 	// +kubebuilder:default:=openziti/ziti-tunnel
 	SidecarImage string `json:"sidecarImage,omitempty"`
@@ -103,6 +140,11 @@ type DeploymentSpec struct {
 	// Sidecar container image version
 	// +kubebuilder:default:=latest
 	SidecarImageVersion string `json:"sidecarImageVersion,omitempty"`
+
+	// Image pull policy for sidecar container
+	// +kubebuilder:enum:=Always;Never;IfNotPresent
+	// +kubebuilder:default:=IfNotPresent
+	SidecarImagePullPolicy corev1.PullPolicy `json:"sidecarImagePullPolicy,omitempty"`
 
 	// Used in creation of ContainerName to be used as injected sidecar
 	// +kubebuilder:default:=zt
@@ -138,59 +180,50 @@ type DeploymentSpec struct {
 	// Ziti Identity Role Key used in pod annotation
 	// +kubebuilder:default:=identity.openziti.io/role-attributes
 	ZitiRoleKey string `json:"zitiRoleKey,omitempty"`
-
-	// Image pull policy for sidecar container
-	// +kubebuilder:enum:=Always;Never;IfNotPresent
-	// +kubebuilder:default:=IfNotPresent
-	SidecarImagePullPolicy corev1.PullPolicy `json:"sidecarImagePullPolicy,omitempty"`
-
-	// Log Verbose Level
-	// +kubebuilder:default:=2
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=5
-	LogLevel int32 `json:"logLevel,omitempty"`
 }
 
-type WebhookSpec struct {
-	// Selector Type
-	// +kubebuilder:default:=Namespace
-	// +kubebuilder:validation:Enum:=Namespace;Pod
-	SelectorType string `json:"selectorType,omitempty"`
+type MutatingWebhookSpec struct {
 
-	// Namespace / Pod Label Selector Key to enable the sidecar injection
-	// +kubebuilder:default:=tunnel.openziti.io/enabled
-	TunnelSelectorKey string `json:"tunnelSelectorKey,omitempty"`
+	// Object Selector
+	ObjectSelector *metav1.LabelSelector `json:"objectSelector,omitempty"`
 
-	// Namespace / Pod Label Selector Key to enable the sidecar injection
-	// +kubebuilder:default:=router.openziti.io/enabled
-	RouterSelectorKey string `json:"routerSelectorKey,omitempty"`
-
-	// PodMutatorSelectorValues is the list of values used to select the pod mutator
-	// +kubebuilder:default:={"true","false"}
-	SelectorValues []string `json:"webhookSelectorValues,omitempty"`
+	// Namespace Selector
+	// +kubebuilder:default:={matchExpressions: {{key: "kubernetes.io/metadata.name", operator: NotIn, values: {"kube-system"}}, {key: "tunnel.openziti.io/enabled", operator: In, values: {"true", "false"}}}}
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
 	// Webhook Side EfFect
 	// +kubebuilder:validation:Enum:=None;Unknown;Some;NoneOnDryRun
 	// +kubebuilder:default:=None
-	SideEffectType admissionregistration1.SideEffectClass `json:"sideEffectType,omitempty"`
+	SideEffectType *admissionregistration1.SideEffectClass `json:"sideEffectType,omitempty"`
 
 	// Webhook Failure Policy
 	// +kubebuilder:default:=Fail
 	// +kubebuilder:validation:Enum:=Ignore;Fail
-	FailurePolicy admissionregistration1.FailurePolicyType `json:"failurePolicy,omitempty"`
+	FailurePolicy *admissionregistration1.FailurePolicyType `json:"failurePolicy,omitempty"`
 
 	// Webhook Timeout
 	// +kubebuilder:default:=30
-	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
 
 	// Webhook Match Policy
 	// +kubebuilder:default:=Equivalent
 	// +kubebuilder:validation:Enum:=Exact;Equivalent
-	MatchPolicy admissionregistration1.MatchPolicyType `json:"matchPolicy,omitempty"`
+	MatchPolicy *admissionregistration1.MatchPolicyType `json:"matchPolicy,omitempty"`
+
+	// Webhook Reinvocation Policy
+	// +kubebuilder:default:=Never
+	// +kubebuilder:validation:Enum:=Never;IfNeeded
+	ReinvocationPolicy *admissionregistration1.ReinvocationPolicyType `json:"reinvocationPolicy,omitempty"`
+
+	// Wenhoo Admission Review Versions
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:default:={"v1"}
+	AdmissionReviewVersions []string `json:"admissionReviewVersions,omitempty"`
 
 	// Webhook Rules
 	// +kubebuilder:validation:MinItems=1
-	Rules []admissionregistration1.RuleWithOperations `json:"rules,omitempty"`
+	// +kubebuilder:default:={{"operations":{"CREATE","UPDATE","DELETE"},"apiGroups":{"*"},"apiVersions":{"v1","v1beta1"},"resources":{"pods"},"scope":"*"}}
+	Rules []admissionregistrationv1.RuleWithOperations `json:"rules,omitempty"`
 
 	// Webhook Client Config
 	ClientConfig ClientConfigSpec `json:"clientConfig,omitempty"`
