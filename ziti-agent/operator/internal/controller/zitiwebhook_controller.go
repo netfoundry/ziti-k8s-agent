@@ -112,43 +112,123 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	foundIssuer := &certmanagerv1.Issuer{}
+	actualStateIssuer := &certmanagerv1.Issuer{}
+	desiredStateIssuer := r.getDesiredStateIssuer(ctx, zitiwebhook)
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: zitiwebhook.Namespace,
 		Name:      zitiwebhook.Spec.Name + "-ca-issuer",
-	}, foundIssuer); err != nil && apierrors.IsNotFound(err) {
-		if err := r.updateIssuer(ctx, zitiwebhook, "create"); err != nil {
+	}, actualStateIssuer); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new Issuer", "Issuer.Namespace", desiredStateIssuer.Namespace, "Issuer.Name", desiredStateIssuer.Name)
+		log.V(5).Info("Creating a new Issuer", "Issuer.Namespace", desiredStateIssuer.Namespace, "Issuer.Spec", desiredStateIssuer.Spec)
+		if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateIssuer, r.Scheme); err != nil {
 			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateIssuer); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		if !reflect.DeepEqual(actualStateIssuer.Spec, desiredStateIssuer.Spec) {
+			log.V(4).Info("Updating Issuer", "Issuer.Actual", actualStateIssuer.Name, "Issuer.Desired", desiredStateIssuer.Name)
+			log.V(5).Info("Updating Issuer", "Issuer.Actual", actualStateIssuer.Spec, "Issuer.Desired", desiredStateIssuer.Spec)
+			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateIssuer, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, desiredStateIssuer); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
-	foundWebhookCert := &certmanagerv1.Certificate{}
+	actualStateWebhookCert := &certmanagerv1.Certificate{}
+	desiredStateWebhookCert := r.getDesiredStateCertificate(ctx, zitiwebhook)
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: zitiwebhook.Namespace,
 		Name:      zitiwebhook.Spec.Name + "-admission-cert",
-	}, foundWebhookCert); err != nil && apierrors.IsNotFound(err) {
-		if err := r.updateCertificate(ctx, zitiwebhook, "create"); err != nil {
+	}, actualStateWebhookCert); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new Certificate", "Certificate.Namespace", desiredStateWebhookCert.Namespace, "Certificate.Name", desiredStateWebhookCert.Name)
+		log.V(5).Info("Creating a new Certificate", "Certificate.Namespace", desiredStateWebhookCert.Namespace, "Certificate.Spec", desiredStateWebhookCert.Spec)
+		if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateWebhookCert, r.Scheme); err != nil {
 			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateWebhookCert); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		if !reflect.DeepEqual(actualStateWebhookCert.Spec, desiredStateWebhookCert.Spec) {
+			log.V(4).Info("Updating Certificate", "Certificate.Actual", actualStateWebhookCert.Name, "Certificate.Desired", desiredStateWebhookCert.Name)
+			log.V(5).Info("Updating Certificate", "Certificate.Actual", actualStateWebhookCert.Spec, "Certificate.Desired", desiredStateWebhookCert.Spec)
+			desiredStateWebhookCert.ObjectMeta.ResourceVersion = actualStateWebhookCert.ObjectMeta.ResourceVersion
+			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateWebhookCert, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, desiredStateWebhookCert); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
-	foundService := &corev1.Service{}
+	actualStateService := &corev1.Service{}
+	desiredStateService := r.getDesiredStateService(ctx, zitiwebhook)
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: zitiwebhook.Namespace,
 		Name:      zitiwebhook.Spec.Name + "-service",
-	}, foundService); err != nil && apierrors.IsNotFound(err) {
-		if err := r.updateService(ctx, zitiwebhook, "create"); err != nil {
+	}, actualStateService); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new Service", "Service.Namespace", desiredStateService.Namespace, "Service.Name", desiredStateService.Name)
+		log.V(5).Info("Creating a new Service", "Service.Namespace", desiredStateService.Namespace, "Service.Spec", desiredStateService.Spec)
+		if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateService, r.Scheme); err != nil {
 			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateService); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		// Normalize desiredStateService to eliminate the difference in assigned IPs
+		if actualStateService.Spec.ClusterIP != "" || actualStateService.Spec.ClusterIPs == nil {
+			desiredStateService.Spec.ClusterIP = actualStateService.Spec.ClusterIP
+			desiredStateService.Spec.ClusterIPs = actualStateService.Spec.ClusterIPs
+		}
+		if !reflect.DeepEqual(actualStateService.Spec, desiredStateService.Spec) {
+			log.V(4).Info("Updating Service", "Service.Actual", actualStateService.Name, "Service.Desired", desiredStateService.Name)
+			log.V(5).Info("Updating Service", "Service.Actual", actualStateService.Spec, "Service.Desired", desiredStateService.Spec)
+			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateService, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, desiredStateService); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
-	foundServiceAccount := &corev1.ServiceAccount{}
+	actualStateServiceAccount := &corev1.ServiceAccount{}
+	desiredStateServiceAccount := r.getDesiredStateServiceAccount(ctx, zitiwebhook)
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: zitiwebhook.Namespace,
 		Name:      zitiwebhook.Spec.Name + "-service-account",
-	}, foundServiceAccount); err != nil && apierrors.IsNotFound(err) {
-		if err := r.updateServiceAccount(ctx, zitiwebhook, "create"); err != nil {
+	}, actualStateServiceAccount); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new ServiceAccount", "ServiceAccount.Namespace", desiredStateServiceAccount.Namespace, "ServiceAccount.Name", desiredStateServiceAccount.Name)
+		log.V(5).Info("Creating a new ServiceAccount", "ServiceAccount.Namespace", desiredStateServiceAccount.Namespace, "ServiceAccount.ImagePullSecrets", desiredStateServiceAccount.ImagePullSecrets)
+		log.V(5).Info("Creating a new ServiceAccount", "ServiceAccount.Namespace", desiredStateServiceAccount.Namespace, "ServiceAccount.Secrets", desiredStateServiceAccount.Secrets)
+		log.V(5).Info("Creating a new ServiceAccount", "ServiceAccount.Namespace", desiredStateServiceAccount.Namespace, "ServiceAccount.AutomountServiceAccountToken", desiredStateServiceAccount.AutomountServiceAccountToken)
+		if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateServiceAccount, r.Scheme); err != nil {
 			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateServiceAccount); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		if !reflect.DeepEqual(actualStateServiceAccount.ImagePullSecrets, desiredStateServiceAccount.ImagePullSecrets) ||
+			!reflect.DeepEqual(actualStateServiceAccount.Secrets, desiredStateServiceAccount.Secrets) ||
+			!reflect.DeepEqual(actualStateServiceAccount.AutomountServiceAccountToken, desiredStateServiceAccount.AutomountServiceAccountToken) {
+			log.V(4).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.Name, "ServiceAccount.Desired", desiredStateServiceAccount.Name)
+			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.ImagePullSecrets, "ServiceAccount.Desired", desiredStateServiceAccount.ImagePullSecrets)
+			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.Secrets, "ServiceAccount.Desired", desiredStateServiceAccount.Secrets)
+			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.AutomountServiceAccountToken, "ServiceAccount.Desired", desiredStateServiceAccount.AutomountServiceAccountToken)
+			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateServiceAccount, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, desiredStateServiceAccount); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
@@ -228,10 +308,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	} else {
 		if len(desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle) == 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle) > 0 {
 			desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle = actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle
-			log.V(4).Info("Desired MutatingWebhookConfiguration", "CA BUndled", desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle)
+			log.V(5).Info("Desired MutatingWebhookConfiguration", "CA BUndled", desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle)
 		}
 		desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion = actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.ResourceVersion
-		log.V(4).Info("Desired MutatingWebhookConfiguration", "ResourceVersion", desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion)
+		log.V(5).Info("Desired MutatingWebhookConfiguration", "ResourceVersion", desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion)
 		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]) {
 			log.V(4).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
 			log.V(5).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Webhooks[0])
@@ -277,6 +357,8 @@ func (r *ZitiWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ServiceAccount{}).
+		Owns(&certmanagerv1.Certificate{}).
+		Owns(&certmanagerv1.Issuer{}).
 		Complete(r)
 }
 
@@ -317,61 +399,9 @@ func (r *ZitiWebhookReconciler) finalizeZitiWebhook(ctx context.Context, zitiweb
 	return nil
 }
 
-func (r *ZitiWebhookReconciler) updateCertificate(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	cert := &certmanagerv1.Certificate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      zitiwebhook.Spec.Name + "-admission-cert",
-			Namespace: zitiwebhook.Namespace,
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
-		},
-		Spec: certmanagerv1.CertificateSpec{
-			SecretName:  zitiwebhook.Spec.Name + "-server-cert",
-			Duration:    &metav1.Duration{Duration: time.Duration(zitiwebhook.Spec.Cert.Duration) * time.Hour},
-			RenewBefore: &metav1.Duration{Duration: time.Duration(zitiwebhook.Spec.Cert.RenewBefore) * time.Hour},
-			Subject: &certmanagerv1.X509Subject{
-				Organizations: zitiwebhook.Spec.Cert.Organizations,
-			},
-			CommonName: zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc.cluster.local",
-			IsCA:       false,
-			PrivateKey: &certmanagerv1.CertificatePrivateKey{
-				Algorithm: certmanagerv1.RSAKeyAlgorithm,
-				Encoding:  certmanagerv1.PKCS1,
-				Size:      2048,
-			},
-			Usages: []certmanagerv1.KeyUsage{
-				certmanagerv1.UsageDigitalSignature,
-				certmanagerv1.UsageKeyEncipherment,
-				certmanagerv1.UsageServerAuth,
-			},
-			DNSNames: []string{
-				zitiwebhook.Spec.Name + "-service",
-				zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace,
-				zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc",
-				zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc.cluster.local",
-			},
-			IssuerRef: certmetav1.ObjectReference{
-				Name: zitiwebhook.Spec.Name + "-ca-issuer",
-				Kind: "Issuer",
-			},
-		},
-	}
-	if err := ctrl.SetControllerReference(zitiwebhook, cert, r.Scheme); err != nil {
-		return err
-	}
-	if method == "create" {
-		if err := r.Client.Create(ctx, cert); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *ZitiWebhookReconciler) updateIssuer(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-
-	issuer := &certmanagerv1.Issuer{
+func (r *ZitiWebhookReconciler) getDesiredStateIssuer(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *certmanagerv1.Issuer {
+	_ = log.FromContext(ctx)
+	return &certmanagerv1.Issuer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-ca-issuer",
 			Namespace: zitiwebhook.Namespace,
@@ -386,19 +416,56 @@ func (r *ZitiWebhookReconciler) updateIssuer(ctx context.Context, zitiwebhook *k
 			},
 		},
 	}
-	if err := ctrl.SetControllerReference(zitiwebhook, issuer, r.Scheme); err != nil {
-		return err
-	}
-	if method == "create" {
-		if err := r.Client.Create(ctx, issuer); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-func (r *ZitiWebhookReconciler) updateService(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	service := &corev1.Service{
+func (r *ZitiWebhookReconciler) getDesiredStateCertificate(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *certmanagerv1.Certificate {
+	_ = log.FromContext(ctx)
+	return &certmanagerv1.Certificate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zitiwebhook.Spec.Name + "-admission-cert",
+			Namespace: zitiwebhook.Namespace,
+			Labels: map[string]string{
+				"app":                    zitiwebhook.Spec.Name,
+				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
+			},
+		},
+		Spec: certmanagerv1.CertificateSpec{
+			CommonName: zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc.cluster.local",
+			DNSNames: []string{
+				zitiwebhook.Spec.Name + "-service",
+				zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace,
+				zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc",
+				zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc.cluster.local",
+			},
+			Duration: &metav1.Duration{Duration: time.Duration(zitiwebhook.Spec.Cert.Duration) * time.Hour},
+			IssuerRef: certmetav1.ObjectReference{
+				Name: zitiwebhook.Spec.Name + "-ca-issuer",
+				Kind: "Issuer",
+			},
+			PrivateKey: &certmanagerv1.CertificatePrivateKey{
+				Algorithm: certmanagerv1.RSAKeyAlgorithm,
+				Encoding:  certmanagerv1.PKCS1,
+				Size:      2048,
+			},
+			RenewBefore: &metav1.Duration{Duration: time.Duration(zitiwebhook.Spec.Cert.RenewBefore) * time.Hour},
+			SecretName:  zitiwebhook.Spec.Name + "-server-cert",
+			Subject: &certmanagerv1.X509Subject{
+				Organizations: zitiwebhook.Spec.Cert.Organizations,
+			},
+			Usages: []certmanagerv1.KeyUsage{
+				certmanagerv1.UsageDigitalSignature,
+				certmanagerv1.UsageKeyEncipherment,
+				certmanagerv1.UsageServerAuth,
+			},
+		},
+	}
+}
+
+func (r *ZitiWebhookReconciler) getDesiredStateService(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *corev1.Service {
+	_ = log.FromContext(ctx)
+	cluster := corev1.ServiceInternalTrafficPolicyCluster
+	singleStack := corev1.IPFamilyPolicySingleStack
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-service",
 			Namespace: zitiwebhook.Namespace,
@@ -419,25 +486,22 @@ func (r *ZitiWebhookReconciler) updateService(ctx context.Context, zitiwebhook *
 					},
 				},
 			},
+			InternalTrafficPolicy: &cluster,
+			IPFamilies:            []corev1.IPFamily{corev1.IPv4Protocol},
+			IPFamilyPolicy:        &singleStack,
 			Selector: map[string]string{
 				"app":                    zitiwebhook.Spec.Name,
 				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
 			},
+			SessionAffinity: corev1.ServiceAffinityNone,
+			Type:            corev1.ServiceTypeClusterIP,
 		},
 	}
-	if err := controllerutil.SetControllerReference(zitiwebhook, service, r.Scheme); err != nil {
-		return err
-	}
-	if method == "create" {
-		if err := r.Client.Create(ctx, service); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-func (r *ZitiWebhookReconciler) updateServiceAccount(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook, method string) error {
-	serviceAccount := &corev1.ServiceAccount{
+func (r *ZitiWebhookReconciler) getDesiredStateServiceAccount(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *corev1.ServiceAccount {
+	_ = log.FromContext(ctx)
+	return &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-service-account",
 			Namespace: zitiwebhook.Namespace,
@@ -446,14 +510,10 @@ func (r *ZitiWebhookReconciler) updateServiceAccount(ctx context.Context, zitiwe
 				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
 			},
 		},
+		ImagePullSecrets:             zitiwebhook.Spec.ServiceAccount.ImagePullSecrets,
+		Secrets:                      zitiwebhook.Spec.ServiceAccount.Secrets,
+		AutomountServiceAccountToken: zitiwebhook.Spec.ServiceAccount.AutomountServiceAccountToken,
 	}
-	if err := controllerutil.SetControllerReference(zitiwebhook, serviceAccount, r.Scheme); err != nil {
-		return err
-	}
-	if err := r.Client.Create(ctx, serviceAccount); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (r *ZitiWebhookReconciler) getDesiredStateClusterRole(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) *rbacv1.ClusterRole {

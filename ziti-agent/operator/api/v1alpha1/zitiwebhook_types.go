@@ -49,6 +49,9 @@ type ZitiWebhookSpec struct {
 
 	// Cluster Role Specs
 	ClusterRoleSpec ClusterRoleSpec `json:"clusterRoleSpec,omitempty"`
+
+	// Service Account
+	ServiceAccount ServiceAccountSpec `json:"serviceAccount,omitempty"`
 }
 
 type CertificateSpecs struct {
@@ -182,6 +185,7 @@ type DeploymentEnvVars struct {
 type MutatingWebhookSpec struct {
 
 	// Object Selector
+	// +kubebuilder:default:={}
 	ObjectSelector *metav1.LabelSelector `json:"objectSelector,omitempty"`
 
 	// Namespace Selector
@@ -251,6 +255,17 @@ type ClusterRoleSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:default:={{"apiGroups":{"*"},"resources":{"services","namespaces"},"verbs":{"get","list","watch"}}}
 	Rules []rbacv1.PolicyRule `json:"rules,omitempty"`
+}
+
+type ServiceAccountSpec struct {
+	// Secrets
+	Secrets []corev1.ObjectReference `json:"secrets,omitempty"`
+
+	// Image Pull Secrets
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
+	// Automount Service Account Token
+	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
 }
 
 // ZitiWebhookStatus defines the observed state of ZitiWebhook
