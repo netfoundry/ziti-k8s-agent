@@ -17,10 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	admissionregistration1 "k8s.io/api/admissionregistration/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -52,6 +52,10 @@ type ZitiWebhookSpec struct {
 
 	// Service Account
 	ServiceAccount ServiceAccountSpec `json:"serviceAccount,omitempty"`
+
+	// Webhook Revision Number
+	// +kubebuilder:default:="1"
+	Revision string `json:"revision,omitempty"`
 }
 
 type CertificateSpecs struct {
@@ -155,7 +159,7 @@ type DeploymentEnvVars struct {
 	SidecarIdentityDir string `json:"sidecarIdentityDir,omitempty"`
 
 	// Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1
-	// +kubebuilder:default:="https://ziti-controller:1280/edge/management/v1"
+	// +kubebuilder:default:=""
 	ZitiCtrlMgmtApi string `json:"zitiCtrlMgmtApi,omitempty"`
 
 	// Ziti Controller Client Certificate
@@ -195,12 +199,12 @@ type MutatingWebhookSpec struct {
 	// Webhook Side EfFect
 	// +kubebuilder:validation:Enum:=None;Unknown;Some;NoneOnDryRun
 	// +kubebuilder:default:=None
-	SideEffectType *admissionregistration1.SideEffectClass `json:"sideEffectType,omitempty"`
+	SideEffectType *admissionregistrationv1.SideEffectClass `json:"sideEffectType,omitempty"`
 
 	// Webhook Failure Policy
 	// +kubebuilder:default:=Fail
 	// +kubebuilder:validation:Enum:=Ignore;Fail
-	FailurePolicy *admissionregistration1.FailurePolicyType `json:"failurePolicy,omitempty"`
+	FailurePolicy *admissionregistrationv1.FailurePolicyType `json:"failurePolicy,omitempty"`
 
 	// Webhook Timeout
 	// +kubebuilder:default:=30
@@ -209,12 +213,12 @@ type MutatingWebhookSpec struct {
 	// Webhook Match Policy
 	// +kubebuilder:default:=Equivalent
 	// +kubebuilder:validation:Enum:=Exact;Equivalent
-	MatchPolicy *admissionregistration1.MatchPolicyType `json:"matchPolicy,omitempty"`
+	MatchPolicy *admissionregistrationv1.MatchPolicyType `json:"matchPolicy,omitempty"`
 
 	// Webhook Reinvocation Policy
 	// +kubebuilder:default:=Never
 	// +kubebuilder:validation:Enum:=Never;IfNeeded
-	ReinvocationPolicy *admissionregistration1.ReinvocationPolicyType `json:"reinvocationPolicy,omitempty"`
+	ReinvocationPolicy *admissionregistrationv1.ReinvocationPolicyType `json:"reinvocationPolicy,omitempty"`
 
 	// Wenhoo Admission Review Versions
 	// +kubebuilder:validation:MinItems=1
@@ -297,4 +301,98 @@ type ZitiWebhookList struct {
 
 func init() {
 	SchemeBuilder.Register(&ZitiWebhook{}, &ZitiWebhookList{})
+}
+
+func (z *ZitiWebhookSpec) GetDefaults() *ZitiWebhookSpec {
+	sideEffectClassNone := admissionregistrationv1.SideEffectClassNone
+	failurePolicyFail := admissionregistrationv1.Fail
+	matchPolicyEquivalent := admissionregistrationv1.Equivalent
+	reinvocationPolicyNever := admissionregistrationv1.NeverReinvocationPolicy
+	timeoutSeconds := int32(30)
+	scopeAll := admissionregistrationv1.ScopeType("*")
+	return &ZitiWebhookSpec{
+		Name:               z.Name,
+		ZitiControllerName: z.ZitiControllerName,
+		Cert: CertificateSpecs{
+			Duration:      2160,
+			RenewBefore:   360,
+			Organizations: []string{"netfoundry"},
+		},
+		DeploymentSpec: DeploymentSpec{
+			Replicas:        1,
+			Image:           "netfoundry/ziti-k8s-agent",
+			ImageVersion:    "latest",
+			ImagePullPolicy: "IfNotPresent",
+			Port:            9443,
+			Env: DeploymentEnvVars{
+				SidecarImage:           "openziti/ziti-tunnel",
+				SidecarImageVersion:    "latest",
+				SidecarImagePullPolicy: "IfNotPresent",
+				SidecarPrefix:          "zt",
+				SidecarIdentityDir:     "/ziti-tunnel",
+				ZitiCtrlMgmtApi:        "",
+				ZitiCtrlClientCertFile: "",
+				ZitiCtrlClientKeyFile:  "",
+				ZitiCtrlCaBundleFile:   "",
+				PodSecurityOverride:    false,
+				ClusterDnsServiceIP:    "",
+				SearchDomainList:       "",
+				ZitiRoleKey:            "identity.openziti.io/role-attributes",
+			},
+			ResourceRequest:               corev1.ResourceList{"cpu": resource.MustParse("100m"), "memory": resource.MustParse("128Mi")},
+			ResourceLimit:                 corev1.ResourceList{"cpu": resource.MustParse("500m"), "memory": resource.MustParse("512Mi")},
+			MaxUnavailable:                "25%",
+			MaxSurge:                      "25%",
+			TerminationGracePeriodSeconds: 30,
+			ProgressDeadlineSeconds:       600,
+			RevisionHistoryLimit:          10,
+			LogLevel:                      2,
+		},
+		MutatingWebhookSpec: MutatingWebhookSpec{
+			ObjectSelector:          &metav1.LabelSelector{},
+			NamespaceSelector:       &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system"}}, {Key: "tunnel.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}}}},
+			SideEffectType:          &sideEffectClassNone,
+			FailurePolicy:           &failurePolicyFail,
+			TimeoutSeconds:          &timeoutSeconds,
+			MatchPolicy:             &matchPolicyEquivalent,
+			ReinvocationPolicy:      &reinvocationPolicyNever,
+			AdmissionReviewVersions: []string{"v1"},
+			Rules: []admissionregistrationv1.RuleWithOperations{
+				{
+					Operations: []admissionregistrationv1.OperationType{
+						admissionregistrationv1.Create,
+						admissionregistrationv1.Update,
+						admissionregistrationv1.Delete,
+					},
+					Rule: admissionregistrationv1.Rule{
+						APIGroups:   []string{"*"},
+						APIVersions: []string{"v1", "v1beta1"},
+						Resources:   []string{"pods"},
+						Scope:       &scopeAll,
+					},
+				},
+			},
+			ClientConfig: ClientConfigSpec{
+				ServiceName: z.Name + "-service",
+				Path:        "/ziti-tunnel",
+				Port:        443,
+				CaBundle:    "",
+			},
+		},
+		ClusterRoleSpec: ClusterRoleSpec{
+			Rules: []rbacv1.PolicyRule{
+				{
+					APIGroups: []string{"*"},
+					Resources: []string{"services", "namespaces"},
+					Verbs:     []string{"get", "list", "watch"},
+				},
+			},
+		},
+		ServiceAccount: ServiceAccountSpec{
+			Secrets:                      nil,
+			ImagePullSecrets:             nil,
+			AutomountServiceAccountToken: nil,
+		},
+		Revision: "1",
+	}
 }

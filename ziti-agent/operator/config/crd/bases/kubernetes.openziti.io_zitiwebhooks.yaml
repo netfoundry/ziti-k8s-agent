@@ -176,7 +176,7 @@ spec:
                         description: Ziti Controller Client Key
                         type: string
                       zitiCtrlMgmtApi:
-                        default: https://ziti-controller:1280/edge/management/v1
+                        default: ""
                         description: Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1
                         type: string
                       zitiRoleKey:
@@ -526,6 +526,10 @@ spec:
                 type: object
               name:
                 description: Webhook Name
+                type: string
+              revision:
+                default: "1"
+                description: Webhook Revision Number
                 type: string
               serviceAccount:
                 description: Service Account

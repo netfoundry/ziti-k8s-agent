@@ -80,6 +80,9 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Get(ctx, req.NamespacedName, zitiwebhook); err != nil && apierrors.IsNotFound(err) {
 		return ctrl.Result{}, nil
 	}
+	log.Info("ZitiWebhook Actual", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
+	specs := zitiwebhook.Spec.GetDefaults()
+	log.Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", specs)
 
 	// Check if the ZitiWebhook is being deleted
 	if zitiwebhook.ObjectMeta.DeletionTimestamp.IsZero() {
