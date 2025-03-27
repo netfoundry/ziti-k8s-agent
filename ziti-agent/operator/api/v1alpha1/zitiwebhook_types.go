@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -33,10 +34,13 @@ type ZitiWebhookSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Webhook Name
+	// +kubebuilder:validation:MinLength=10
 	Name string `json:"name,omitempty"`
 
 	// Controller CR Name
-	ZitiControllerName string `json:"zitiControllerName,omitempty"`
+	// +kubebuilder:required
+	// +kubebuilder:validation:MinLength=10
+	ZitiControllerName string `json:"zitiControllerName"`
 
 	// Webhook Certificate
 	Cert CertificateSpecs `json:"cert,omitempty"`
@@ -274,8 +278,9 @@ type ServiceAccountSpec struct {
 
 // ZitiWebhookStatus defines the observed state of ZitiWebhook
 type ZitiWebhookStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+
+	// Conditions is a list of conditions that describe the ZitiWebhook Deployment Status
+	DeploymentConditions []appsv1.DeploymentCondition `json:"deploymentConditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -303,7 +308,7 @@ func init() {
 	SchemeBuilder.Register(&ZitiWebhook{}, &ZitiWebhookList{})
 }
 
-func (z *ZitiWebhookSpec) GetDefaults() *ZitiWebhookSpec {
+func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 	sideEffectClassNone := admissionregistrationv1.SideEffectClassNone
 	failurePolicyFail := admissionregistrationv1.Fail
 	matchPolicyEquivalent := admissionregistrationv1.Equivalent
@@ -311,8 +316,8 @@ func (z *ZitiWebhookSpec) GetDefaults() *ZitiWebhookSpec {
 	timeoutSeconds := int32(30)
 	scopeAll := admissionregistrationv1.ScopeType("*")
 	return &ZitiWebhookSpec{
-		Name:               z.Name,
-		ZitiControllerName: z.ZitiControllerName,
+		Name:               z.ObjectMeta.Name,
+		ZitiControllerName: z.Spec.ZitiControllerName,
 		Cert: CertificateSpecs{
 			Duration:      2160,
 			RenewBefore:   360,
@@ -373,7 +378,7 @@ func (z *ZitiWebhookSpec) GetDefaults() *ZitiWebhookSpec {
 				},
 			},
 			ClientConfig: ClientConfigSpec{
-				ServiceName: z.Name + "-service",
+				ServiceName: z.ObjectMeta.Name + "-service",
 				Path:        "/ziti-tunnel",
 				Port:        443,
 				CaBundle:    "",

@@ -34,10 +34,13 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"slices"
 
 	kubernetesv1alpha1 "github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/api/v1alpha1"
 )
@@ -47,7 +50,8 @@ const zitiWebhookFinalizer = "kubernetes.openziti.io/zitiwebhook"
 // ZitiWebhookReconciler reconciles a ZitiWebhook object
 type ZitiWebhookReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitiwebhooks,verbs=get;list;watch;create;update;patch;delete
@@ -80,9 +84,20 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Get(ctx, req.NamespacedName, zitiwebhook); err != nil && apierrors.IsNotFound(err) {
 		return ctrl.Result{}, nil
 	}
-	log.Info("ZitiWebhook Actual", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
-	specs := zitiwebhook.Spec.GetDefaults()
-	log.Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", specs)
+	log.V(5).Info("ZitiWebhook Actual", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
+	defaultSpecs := zitiwebhook.GetDefaults()
+	log.V(5).Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", defaultSpecs)
+
+	err, ok := r.mergeSpecs(ctx, &zitiwebhook.Spec, defaultSpecs)
+	if err == nil && ok {
+		if err := r.Update(ctx, zitiwebhook); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Merged", "Merged default specs to ZitiWebhook")
+		log.V(5).Info("ZitiWebhook Merged", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	// Check if the ZitiWebhook is being deleted
 	if zitiwebhook.ObjectMeta.DeletionTimestamp.IsZero() {
@@ -92,8 +107,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			if err := r.Update(ctx, zitiwebhook); err != nil {
 				return ctrl.Result{}, err
 			}
-			log.Info("Added finalizer to ZitiWebhook", "ZitiWebhook.Name", zitiwebhook.Name)
-			return ctrl.Result{}, nil
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Added finalizer to ZitiWebhook")
+			log.V(5).Info("Added finalizer to ZitiWebhook", "ZitiWebhook.Name", zitiwebhook.Name)
 		}
 	} else {
 		// The object is being deleted
@@ -110,7 +125,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			if err := r.Update(ctx, zitiwebhook); err != nil {
 				return ctrl.Result{}, err
 			}
-			log.Info("Removed finalizer from ZitiWebhook", "ZitiWebhook.Name", zitiwebhook.Name)
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Removed", "Removed finalizer from ZitiWebhook")
 			return ctrl.Result{}, nil
 		}
 	}
@@ -127,8 +142,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, desiredStateIssuer); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create Issuer")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Issuer")
 	} else {
 		if !reflect.DeepEqual(actualStateIssuer.Spec, desiredStateIssuer.Spec) {
 			log.V(4).Info("Updating Issuer", "Issuer.Actual", actualStateIssuer.Name, "Issuer.Desired", desiredStateIssuer.Name)
@@ -137,8 +154,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			if err := r.Update(ctx, desiredStateIssuer); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Issuer")
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Issuer")
 		}
 	}
 
@@ -154,8 +173,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, desiredStateWebhookCert); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create Certificate")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Certificate")
 	} else {
 		if !reflect.DeepEqual(actualStateWebhookCert.Spec, desiredStateWebhookCert.Spec) {
 			log.V(4).Info("Updating Certificate", "Certificate.Actual", actualStateWebhookCert.Name, "Certificate.Desired", desiredStateWebhookCert.Name)
@@ -165,8 +186,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			if err := r.Update(ctx, desiredStateWebhookCert); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Certificate")
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Certificate")
 		}
 	}
 
@@ -182,8 +205,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, desiredStateService); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create Service")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Service")
 	} else {
 		// Normalize desiredStateService to eliminate the difference in assigned IPs
 		if actualStateService.Spec.ClusterIP != "" || actualStateService.Spec.ClusterIPs == nil {
@@ -197,8 +222,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			if err := r.Update(ctx, desiredStateService); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Service")
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Service")
 		}
 	}
 
@@ -216,8 +243,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, desiredStateServiceAccount); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create ServiceAccount")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ServiceAccount")
 	} else {
 		if !reflect.DeepEqual(actualStateServiceAccount.ImagePullSecrets, desiredStateServiceAccount.ImagePullSecrets) ||
 			!reflect.DeepEqual(actualStateServiceAccount.Secrets, desiredStateServiceAccount.Secrets) ||
@@ -230,8 +259,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			if err := r.Update(ctx, desiredStateServiceAccount); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ServiceAccount")
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ServiceAccount")
 		}
 	}
 
@@ -250,15 +281,19 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.V(4).Info("Creating a new ClusterRole", "ClusterRole.Namespace", desiredStateClusterRole.Namespace, "ClusterRole.Name", desiredStateClusterRole.Name)
 		log.V(5).Info("Creating a new ClusterRole", "ClusterRole.Namespace", desiredStateClusterRole.Namespace, "ClusterRole.Rules", desiredStateClusterRole.Rules)
 		if err := r.Create(ctx, desiredStateClusterRole); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create ClusterRole")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ClusterRole")
 	} else {
 		if !reflect.DeepEqual(actualStateClusterRoleList.Items[0].Rules, desiredStateClusterRole.Rules) {
 			log.V(4).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Name, "ClusterRole.Desired", desiredStateClusterRole.Name)
 			log.V(5).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Rules, "ClusterRole.Desired", desiredStateClusterRole.Rules)
 			if err := r.Update(ctx, desiredStateClusterRole); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRole")
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRole")
 		}
 	}
 
@@ -278,16 +313,20 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.V(5).Info("Creating a new ClusterRoleBinding", "ClusterRoleBinding.Namespace", desiredStateClusterRoleBinding.Namespace, "ClusterRoleBinding.RoleRef", desiredStateClusterRoleBinding.RoleRef)
 		log.V(5).Info("Creating a new ClusterRoleBinding", "ClusterRoleBinding.Namespace", desiredStateClusterRoleBinding.Namespace, "ClusterRoleBinding.Subjects", desiredStateClusterRoleBinding.Subjects)
 		if err := r.Create(ctx, desiredStateClusterRoleBinding); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create ClusterRoleBinding")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ClusterRoleBinding")
 	} else {
 		if !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].RoleRef, desiredStateClusterRoleBinding.RoleRef) || !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].Subjects, desiredStateClusterRoleBinding.Subjects) {
 			log.V(4).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Name, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Name)
 			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].RoleRef, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.RoleRef)
 			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Subjects, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Subjects)
 			if err := r.Update(ctx, desiredStateClusterRoleBinding); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRoleBinding")
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRoleBinding")
 		}
 	}
 
@@ -306,8 +345,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.V(4).Info("Creating a new MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Namespace", desiredStateMutatingWebhookConfiguration.Namespace, "MutatingWebhookConfiguration.Name", desiredStateMutatingWebhookConfiguration.Name)
 		log.V(5).Info("Creating a new MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Namespace", desiredStateMutatingWebhookConfiguration.Namespace, "MutatingWebhookConfiguration.Webhook", desiredStateMutatingWebhookConfiguration.Webhooks[0])
 		if err := r.Create(ctx, desiredStateMutatingWebhookConfiguration); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create MutatingWebhookConfiguration")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new MutatingWebhookConfiguration")
 	} else {
 		if len(desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle) == 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle) > 0 {
 			desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle = actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle
@@ -319,8 +360,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.V(4).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
 			log.V(5).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Webhooks[0])
 			if err := r.Update(ctx, desiredStateMutatingWebhookConfiguration); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update MutatingWebhookConfiguration")
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration")
 		}
 	}
 
@@ -333,11 +376,14 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.V(4).Info("Creating a new Deployment", "Deployment.Namespace", desiredStateWebhookDeployment.Namespace, "Deployment.Name", desiredStateWebhookDeployment.Name)
 		log.V(5).Info("Creating a new Deployment", "Deployment.Namespace", desiredStateWebhookDeployment.Namespace, "Deployment.Spec", desiredStateWebhookDeployment.Spec)
 		if err := ctrl.SetControllerReference(zitiwebhook, desiredStateWebhookDeployment, r.Scheme); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to set controller reference")
 			return ctrl.Result{}, err
 		}
 		if err := r.Create(ctx, desiredStateWebhookDeployment); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to create Deployment")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Deployment")
 	} else if !reflect.DeepEqual(actualStateWebhookDeployment.Spec, desiredStateWebhookDeployment.Spec) {
 		log.V(4).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Name, "Deployment.Desired", desiredStateWebhookDeployment.Name)
 		log.V(5).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Spec, "Deployment.Desired", desiredStateWebhookDeployment.Spec)
@@ -345,16 +391,36 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		if err := r.Update(ctx, desiredStateWebhookDeployment); err != nil {
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment")
 			return ctrl.Result{}, err
 		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Deployment")
 	}
 
-	log.Info("ZitiWebhook Reconciliation finished")
+	// Re-fetch the ZitiWebhook object before updating the status
+	if err := r.Get(ctx, req.NamespacedName, zitiwebhook); err == nil {
+		// Create a copy *before* modifying the status
+		existing := zitiwebhook.DeepCopy()
+		// Update the status
+		zitiwebhook.Status.DeploymentConditions = convertDeploymentConditions(actualStateWebhookDeployment.Status.Conditions)
+		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.DeploymentConditions)
+		// Attempt to patch the status
+		if err := r.Status().Patch(ctx, zitiwebhook, client.MergeFrom(existing)); err != nil {
+			log.Error(err, "Failed to patch ZitiWebhook status")
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ZitiWebhook status")
+			return ctrl.Result{}, err
+		}
+	} else {
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to get ZitiWebhook")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ZitiWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("zitiwebhook-controller")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kubernetesv1alpha1.ZitiWebhook{}).
 		Owns(&appsv1.Deployment{}).
@@ -776,4 +842,77 @@ func (r *ZitiWebhookReconciler) getDesiredStateDeploymentConfiguration(ctx conte
 			RevisionHistoryLimit:    &zitiwebhook.Spec.DeploymentSpec.RevisionHistoryLimit,
 		},
 	}
+}
+
+func (r *ZitiWebhookReconciler) mergeSpecs(ctx context.Context, current, desired any) (error, bool) {
+	log := log.FromContext(ctx)
+	ok := false
+	log.V(5).Info("Merging Structs", "Current", current, "Desired", desired)
+	currentVal := reflect.ValueOf(current)
+	desiredVal := reflect.ValueOf(desired)
+
+	// Check if the values are pointers; if not, get a pointer to them
+	if currentVal.Kind() != reflect.Ptr {
+		log.V(5).Info("Current is not a pointer, creating a pointer to it")
+		currentPtr := reflect.New(currentVal.Type())
+		currentPtr.Elem().Set(currentVal)
+		currentVal = currentPtr
+	}
+	if desiredVal.Kind() != reflect.Ptr {
+		log.V(5).Info("Desired is not a pointer, creating a pointer to it")
+		desiredPtr := reflect.New(desiredVal.Type())
+		desiredPtr.Elem().Set(desiredVal)
+		desiredVal = desiredPtr
+	}
+
+	currentValElem := currentVal.Elem()
+	desiredValElem := desiredVal.Elem()
+
+	for i := range currentValElem.NumField() {
+		fieldType := currentValElem.Type().Field(i)
+		currentField := currentValElem.Field(i)
+		desiredField := desiredValElem.Field(i)
+		log.V(5).Info("Setting fields", "Field", fieldType.Name, "Value", currentField)
+		log.V(5).Info("Setting fields", "Field", fieldType.Name, "Value", desiredField)
+		if r.isManagedField(ctx, fieldType.Name) {
+			log.V(5).Info("IsMangedField", "Field", fieldType.Name, "Value", currentField)
+			log.V(5).Info("IsMangedField", "Field", fieldType.Name, "Value", desiredField)
+			if r.isZeroValue(ctx, currentField) && !r.isZeroValue(ctx, desiredField) {
+				if currentField.CanSet() {
+					currentField.Set(desiredField)
+					ok = true
+					log.V(4).Info("CurrentField Set", "Field", fieldType.Name, "Value", currentField.Interface())
+				} else {
+					return fmt.Errorf("cannot set field %s", fieldType.Name), ok
+				}
+			}
+		}
+	}
+	return nil, ok
+}
+
+func (r *ZitiWebhookReconciler) isManagedField(ctx context.Context, fieldName string) bool {
+	_ = log.FromContext(ctx)
+	managedFields := []string{"Name", "ZitiControllerName", "Cert", "DeploymentSpec", "MutatingWebhookSpec", "ClusterRoleSpec", "ServiceAccount", "Revision"}
+	return slices.Contains(managedFields, fieldName)
+}
+
+func (r *ZitiWebhookReconciler) isZeroValue(ctx context.Context, field reflect.Value) bool {
+	_ = log.FromContext(ctx)
+	return reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface())
+}
+
+func convertDeploymentConditions(conds []appsv1.DeploymentCondition) []appsv1.DeploymentCondition {
+	result := make([]appsv1.DeploymentCondition, 0, len(conds))
+	for _, c := range conds {
+		result = append(result, appsv1.DeploymentCondition{
+			Type:               appsv1.DeploymentConditionType(c.Type),
+			Status:             corev1.ConditionStatus(c.Status),
+			LastTransitionTime: c.LastTransitionTime,
+			LastUpdateTime:     c.LastUpdateTime,
+			Reason:             c.Reason,
+			Message:            c.Message,
+		})
+	}
+	return result
 }

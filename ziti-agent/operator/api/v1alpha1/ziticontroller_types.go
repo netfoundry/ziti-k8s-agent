@@ -29,10 +29,14 @@ type ZitiControllerSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Controller Name
-	Name string `json:"name,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=10
+	Name string `json:"name"`
 
 	// Ziti Admin Idetity Token
-	AdminJwt string `json:"adminJwt,omitempty"`
+	// +kubebuilder:validation:Required
+	//+kubebuilder:validation:Pattern:=`^([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_\-\+\/=]*)`
+	AdminJwt string `json:"adminJwt"`
 }
 
 // ZitiControllerStatus defines the observed state of ZitiController
@@ -64,4 +68,11 @@ type ZitiControllerList struct {
 
 func init() {
 	SchemeBuilder.Register(&ZitiController{}, &ZitiControllerList{})
+}
+
+func (z *ZitiController) GetDefaults() *ZitiControllerSpec {
+	return &ZitiControllerSpec{
+		Name:     z.ObjectMeta.Name,
+		AdminJwt: z.Spec.AdminJwt,
+	}
 }

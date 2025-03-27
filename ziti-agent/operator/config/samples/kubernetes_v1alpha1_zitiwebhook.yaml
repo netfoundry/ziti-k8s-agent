@@ -7,7 +7,7 @@ metadata:
   name: zitiwebhook-sample
   namespace: ziti
 spec:
-  name: zitiwebhook-sample
+  # name: zitiwebhook-sample
   zitiControllerName: ziticontroller-sample
   deploymentSpec:
     env:
