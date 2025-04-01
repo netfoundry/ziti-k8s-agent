@@ -32,7 +32,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
@@ -176,7 +176,9 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Issuer")
 	} else {
-		if !reflect.DeepEqual(actualStateIssuer.Spec, desiredStateIssuer.Spec) {
+		switch {
+
+		case !reflect.DeepEqual(actualStateIssuer.Spec, desiredStateIssuer.Spec):
 			log.V(4).Info("Updating Issuer", "Issuer.Actual", actualStateIssuer.Name, "Issuer.Desired", desiredStateIssuer.Name)
 			log.V(5).Info("Updating Issuer", "Issuer.Actual", actualStateIssuer.Spec, "Issuer.Desired", desiredStateIssuer.Spec)
 			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateIssuer, r.Scheme); err != nil {
@@ -187,7 +189,30 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Issuer")
+		case !reflect.DeepEqual(actualStateIssuer.ObjectMeta.Labels, desiredStateIssuer.ObjectMeta.Labels):
+			log.V(4).Info("Updating Issuer Labels", "Issuer.Actual", actualStateIssuer.Name, "Issuer.Desired", desiredStateIssuer.Name)
+			log.V(5).Info("Updating Issuer Labels", "Issuer.Actual", actualStateIssuer.ObjectMeta.Labels, "Issuer.Desired", desiredStateIssuer.ObjectMeta.Labels)
+			existing := actualStateIssuer.DeepCopy()
+			actualStateIssuer.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, actualStateIssuer, client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Issuer Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Issuer Labels")
+		case !metav1.IsControlledBy(actualStateIssuer, zitiwebhook):
+			log.V(4).Info("Ownership is missing, re-establishing", "Issuer.Name", actualStateIssuer.Name)
+			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateIssuer, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, actualStateIssuer); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Issuer Ownership")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Issuer")
+		default:
+			log.V(4).Info("Issuer is up to date", "Issuer.Name", actualStateIssuer.Name)
 		}
+
 	}
 
 	actualStateWebhookCert := &certmanagerv1.Certificate{}
@@ -207,7 +232,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Certificate")
 	} else {
-		if !reflect.DeepEqual(actualStateWebhookCert.Spec, desiredStateWebhookCert.Spec) {
+		switch {
+		case !reflect.DeepEqual(actualStateWebhookCert.Spec, desiredStateWebhookCert.Spec):
 			log.V(4).Info("Updating Certificate", "Certificate.Actual", actualStateWebhookCert.Name, "Certificate.Desired", desiredStateWebhookCert.Name)
 			log.V(5).Info("Updating Certificate", "Certificate.Actual", actualStateWebhookCert.Spec, "Certificate.Desired", desiredStateWebhookCert.Spec)
 			desiredStateWebhookCert.ObjectMeta.ResourceVersion = actualStateWebhookCert.ObjectMeta.ResourceVersion
@@ -219,6 +245,28 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Certificate")
+		case !reflect.DeepEqual(actualStateWebhookCert.ObjectMeta.Labels, desiredStateWebhookCert.ObjectMeta.Labels):
+			log.V(4).Info("Updating Certificate Labels", "Certificate.Actual", actualStateWebhookCert.Name, "Certificate.Desired", desiredStateWebhookCert.Name)
+			log.V(5).Info("Updating Certificate Labels", "Certificate.Actual", actualStateWebhookCert.ObjectMeta.Labels, "Certificate.Desired", desiredStateWebhookCert.ObjectMeta.Labels)
+			existing := actualStateWebhookCert.DeepCopy()
+			actualStateWebhookCert.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, actualStateWebhookCert, client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Certificate Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Certificate Labels")
+		case !metav1.IsControlledBy(actualStateWebhookCert, zitiwebhook):
+			log.V(4).Info("Ownership is missing, re-establishing", "Certificate.Name", actualStateWebhookCert.Name)
+			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateWebhookCert, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, actualStateWebhookCert); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Certificate Ownership")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Certificate")
+		default:
+			log.V(4).Info("Certificate is up to date", "Certificate.Name", actualStateWebhookCert.Name)
 		}
 	}
 
@@ -244,7 +292,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			desiredStateService.Spec.ClusterIP = actualStateService.Spec.ClusterIP
 			desiredStateService.Spec.ClusterIPs = actualStateService.Spec.ClusterIPs
 		}
-		if !reflect.DeepEqual(actualStateService.Spec, desiredStateService.Spec) {
+		switch {
+		case !reflect.DeepEqual(actualStateService.Spec, desiredStateService.Spec):
 			log.V(4).Info("Updating Service", "Service.Actual", actualStateService.Name, "Service.Desired", desiredStateService.Name)
 			log.V(5).Info("Updating Service", "Service.Actual", actualStateService.Spec, "Service.Desired", desiredStateService.Spec)
 			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateService, r.Scheme); err != nil {
@@ -255,6 +304,28 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Service")
+		case !reflect.DeepEqual(actualStateService.ObjectMeta.Labels, desiredStateService.ObjectMeta.Labels):
+			log.V(4).Info("Updating Service Labels", "Service.Actual", actualStateService.Name, "Service.Desired", desiredStateService.Name)
+			log.V(5).Info("Updating Service Labels", "Service.Actual", actualStateService.ObjectMeta.Labels, "Service.Desired", desiredStateService.ObjectMeta.Labels)
+			existing := actualStateService.DeepCopy()
+			actualStateService.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, actualStateService, client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Service Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Service Labels")
+		case !metav1.IsControlledBy(actualStateService, zitiwebhook):
+			log.V(4).Info("Ownership is missing, re-establishing", "Service.Name", actualStateService.Name)
+			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateService, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, actualStateService); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Service Ownership")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Service")
+		default:
+			log.V(4).Info("Service is up to date", "Service.Name", actualStateService.Name)
 		}
 	}
 
@@ -277,9 +348,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ServiceAccount")
 	} else {
-		if !reflect.DeepEqual(actualStateServiceAccount.ImagePullSecrets, desiredStateServiceAccount.ImagePullSecrets) ||
+		switch {
+		case !reflect.DeepEqual(actualStateServiceAccount.ImagePullSecrets, desiredStateServiceAccount.ImagePullSecrets) ||
 			!reflect.DeepEqual(actualStateServiceAccount.Secrets, desiredStateServiceAccount.Secrets) ||
-			!reflect.DeepEqual(actualStateServiceAccount.AutomountServiceAccountToken, desiredStateServiceAccount.AutomountServiceAccountToken) {
+			!reflect.DeepEqual(actualStateServiceAccount.AutomountServiceAccountToken, desiredStateServiceAccount.AutomountServiceAccountToken):
 			log.V(4).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.Name, "ServiceAccount.Desired", desiredStateServiceAccount.Name)
 			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.ImagePullSecrets, "ServiceAccount.Desired", desiredStateServiceAccount.ImagePullSecrets)
 			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.Secrets, "ServiceAccount.Desired", desiredStateServiceAccount.Secrets)
@@ -292,6 +364,28 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ServiceAccount")
+		case !reflect.DeepEqual(actualStateServiceAccount.ObjectMeta.Labels, desiredStateServiceAccount.ObjectMeta.Labels):
+			log.V(4).Info("Updating ServiceAccount Labels", "ServiceAccount.Actual", actualStateServiceAccount.Name, "ServiceAccount.Desired", desiredStateServiceAccount.Name)
+			log.V(5).Info("Updating ServiceAccount Labels", "ServiceAccount.Actual", actualStateServiceAccount.ObjectMeta.Labels, "ServiceAccount.Desired", desiredStateServiceAccount.ObjectMeta.Labels)
+			existing := actualStateServiceAccount.DeepCopy()
+			actualStateServiceAccount.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, actualStateServiceAccount, client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ServiceAccount Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ServiceAccount Labels")
+		case !metav1.IsControlledBy(actualStateServiceAccount, zitiwebhook):
+			log.V(4).Info("Ownership is missing, re-establishing", "ServiceAccount.Name", actualStateServiceAccount.Name)
+			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateServiceAccount, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, actualStateServiceAccount); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ServiceAccount Ownership")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for ServiceAccount")
+		default:
+			log.V(4).Info("ServiceAccount is up to date", "ServiceAccount.Name", actualStateServiceAccount.Name)
 		}
 	}
 
@@ -299,8 +393,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	desiredStateClusterRole := r.getDesiredStateClusterRole(ctx, zitiwebhook)
 	if err := r.List(ctx, actualStateClusterRoleList,
 		&client.ListOptions{
-			LabelSelector: labels.SelectorFromSet(map[string]string{
-				"app": zitiwebhook.Spec.Name,
+			FieldSelector: fields.SelectorFromSet(map[string]string{
+				"metadata.name": zitiwebhook.Spec.Name + "-cluster-role",
 			}),
 		},
 	); err != nil {
@@ -315,7 +409,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ClusterRole")
 	} else {
-		if !reflect.DeepEqual(actualStateClusterRoleList.Items[0].Rules, desiredStateClusterRole.Rules) {
+		switch {
+		case !reflect.DeepEqual(actualStateClusterRoleList.Items[0].Rules, desiredStateClusterRole.Rules):
 			log.V(4).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Name, "ClusterRole.Desired", desiredStateClusterRole.Name)
 			log.V(5).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Rules, "ClusterRole.Desired", desiredStateClusterRole.Rules)
 			if err := r.Update(ctx, desiredStateClusterRole); err != nil {
@@ -323,6 +418,18 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRole")
+		case !reflect.DeepEqual(actualStateClusterRoleList.Items[0].ObjectMeta.Labels, desiredStateClusterRole.ObjectMeta.Labels):
+			log.V(4).Info("Updating ClusterRole Labels", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Name, "ClusterRole.Desired", desiredStateClusterRole.Name)
+			log.V(5).Info("Updating ClusterRole Labels", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].ObjectMeta.Labels, "ClusterRole.Desired", desiredStateClusterRole.ObjectMeta.Labels)
+			existing := actualStateClusterRoleList.Items[0].DeepCopy()
+			actualStateClusterRoleList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, &actualStateClusterRoleList.Items[0], client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRole Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRole Labels")
+		default:
+			log.V(4).Info("ClusterRole is up to date", "ClusterRole.Name", actualStateClusterRoleList.Items[0].Name)
 		}
 	}
 
@@ -330,8 +437,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	desiredStateClusterRoleBinding := r.getDesiredStateClusterRoleBinding(ctx, zitiwebhook)
 	if err := r.List(ctx, actualStateClusterRoleBindingList,
 		&client.ListOptions{
-			LabelSelector: labels.SelectorFromSet(map[string]string{
-				"app": zitiwebhook.Spec.Name,
+			FieldSelector: fields.SelectorFromSet(map[string]string{
+				"metadata.name": zitiwebhook.Spec.Name + "-cluster-role-binding",
 			}),
 		},
 	); err != nil {
@@ -347,7 +454,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ClusterRoleBinding")
 	} else {
-		if !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].RoleRef, desiredStateClusterRoleBinding.RoleRef) || !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].Subjects, desiredStateClusterRoleBinding.Subjects) {
+		switch {
+		case !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].RoleRef, desiredStateClusterRoleBinding.RoleRef) || !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].Subjects, desiredStateClusterRoleBinding.Subjects):
 			log.V(4).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Name, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Name)
 			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].RoleRef, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.RoleRef)
 			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Subjects, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Subjects)
@@ -356,6 +464,18 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRoleBinding")
+		case !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels, desiredStateClusterRoleBinding.ObjectMeta.Labels):
+			log.V(4).Info("Updating ClusterRoleBinding Labels", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Name, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Name)
+			log.V(5).Info("Updating ClusterRoleBinding Labels", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.ObjectMeta.Labels)
+			existing := actualStateClusterRoleBindingList.Items[0].DeepCopy()
+			actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, &actualStateClusterRoleBindingList.Items[0], client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRoleBinding Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRoleBinding Labels")
+		default:
+			log.V(4).Info("ClusterRoleBinding is up to date", "ClusterRoleBinding.Name", actualStateClusterRoleBindingList.Items[0].Name)
 		}
 	}
 
@@ -363,8 +483,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	desiredStateMutatingWebhookConfiguration := r.getDesiredStateMutatingWebhookConfiguration(ctx, zitiwebhook)
 	if err := r.List(ctx, actualStateMutatingWebhookConfigurationList,
 		&client.ListOptions{
-			LabelSelector: labels.SelectorFromSet(map[string]string{
-				"app": zitiwebhook.Spec.Name,
+			FieldSelector: fields.SelectorFromSet(map[string]string{
+				"metadata.name": zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
 			}),
 		},
 	); err != nil {
@@ -385,7 +505,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion = actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.ResourceVersion
 		log.V(5).Info("Desired MutatingWebhookConfiguration", "ResourceVersion", desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion)
-		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]) {
+		switch {
+		case !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]):
 			log.V(4).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
 			log.V(5).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Webhooks[0])
 			if err := r.Update(ctx, desiredStateMutatingWebhookConfiguration); err != nil {
@@ -393,6 +514,18 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration")
+		case !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels, desiredStateMutatingWebhookConfiguration.ObjectMeta.Labels):
+			log.V(4).Info("Updating MutatingWebhookConfiguration Labels", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
+			log.V(5).Info("Updating MutatingWebhookConfiguration Labels", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.ObjectMeta.Labels)
+			existing := actualStateMutatingWebhookConfigurationList.Items[0].DeepCopy()
+			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, &actualStateMutatingWebhookConfigurationList.Items[0], client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update MutatingWebhookConfiguration Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration Labels")
+		default:
+			log.V(4).Info("MutatingWebhookConfiguration is up to date", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
 		}
 	}
 
@@ -413,17 +546,42 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Deployment")
-	} else if !reflect.DeepEqual(actualStateWebhookDeployment.Spec, desiredStateWebhookDeployment.Spec) {
-		log.V(4).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Name, "Deployment.Desired", desiredStateWebhookDeployment.Name)
-		log.V(5).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Spec, "Deployment.Desired", desiredStateWebhookDeployment.Spec)
-		if err := ctrl.SetControllerReference(zitiwebhook, desiredStateWebhookDeployment, r.Scheme); err != nil {
-			return ctrl.Result{}, err
+	} else {
+		switch {
+		case !reflect.DeepEqual(actualStateWebhookDeployment.Spec, desiredStateWebhookDeployment.Spec):
+			log.V(4).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Name, "Deployment.Desired", desiredStateWebhookDeployment.Name)
+			log.V(5).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Spec, "Deployment.Desired", desiredStateWebhookDeployment.Spec)
+			if err := ctrl.SetControllerReference(zitiwebhook, desiredStateWebhookDeployment, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, desiredStateWebhookDeployment); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Deployment")
+		case !reflect.DeepEqual(actualStateWebhookDeployment.ObjectMeta.Labels, desiredStateWebhookDeployment.ObjectMeta.Labels):
+			log.V(4).Info("Updating Deployment Labels", "Deployment.Actual", actualStateWebhookDeployment.Name, "Deployment.Desired", desiredStateWebhookDeployment.Name)
+			log.V(5).Info("Updating Deployment Labels", "Deployment.Actual", actualStateWebhookDeployment.ObjectMeta.Labels, "Deployment.Desired", desiredStateWebhookDeployment.ObjectMeta.Labels)
+			existing := actualStateWebhookDeployment.DeepCopy()
+			actualStateWebhookDeployment.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			if err := r.Patch(ctx, actualStateWebhookDeployment, client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment Labels")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Deployment Labels")
+		case !metav1.IsControlledBy(actualStateWebhookDeployment, zitiwebhook):
+			log.V(4).Info("Ownership is missing, re-establishing", "Deployment.Name", actualStateWebhookDeployment.Name)
+			if err := ctrl.SetControllerReference(zitiwebhook, actualStateWebhookDeployment, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Update(ctx, actualStateWebhookDeployment); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment Ownership")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Deployment")
+		default:
+			log.V(4).Info("Deployment is up to date", "Deployment.Name", actualStateWebhookDeployment.Name)
 		}
-		if err := r.Update(ctx, desiredStateWebhookDeployment); err != nil {
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment")
-			return ctrl.Result{}, err
-		}
-		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Deployment")
 	}
 
 	// Re-fetch the ZitiWebhook object before updating the status
@@ -455,6 +613,24 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // SetupWithManager sets up the controller with the Manager.
 func (r *ZitiWebhookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Recorder = mgr.GetEventRecorderFor("zitiwebhook-controller")
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &rbacv1.ClusterRole{}, "metadata.name", func(rawObj client.Object) []string {
+		cr := rawObj.(*rbacv1.ClusterRole)
+		return []string{cr.Name}
+	}); err != nil {
+		return err
+	}
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &rbacv1.ClusterRoleBinding{}, "metadata.name", func(rawObj client.Object) []string {
+		crb := rawObj.(*rbacv1.ClusterRoleBinding)
+		return []string{crb.Name}
+	}); err != nil {
+		return err
+	}
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &admissionregistrationv1.MutatingWebhookConfiguration{}, "metadata.name", func(rawObj client.Object) []string {
+		mwc := rawObj.(*admissionregistrationv1.MutatingWebhookConfiguration)
+		return []string{mwc.Name}
+	}); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kubernetesv1alpha1.ZitiWebhook{}).
 		Owns(&appsv1.Deployment{}).
@@ -508,10 +684,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateIssuer(ctx context.Context, zitiw
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-ca-issuer",
 			Namespace: zitiwebhook.Namespace,
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Labels:    getlabels(ctx, zitiwebhook),
 		},
 		Spec: certmanagerv1.IssuerSpec{
 			IssuerConfig: certmanagerv1.IssuerConfig{
@@ -527,10 +700,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateCertificate(ctx context.Context, 
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-admission-cert",
 			Namespace: zitiwebhook.Namespace,
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Labels:    getlabels(ctx, zitiwebhook),
 		},
 		Spec: certmanagerv1.CertificateSpec{
 			CommonName: zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc.cluster.local",
@@ -572,10 +742,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateService(ctx context.Context, ziti
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-service",
 			Namespace: zitiwebhook.Namespace,
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Labels:    getlabels(ctx, zitiwebhook),
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
@@ -592,12 +759,9 @@ func (r *ZitiWebhookReconciler) getDesiredStateService(ctx context.Context, ziti
 			InternalTrafficPolicy: &cluster,
 			IPFamilies:            []corev1.IPFamily{corev1.IPv4Protocol},
 			IPFamilyPolicy:        &singleStack,
-			Selector: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
-			SessionAffinity: corev1.ServiceAffinityNone,
-			Type:            corev1.ServiceTypeClusterIP,
+			Selector:              filterLabels(getlabels(ctx, zitiwebhook)),
+			SessionAffinity:       corev1.ServiceAffinityNone,
+			Type:                  corev1.ServiceTypeClusterIP,
 		},
 	}
 }
@@ -608,10 +772,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateServiceAccount(ctx context.Contex
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-service-account",
 			Namespace: zitiwebhook.Namespace,
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Labels:    getlabels(ctx, zitiwebhook),
 		},
 		ImagePullSecrets:             zitiwebhook.Spec.ServiceAccount.ImagePullSecrets,
 		Secrets:                      zitiwebhook.Spec.ServiceAccount.Secrets,
@@ -623,11 +784,8 @@ func (r *ZitiWebhookReconciler) getDesiredStateClusterRole(ctx context.Context, 
 	_ = log.FromContext(ctx)
 	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: zitiwebhook.Spec.Name + "-cluster-role",
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Name:   zitiwebhook.Spec.Name + "-cluster-role",
+			Labels: getlabels(ctx, zitiwebhook),
 		},
 		Rules: zitiwebhook.Spec.ClusterRoleSpec.Rules,
 	}
@@ -637,11 +795,8 @@ func (r *ZitiWebhookReconciler) getDesiredStateClusterRoleBinding(ctx context.Co
 	_ = log.FromContext(ctx)
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: zitiwebhook.Spec.Name + "-cluster-role-binding",
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Name:   zitiwebhook.Spec.Name + "-cluster-role-binding",
+			Labels: getlabels(ctx, zitiwebhook),
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
@@ -662,11 +817,8 @@ func (r *ZitiWebhookReconciler) getDesiredStateMutatingWebhookConfiguration(ctx 
 	_ = log.FromContext(ctx)
 	return &admissionregistrationv1.MutatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Name:   zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
+			Labels: getlabels(ctx, zitiwebhook),
 			Annotations: map[string]string{
 				"cert-manager.io/inject-ca-from": zitiwebhook.Namespace + "/" + zitiwebhook.Spec.Name + "-admission-cert",
 			},
@@ -703,25 +855,16 @@ func (r *ZitiWebhookReconciler) getDesiredStateDeploymentConfiguration(ctx conte
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-deployment",
 			Namespace: zitiwebhook.Namespace,
-			Labels: map[string]string{
-				"app":                    zitiwebhook.Spec.Name,
-				"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-			},
+			Labels:    getlabels(ctx, zitiwebhook),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &zitiwebhook.Spec.DeploymentSpec.Replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app":                    zitiwebhook.Spec.Name,
-					"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-				},
+				MatchLabels: filterLabels(getlabels(ctx, zitiwebhook)),
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app":                    zitiwebhook.Spec.Name,
-						"app.kubernetes.io/name": zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-					},
+					Labels: getlabels(ctx, zitiwebhook),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -934,6 +1077,28 @@ func (r *ZitiWebhookReconciler) isManagedField(ctx context.Context, fieldName st
 func (r *ZitiWebhookReconciler) isZeroValue(ctx context.Context, field reflect.Value) bool {
 	_ = log.FromContext(ctx)
 	return reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface())
+}
+
+func getlabels(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) map[string]string {
+	_ = log.FromContext(ctx)
+	return map[string]string{
+		"app":                          zitiwebhook.Spec.Name,
+		"app.kubernetes.io/name":       zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
+		"app.kubernetes.io/part-of":    zitiwebhook.Spec.Name + "-operator",
+		"app.kubernetes.io/managed-by": zitiwebhook.Spec.Name + "-controller",
+		"app.kubernetes.io/component":  "webhook",
+	}
+}
+
+func filterLabels(allLabels map[string]string) map[string]string {
+	filtered := make(map[string]string)
+	if val, ok := allLabels["app"]; ok {
+		filtered["app"] = val
+	}
+	if val, ok := allLabels["app.kubernetes.io/name"]; ok {
+		filtered["app.kubernetes.io/name"] = val
+	}
+	return filtered
 }
 
 func convertDeploymentConditions(conds []appsv1.DeploymentCondition) []appsv1.DeploymentCondition {
