@@ -30,7 +30,8 @@ import (
 // ZitiRouterReconciler reconciles a ZitiRouter object
 type ZitiRouterReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme             *runtime.Scheme
+	ZitiControllerChan chan kubernetesv1alpha1.ZitiController
 }
 
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitirouters,verbs=get;list;watch;create;update;patch;delete

@@ -225,7 +225,7 @@ spec:
                     minimum: 0
                     type: integer
                   replicas:
-                    default: 1
+                    default: 2
                     description: Number of replicas
                     format: int32
                     type: integer
@@ -607,14 +607,60 @@ spec:
                 type: object
               zitiControllerName:
                 description: Controller CR Name
-                minLength: 10
                 type: string
-            required:
-            - zitiControllerName
             type: object
           status:
             description: ZitiWebhookStatus defines the observed state of ZitiWebhook
             properties:
+              certificateConditions:
+                description: Conditions is a list of conditions that describe the
+                  ZitiWebhook Certificate Status
+                items:
+                  description: CertificateCondition contains condition information
+                    for a Certificate.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        LastTransitionTime is the timestamp corresponding to the last status
+                        change of this condition.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        Message is a human readable description of the details of the last
+                        transition, complementing reason.
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        If set, this represents the .metadata.generation that the condition was
+                        set based upon.
+                        For instance, if .metadata.generation is currently 12, but the
+                        .status.condition[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the Certificate.
+                      format: int64
+                      type: integer
+                    reason:
+                      description: |-
+                        Reason is a brief machine readable explanation for the condition's last
+                        transition.
+                      type: string
+                    status:
+                      description: Status of the condition, one of (`True`, `False`,
+                        `Unknown`).
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: Type of the condition, known values are (`Ready`,
+                        `Issuing`).
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
               deploymentConditions:
                 description: Conditions is a list of conditions that describe the
                   ZitiWebhook Deployment Status
@@ -643,6 +689,54 @@ spec:
                       type: string
                     type:
                       description: Type of deployment condition.
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              issuerConditions:
+                description: Conditions is a list of conditions that describe the
+                  ZitiWebhook Issuer Status
+                items:
+                  description: IssuerCondition contains condition information for
+                    an Issuer.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        LastTransitionTime is the timestamp corresponding to the last status
+                        change of this condition.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        Message is a human readable description of the details of the last
+                        transition, complementing reason.
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        If set, this represents the .metadata.generation that the condition was
+                        set based upon.
+                        For instance, if .metadata.generation is currently 12, but the
+                        .status.condition[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the Issuer.
+                      format: int64
+                      type: integer
+                    reason:
+                      description: |-
+                        Reason is a brief machine readable explanation for the condition's last
+                        transition.
+                      type: string
+                    status:
+                      description: Status of the condition, one of (`True`, `False`,
+                        `Unknown`).
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: Type of the condition, known values are (`Ready`).
                       type: string
                   required:
                   - status

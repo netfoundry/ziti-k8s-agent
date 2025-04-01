@@ -22,6 +22,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -43,7 +44,9 @@ import (
 // ZitiControllerReconciler reconciles a ZitiController object
 type ZitiControllerReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme             *runtime.Scheme
+	ZitiControllerChan chan kubernetesv1alpha1.ZitiController
+	channelChecked     bool
 }
 
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=ziticontrollers,verbs=get;list;watch;create;update;patch;delete
@@ -62,12 +65,15 @@ type ZitiControllerReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ZitiControllerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	log.Info("ZitiController Reconciliation started")
+	log.V(2).Info("ZitiController Reconciliation started")
 
 	ziticontroller := &kubernetesv1alpha1.ZitiController{}
 	if err := r.Get(ctx, req.NamespacedName, ziticontroller); err != nil && apierrors.IsNotFound(err) {
 		return ctrl.Result{}, nil
 	}
+
+	// Deep copy the fetched resource
+	existingZitiController := ziticontroller.DeepCopy()
 
 	foundAdminSecret := &corev1.Secret{}
 	if err := r.Get(ctx, client.ObjectKey{
@@ -90,7 +96,26 @@ func (r *ZitiControllerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	log.Info("ZitiController Reconciliation finished")
+	// Determine if the spec has changed
+	specChanged := !reflect.DeepEqual(existingZitiController.Spec, ziticontroller.Spec)
+
+	// Check if the channel is empty only on the first access
+	if !r.channelChecked {
+		select {
+		case <-r.ZitiControllerChan:
+			log.V(2).Info("ZitiController channel not empty on first access")
+		default:
+			r.ZitiControllerChan <- *ziticontroller
+			log.V(2).Info("ZitiController channel is empty on first access and written to")
+		}
+		r.channelChecked = true
+	}
+	if specChanged {
+		r.ZitiControllerChan <- *ziticontroller
+		log.V(2).Info("ZitiController spec changed, sending update to channel")
+	}
+
+	log.V(2).Info("ZitiController Reconciliation finished")
 	return ctrl.Result{RequeueAfter: time.Minute}, nil
 }
 

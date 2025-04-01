@@ -25,6 +25,7 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	"github.com/golang-jwt/jwt/v5"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -50,8 +51,10 @@ const zitiWebhookFinalizer = "kubernetes.openziti.io/zitiwebhook"
 // ZitiWebhookReconciler reconciles a ZitiWebhook object
 type ZitiWebhookReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme               *runtime.Scheme
+	Recorder             record.EventRecorder
+	ZitiControllerChan   chan kubernetesv1alpha1.ZitiController
+	CachedZitiController *kubernetesv1alpha1.ZitiController
 }
 
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitiwebhooks,verbs=get;list;watch;create;update;patch;delete
@@ -78,25 +81,11 @@ type ZitiWebhookReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	log.Info("ZitiWebhook Reconciliation started")
+	log.V(2).Info("ZitiWebhook Reconciliation started")
 
 	zitiwebhook := &kubernetesv1alpha1.ZitiWebhook{}
 	if err := r.Get(ctx, req.NamespacedName, zitiwebhook); err != nil && apierrors.IsNotFound(err) {
 		return ctrl.Result{}, nil
-	}
-	log.V(5).Info("ZitiWebhook Actual", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
-	defaultSpecs := zitiwebhook.GetDefaults()
-	log.V(5).Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", defaultSpecs)
-
-	err, ok := r.mergeSpecs(ctx, &zitiwebhook.Spec, defaultSpecs)
-	if err == nil && ok {
-		if err := r.Update(ctx, zitiwebhook); err != nil {
-			return ctrl.Result{}, err
-		}
-		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Merged", "Merged default specs to ZitiWebhook")
-		log.V(5).Info("ZitiWebhook Merged", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
-	} else if err != nil {
-		return ctrl.Result{}, err
 	}
 
 	// Check if the ZitiWebhook is being deleted
@@ -128,6 +117,46 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Removed", "Removed finalizer from ZitiWebhook")
 			return ctrl.Result{}, nil
 		}
+	}
+
+	// Merge defaults and ziticontroller specs if changes are detected
+	log.V(5).Info("ZitiWebhook Actual", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
+	defaultSpecs := zitiwebhook.GetDefaults()
+	log.V(5).Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", defaultSpecs)
+	err, ok := r.mergeSpecs(ctx, &zitiwebhook.Spec, defaultSpecs)
+	if err == nil && ok {
+		select {
+		case ziticontroller := <-r.ZitiControllerChan:
+			log.V(5).Info("ZitiController Spec", "Name", ziticontroller.Spec.Name, "ZitiController.Spec", ziticontroller.Spec)
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Update", "Using ZitiController from channel")
+			r.CachedZitiController = &ziticontroller
+			zitiwebhook.Spec.ZitiControllerName = r.CachedZitiController.Spec.Name
+			if zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi == "" {
+				zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi, _ = getZitiControllerUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
+				zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi = zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi + "/edge/management/v1"
+				log.V(5).Info("ZitiController URL", "ZitiCtrlMgmtApi", zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi)
+			}
+		default:
+			if r.CachedZitiController != nil {
+				log.V(5).Info("Cached ZitiController Spec", "Name", r.CachedZitiController.Spec.Name, "ZitiController.Spec", r.CachedZitiController.Spec)
+				zitiwebhook.Spec.ZitiControllerName = r.CachedZitiController.Spec.Name
+				if zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi == "" {
+					zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi, _ = getZitiControllerUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
+					zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi = zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi + "/edge/management/v1"
+					log.V(5).Info("ZitiController URL", "ZitiCtrlMgmtApi", zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi)
+				}
+			} else {
+				log.V(5).Info("No ZitiController Spec available")
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "No ZitiController Spec available")
+			}
+		}
+		if err := r.Update(ctx, zitiwebhook); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Merged", "Merged default specs to ZitiWebhook")
+		log.V(5).Info("ZitiWebhook Merged", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
+	} else if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	actualStateIssuer := &certmanagerv1.Issuer{}
@@ -404,6 +433,10 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// Update the status
 		zitiwebhook.Status.DeploymentConditions = convertDeploymentConditions(actualStateWebhookDeployment.Status.Conditions)
 		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.DeploymentConditions)
+		zitiwebhook.Status.IssuerConditions = convertIssuerConditions(actualStateIssuer.Status.Conditions)
+		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.IssuerConditions)
+		zitiwebhook.Status.CertificateConditions = convertCertificateConditions(actualStateWebhookCert.Status.Conditions)
+		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.CertificateConditions)
 		// Attempt to patch the status
 		if err := r.Status().Patch(ctx, zitiwebhook, client.MergeFrom(existing)); err != nil {
 			log.Error(err, "Failed to patch ZitiWebhook status")
@@ -415,6 +448,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	log.V(2).Info("ZitiWebhook Reconciliation finished")
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
@@ -915,4 +949,59 @@ func convertDeploymentConditions(conds []appsv1.DeploymentCondition) []appsv1.De
 		})
 	}
 	return result
+}
+
+func convertIssuerConditions(conds []certmanagerv1.IssuerCondition) []certmanagerv1.IssuerCondition {
+	result := make([]certmanagerv1.IssuerCondition, 0, len(conds))
+	for _, c := range conds {
+		result = append(result, certmanagerv1.IssuerCondition{
+			Type:               certmanagerv1.IssuerConditionType(c.Type),
+			Status:             c.Status,
+			LastTransitionTime: c.LastTransitionTime,
+			Reason:             c.Reason,
+			Message:            c.Message,
+		})
+	}
+	return result
+}
+
+func convertCertificateConditions(conds []certmanagerv1.CertificateCondition) []certmanagerv1.CertificateCondition {
+	result := make([]certmanagerv1.CertificateCondition, 0, len(conds))
+	for _, c := range conds {
+		result = append(result, certmanagerv1.CertificateCondition{
+			Type:               certmanagerv1.CertificateConditionType(c.Type),
+			Status:             c.Status,
+			LastTransitionTime: c.LastTransitionTime,
+			Reason:             c.Reason,
+			Message:            c.Message,
+		})
+	}
+	return result
+}
+
+func decodeJWT(tokenString string) (jwt.MapClaims, error) {
+	token, _, err := new(jwt.Parser).ParseUnverified(tokenString, jwt.MapClaims{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JWT: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("failed to extract claims from JWT")
+	}
+
+	return claims, nil
+}
+
+func getZitiControllerUrlFromJwt(tokenString string) (string, error) {
+
+	claims, err := decodeJWT(tokenString)
+	if err != nil {
+		return "", err
+	}
+	issuer, err := claims.GetIssuer()
+	if err != nil {
+		return "", err
+	}
+	return issuer, nil
 }

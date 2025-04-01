@@ -21,6 +21,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
@@ -487,6 +488,20 @@ func (in *ZitiWebhookStatus) DeepCopyInto(out *ZitiWebhookStatus) {
 	if in.DeploymentConditions != nil {
 		in, out := &in.DeploymentConditions, &out.DeploymentConditions
 		*out = make([]appsv1.DeploymentCondition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.IssuerConditions != nil {
+		in, out := &in.IssuerConditions, &out.IssuerConditions
+		*out = make([]certmanagerv1.IssuerCondition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.CertificateConditions != nil {
+		in, out := &in.CertificateConditions, &out.CertificateConditions
+		*out = make([]certmanagerv1.CertificateCondition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

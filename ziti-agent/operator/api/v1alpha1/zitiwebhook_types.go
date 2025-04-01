@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -38,9 +39,7 @@ type ZitiWebhookSpec struct {
 	Name string `json:"name,omitempty"`
 
 	// Controller CR Name
-	// +kubebuilder:required
-	// +kubebuilder:validation:MinLength=10
-	ZitiControllerName string `json:"zitiControllerName"`
+	ZitiControllerName string `json:"zitiControllerName,omitempty"`
 
 	// Webhook Certificate
 	Cert CertificateSpecs `json:"cert,omitempty"`
@@ -77,7 +76,7 @@ type CertificateSpecs struct {
 
 type DeploymentSpec struct {
 	// Number of replicas
-	// +kubebuilder:default:=1
+	// +kubebuilder:default:=2
 	Replicas int32 `json:"replicas,omitempty"`
 
 	// Webhook Image
@@ -281,6 +280,12 @@ type ZitiWebhookStatus struct {
 
 	// Conditions is a list of conditions that describe the ZitiWebhook Deployment Status
 	DeploymentConditions []appsv1.DeploymentCondition `json:"deploymentConditions,omitempty"`
+
+	// Conditions is a list of conditions that describe the ZitiWebhook Issuer Status
+	IssuerConditions []certmanagerv1.IssuerCondition `json:"issuerConditions,omitempty"`
+
+	// Conditions is a list of conditions that describe the ZitiWebhook Certificate Status
+	CertificateConditions []certmanagerv1.CertificateCondition `json:"certificateConditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
