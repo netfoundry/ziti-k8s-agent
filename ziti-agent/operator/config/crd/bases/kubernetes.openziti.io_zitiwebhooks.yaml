@@ -49,7 +49,7 @@ spec:
                     type: integer
                   organization:
                     default:
-                    - netfoundry
+                    - NetFoundry
                     description: Cert Organization
                     items:
                       type: string

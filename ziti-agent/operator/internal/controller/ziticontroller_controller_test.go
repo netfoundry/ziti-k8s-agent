@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -32,13 +33,14 @@ import (
 
 var _ = Describe("ZitiController Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const resourceName = "test-controller"
+		const resourceNamespace = "default"
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: resourceNamespace,
 		}
 		ziticontroller := &kubernetesv1alpha1.ZitiController{}
 
@@ -49,9 +51,12 @@ var _ = Describe("ZitiController Controller", func() {
 				resource := &kubernetesv1alpha1.ZitiController{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: resourceNamespace,
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: kubernetesv1alpha1.ZitiControllerSpec{
+						Name:     resourceName,
+						AdminJwt: "eyJhbGciOiJSUzI1NiIsImtpZCI6ImI0NWFmYWQ1NzFiNDM1NjBkNDU2Y2JjYjI4YzBlZjkwZDgzYzQ2ZTIiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovLzhlZDE1YmVhLTU2MDMtNDg1ZS04NTc5LWEyOTcxZDJkYTY4NC5wcm9kdWN0aW9uLm5ldGZvdW5kcnkuaW86NDQzIiwic3ViIjoiWUk3aXIyWkdUbiIsImF1ZCI6WyIiXSwiZXhwIjoxNzQyMjY2MzQxLCJqdGkiOiI0YjNmZjFiZC1hYjJjLTRiOWYtYjQ0Yi0zZjZjOTkwNWZmZWMiLCJlbSI6Im90dCIsImN0cmxzIjpudWxsfQ.BhyAGv_E9P0NYF8tJjDWyXeXHNKAfMmSeBHpa_J0Qs3TSrhWA1-u3BMxtYvCk9zpMgm50Ft3StCxPahgveTT3w40yBgd-uZ8uHRQle5pUkbhXn8g9E5LgAN5ImyFLUVI_vaG-xqJ8uHKG5ScWUU3z7bHVqoURCrlVSwBBF_iw27DA4o3AYTtDvGk7Y5Jbv_4hdyXGHghMoH1rrP0puENYYgLRSk3q9Y4pClk874uA6e_e3SkX_YsxzDVSiFStFAalOce9EpxP_ngN7Cy1Tu7vWAKgCBoYkf5I0AEBRR95yS838cOXqWW25ZK414nj5HYi00_OuzXA4aAQnrYqAsAohVOcDBXzdbDF7jl_oJZWZOeX17YXBXQbdVuA9Ss72vt090oW3_SZhx4zn3k7XRnT6B09kBNF7qNKNdYCAAfL3s0eQgQHp2ZBRaxmjtzbrKNiipREMygBI_B3XPViVhhdDgMtMAkVjvQjeZjsYyGChipFINlCtJjT9BY8Ls3zOWnEXBl35rsu2KIZBMijlZwWTWODoUs46-aoTcCTNyo-_4Clb1M_3-RSYRe41MOZd4TgTJCOTrwUZ5e3l70i2d5qmL6KpRzZ8ONIypmZWS_RIXC_dunyEwriK_G_CMwwWYmWLmvvO4oy0Opzbjl54Fn2lWZLJgHLOTB7Vgr3MHa6Z4",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -76,9 +81,9 @@ var _ = Describe("ZitiController Controller", func() {
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+			Expect(err).To(HaveOccurred())
+			Expect(strings.Contains(err.Error(), "token is expired")).To(BeTrue())
+
 		})
 	})
 })

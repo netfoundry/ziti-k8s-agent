@@ -524,6 +524,16 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration Labels")
+		case !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations, desiredStateMutatingWebhookConfiguration.ObjectMeta.Annotations):
+			log.V(4).Info("Updating MutatingWebhookConfiguration Annotations", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
+			log.V(5).Info("Updating MutatingWebhookConfiguration Annotations", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.ObjectMeta.Annotations)
+			existing := actualStateMutatingWebhookConfigurationList.Items[0].DeepCopy()
+			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations = getAnnotations(ctx, zitiwebhook)
+			if err := r.Patch(ctx, &actualStateMutatingWebhookConfigurationList.Items[0], client.MergeFrom(existing)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update MutatingWebhookConfiguration Annotations")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration Annotations")
 		default:
 			log.V(4).Info("MutatingWebhookConfiguration is up to date", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
 		}
@@ -817,11 +827,9 @@ func (r *ZitiWebhookReconciler) getDesiredStateMutatingWebhookConfiguration(ctx 
 	_ = log.FromContext(ctx)
 	return &admissionregistrationv1.MutatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
-			Labels: getlabels(ctx, zitiwebhook),
-			Annotations: map[string]string{
-				"cert-manager.io/inject-ca-from": zitiwebhook.Namespace + "/" + zitiwebhook.Spec.Name + "-admission-cert",
-			},
+			Name:        zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
+			Labels:      getlabels(ctx, zitiwebhook),
+			Annotations: getAnnotations(ctx, zitiwebhook),
 		},
 		Webhooks: []admissionregistrationv1.MutatingWebhook{
 			{
@@ -1099,6 +1107,13 @@ func filterLabels(allLabels map[string]string) map[string]string {
 		filtered["app.kubernetes.io/name"] = val
 	}
 	return filtered
+}
+
+func getAnnotations(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) map[string]string {
+	_ = log.FromContext(ctx)
+	return map[string]string{
+		"cert-manager.io/inject-ca-from": zitiwebhook.Namespace + "/" + zitiwebhook.Spec.Name + "-admission-cert",
+	}
 }
 
 func convertDeploymentConditions(conds []appsv1.DeploymentCondition) []appsv1.DeploymentCondition {

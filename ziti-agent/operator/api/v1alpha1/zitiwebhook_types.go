@@ -70,7 +70,7 @@ type CertificateSpecs struct {
 	// +kubebuilder:default:=360
 	RenewBefore int64 `json:"renewBefore,omitempty"`
 	// Cert Organization
-	// +kubebuilder:default:={"netfoundry"}
+	// +kubebuilder:default:={"NetFoundry"}
 	Organizations []string `json:"organization,omitempty"`
 }
 
