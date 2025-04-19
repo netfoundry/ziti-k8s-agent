@@ -41,8 +41,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"slices"
-
 	kubernetesv1alpha1 "github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/api/v1alpha1"
 )
 
@@ -154,8 +152,11 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Merged", "Merged default specs to ZitiWebhook")
-		log.V(5).Info("ZitiWebhook Merged", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
+		log.V(2).Info("ZitiWebhook Merged", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
 	} else if err != nil {
+		log.V(5).Info("ZitiWebhook Spec merge failed", "Name", zitiwebhook.Name, "Error", err)
+		log.V(5).Info("ZitiWebhook Spec merge failed", "Name", zitiwebhook.Name, "Ok is", ok)
+		r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "ZitiWebhook Spec merge failed")
 		return ctrl.Result{}, err
 	}
 
@@ -836,8 +837,8 @@ func (r *ZitiWebhookReconciler) getDesiredStateMutatingWebhookConfiguration(ctx 
 				Name: "tunnel.ziti.webhook",
 				ClientConfig: admissionregistrationv1.WebhookClientConfig{
 					Service: &admissionregistrationv1.ServiceReference{
-						Name:      zitiwebhook.Spec.Name + "-service",
-						Namespace: zitiwebhook.Namespace,
+						Name:      zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.ServiceName,
+						Namespace: zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Namespace,
 						Port:      &zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Port,
 						Path:      &zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Path,
 					},
@@ -1033,10 +1034,10 @@ func (r *ZitiWebhookReconciler) mergeSpecs(ctx context.Context, current, desired
 	log := log.FromContext(ctx)
 	ok := false
 	log.V(5).Info("Merging Structs", "Current", current, "Desired", desired)
+
 	currentVal := reflect.ValueOf(current)
 	desiredVal := reflect.ValueOf(desired)
 
-	// Check if the values are pointers; if not, get a pointer to them
 	if currentVal.Kind() != reflect.Ptr {
 		log.V(5).Info("Current is not a pointer, creating a pointer to it")
 		currentPtr := reflect.New(currentVal.Type())
@@ -1050,41 +1051,104 @@ func (r *ZitiWebhookReconciler) mergeSpecs(ctx context.Context, current, desired
 		desiredVal = desiredPtr
 	}
 
-	currentValElem := currentVal.Elem()
-	desiredValElem := desiredVal.Elem()
+	for i := range currentVal.Elem().NumField() {
+		log.V(5).Info("Setting fields", "Field", currentVal.Elem().Type().Field(i).Name, "Value", currentVal.Elem().Field(i))
 
-	for i := range currentValElem.NumField() {
-		fieldType := currentValElem.Type().Field(i)
-		currentField := currentValElem.Field(i)
-		desiredField := desiredValElem.Field(i)
-		log.V(5).Info("Setting fields", "Field", fieldType.Name, "Value", currentField)
-		log.V(5).Info("Setting fields", "Field", fieldType.Name, "Value", desiredField)
-		if r.isManagedField(ctx, fieldType.Name) {
-			log.V(5).Info("IsMangedField", "Field", fieldType.Name, "Value", currentField)
-			log.V(5).Info("IsMangedField", "Field", fieldType.Name, "Value", desiredField)
-			if r.isZeroValue(ctx, currentField) && !r.isZeroValue(ctx, desiredField) {
-				if currentField.CanSet() {
-					currentField.Set(desiredField)
+		if r.isManagedField(ctx, currentVal.Elem().Type().Field(i).Name) {
+			log.V(5).Info("IsMangedField", "Field", currentVal.Elem().Type().Field(i).Name, "Value", currentVal.Elem().Field(i).Interface())
+
+			if r.isZeroValue(ctx, currentVal.Elem().Field(i)) && !r.isZeroValue(ctx, desiredVal.Elem().Field(i)) {
+
+				log.V(5).Info("Current fields", "Field", currentVal.Elem().Type().Field(i).Name, "Value", currentVal.Elem().Field(i).Interface())
+				log.V(5).Info("Desired fields", "Field", desiredVal.Elem().Type().Field(i).Name, "Value", desiredVal.Elem().Field(i).Interface())
+				if currentVal.Elem().Field(i).CanSet() {
+					currentVal.Elem().Field(i).Set(desiredVal.Elem().Field(i))
 					ok = true
-					log.V(4).Info("CurrentField Set", "Field", fieldType.Name, "Value", currentField.Interface())
 				} else {
-					return fmt.Errorf("cannot set field %s", fieldType.Name), ok
+					return fmt.Errorf("cannot set field %s", currentVal.Elem().Type().Field(i).Name), ok
 				}
+			}
+
+			if !r.isZeroValue(ctx, currentVal.Elem().Field(i)) && !r.isZeroValue(ctx, desiredVal.Elem().Field(i)) {
+
+				currentSubVal := currentVal.Elem().Field(i).Addr()
+				desiredSubVal := desiredVal.Elem().Field(i).Addr()
+
+				if currentSubVal.Elem().Kind() == reflect.Struct {
+					for j := range currentSubVal.Elem().NumField() {
+						log.V(5).Info("Setting subFields", "SubField", currentSubVal.Elem().Type().Field(j).Name, "Value", currentSubVal.Elem().Field(j).Interface())
+						log.V(5).Info("Setting subFields", "SubField", desiredSubVal.Elem().Type().Field(j).Name, "Value", desiredSubVal.Elem().Field(j).Interface())
+						if r.isZeroValue(ctx, currentSubVal.Elem().Field(j)) && !r.isZeroValue(ctx, desiredSubVal.Elem().Field(j)) {
+							if currentSubVal.Elem().Field(j).CanSet() {
+								currentSubVal.Elem().Field(j).Set(desiredSubVal.Elem().Field(j))
+								ok = true
+							}
+						}
+
+						currentSub2Val := currentSubVal.Elem().Field(j).Addr()
+						desiredSub2Val := desiredSubVal.Elem().Field(j).Addr()
+
+						if currentSub2Val.Elem().Kind() == reflect.Struct {
+							for k := range currentSub2Val.Elem().NumField() {
+								log.V(5).Info("Setting sub2Fields", "Sub2Field", currentSub2Val.Elem().Type().Field(k).Name, "Value", currentSub2Val.Elem().Field(k).Interface())
+								log.V(5).Info("Setting sub2Fields", "Sub2Field", desiredSub2Val.Elem().Type().Field(k).Name, "Value", desiredSub2Val.Elem().Field(k).Interface())
+								if r.isZeroValue(ctx, currentSub2Val.Elem().Field(k)) && !r.isZeroValue(ctx, desiredSub2Val.Elem().Field(k)) {
+									if currentSub2Val.Elem().Field(k).CanSet() {
+										currentSub2Val.Elem().Field(k).Set(desiredSub2Val.Elem().Field(k))
+										log.V(2).Info("Setting sub2Fields", "Sub2Field", currentSub2Val.Elem().Type().Field(k).Name, "Value", currentSub2Val.Elem().Field(k).Interface())
+										log.V(2).Info("Setting sub2Fields", "Sub2Field", desiredSub2Val.Elem().Type().Field(k).Name, "Value", desiredSub2Val.Elem().Field(k).Interface())
+										ok = true
+									}
+								}
+							}
+						}
+					}
+				}
+
 			}
 		}
 	}
+	log.V(5).Info("Merged Structs", "Current", currentVal.Elem().Interface(), "Desired", desiredVal.Elem().Interface())
 	return nil, ok
 }
 
 func (r *ZitiWebhookReconciler) isManagedField(ctx context.Context, fieldName string) bool {
 	_ = log.FromContext(ctx)
-	managedFields := []string{"Name", "ZitiControllerName", "Cert", "DeploymentSpec", "MutatingWebhookSpec", "ClusterRoleSpec", "ServiceAccount", "Revision"}
-	return slices.Contains(managedFields, fieldName)
+	switch fieldName {
+	case "Name", "ZitiControllerName", "Cert", "DeploymentSpec", "MutatingWebhookSpec", "ClusterRoleSpec", "ServiceAccount", "Revision":
+		return true
+	default:
+		return false
+	}
 }
 
-func (r *ZitiWebhookReconciler) isZeroValue(ctx context.Context, field reflect.Value) bool {
+func (r *ZitiWebhookReconciler) isZeroValue(ctx context.Context, v reflect.Value) bool {
 	_ = log.FromContext(ctx)
-	return reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface())
+	if !v.IsValid() {
+		return true
+	}
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface:
+		return v.IsNil()
+	case reflect.Slice, reflect.Map, reflect.Chan:
+		return v.IsNil() || v.Len() == 0
+	case reflect.String:
+		return v.Len() == 0
+	case reflect.Bool:
+		return !v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Complex64, reflect.Complex128:
+		return v.Complex() == 0
+	case reflect.Struct:
+		return reflect.DeepEqual(v.Interface(), reflect.Zero(v.Type()).Interface())
+	default:
+		return v.IsZero()
+	}
 }
 
 func getlabels(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) map[string]string {

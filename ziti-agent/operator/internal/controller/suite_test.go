@@ -18,9 +18,7 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -63,7 +61,6 @@ var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	ctx, cancel = context.WithCancel(context.TODO())
-	fakeRecorder = record.NewFakeRecorder(10)
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
@@ -72,14 +69,15 @@ var _ = BeforeSuite(func() {
 			filepath.Join("..", "..", "config", "crd", "tests"),
 		},
 		ErrorIfCRDPathMissing: true,
+		UseExistingCluster:    &[]bool{true}[0],
 
 		// The BinaryAssetsDirectory is only required if you want to run the tests directly
 		// without call the makefile target test. If not informed it will look for the
 		// default path defined in controller-runtime which is /usr/local/kubebuilder/.
 		// Note that you must have the required binaries setup under the bin directory to perform
 		// the tests directly. When we run make test it will be setup and used automatically.
-		BinaryAssetsDirectory: filepath.Join("..", "..", "bin", "k8s",
-			fmt.Sprintf("1.31.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
+		// 	BinaryAssetsDirectory: filepath.Join("..", "..", "bin", "k8s",
+		// 		fmt.Sprintf("1.31.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
 	}
 
 	var err error
@@ -116,3 +114,5 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+
+// +kubebuilder:scaffold:cleanup

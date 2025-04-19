@@ -277,6 +277,9 @@ type ServiceAccountSpec struct {
 
 // ZitiWebhookStatus defines the observed state of ZitiWebhook
 type ZitiWebhookStatus struct {
+	// Conditions is a list of conditions that describe the ZitiWebhook Status
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Ready      bool               `json:"ready,omitempty"`
 
 	// Conditions is a list of conditions that describe the ZitiWebhook Deployment Status
 	DeploymentConditions []appsv1.DeploymentCondition `json:"deploymentConditions,omitempty"`
@@ -321,7 +324,7 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 	timeoutSeconds := int32(30)
 	scopeAll := admissionregistrationv1.ScopeType("*")
 	return &ZitiWebhookSpec{
-		Name:               z.ObjectMeta.Name,
+		Name:               z.Spec.Name,
 		ZitiControllerName: z.Spec.ZitiControllerName,
 		Cert: CertificateSpecs{
 			Duration:      2160,
@@ -383,7 +386,8 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 				},
 			},
 			ClientConfig: ClientConfigSpec{
-				ServiceName: z.ObjectMeta.Name + "-service",
+				ServiceName: z.Spec.Name + "-service",
+				Namespace:   z.Namespace,
 				Path:        "/ziti-tunnel",
 				Port:        443,
 				CaBundle:    "",
