@@ -64,61 +64,79 @@ var _ = Describe("ZitiWebhook Controller", func() {
 	controllerReconciler := &ZitiWebhookReconciler{}
 
 	BeforeEach(OncePerOrdered, func() {
-		By("creating the custom resource for the Kind ZitiWebhook")
-		err := k8sClient.Get(ctx, typeNamespacedName, zitiwebhook)
-		if err != nil && errors.IsNotFound(err) {
-			zitiwebhook = &kubernetesv1alpha1.ZitiWebhook{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      typeNamespacedName.Name,
-					Namespace: typeNamespacedName.Namespace,
-				},
-				Spec: kubernetesv1alpha1.ZitiWebhookSpec{
-					ZitiControllerName: "ziticontroller-sample",
-					Name:               typeNamespacedName.Name,
-				},
-			}
-			Expect(k8sClient.Create(ctx, zitiwebhook)).To(Succeed())
 
-			// Initialize the reconciler within the BeforeEach where the client is ready
-			controllerReconciler = &ZitiWebhookReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: fakeRecorder,
-			}
-
-			// Add finalizer manually for testing deletion if needed
-			// Use Eventually to handle potential conflicts on initial creation/update
-			Eventually(func() error {
-				err := k8sClient.Get(ctx, typeNamespacedName, zitiwebhook)
-				if err != nil {
-					return err
-				}
-				controllerutil.AddFinalizer(zitiwebhook, zitiWebhookFinalizer)
-				return k8sClient.Update(ctx, zitiwebhook)
-			}, timeout, interval).Should(Succeed())
+		// Initialize the reconciler within the BeforeEach where the client is ready
+		controllerReconciler = &ZitiWebhookReconciler{
+			Client:   k8sClient,
+			Scheme:   k8sClient.Scheme(),
+			Recorder: fakeRecorder,
 		}
+
+		By("ensuring resources from previous tests are cleaned up")
+		err := k8sClient.Get(ctx, typeNamespacedName, zitiwebhook)
+		if err == nil {
+			By("Deleting the existing ZitiWebhook resource")
+			Expect(k8sClient.Delete(ctx, zitiwebhook)).To(Succeed())
+
+			By("Cleaning up the resources created by the previous test using reconcile loop")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Cleaning up the cluster resources manually")
+			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: resourceName + "-cluster-role"}})
+			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: resourceName + "-cluster-role-binding"}})
+			_ = k8sClient.Delete(ctx, &admissionregistrationv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: resourceName + "-mutating-webhook-configuration"}})
+		}
+
+		By("creating the custom resource for the Kind ZitiWebhook")
+		zitiwebhook = &kubernetesv1alpha1.ZitiWebhook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      typeNamespacedName.Name,
+				Namespace: typeNamespacedName.Namespace,
+			},
+			Spec: kubernetesv1alpha1.ZitiWebhookSpec{
+				ZitiControllerName: "ziticontroller-sample",
+				Name:               typeNamespacedName.Name,
+			},
+		}
+
+		By("Creating the ZitiWebhook resource")
+		Expect(k8sClient.Create(ctx, zitiwebhook)).To(Succeed())
+
+		// Add finalizer manually for testing deletion if needed
+		// Use Eventually to handle potential conflicts on initial creation/update
+		Eventually(func() error {
+			// Re-fetch the resource before updating
+			err := k8sClient.Get(ctx, typeNamespacedName, zitiwebhook)
+			if err != nil {
+				return err
+			}
+			if controllerutil.AddFinalizer(zitiwebhook, zitiWebhookFinalizer) {
+				return k8sClient.Update(ctx, zitiwebhook)
+			}
+			// Finalizer already present, no update needed
+			return nil
+		}, timeout, interval).Should(Succeed(), "Should succeed in adding the finalizer")
 
 		// Drain events before each test to prevent interference
 		Eventually(fakeRecorder.Events).ShouldNot(Receive())
 	})
 
 	AfterEach(OncePerOrdered, func() {
-		resource := &kubernetesv1alpha1.ZitiWebhook{}
-		err := k8sClient.Get(ctx, typeNamespacedName, resource)
-		// Only attempt deletion if the resource exists
+		By("Cleanup ZitiWebhook if exists")
+		err := k8sClient.Get(ctx, typeNamespacedName, zitiwebhook)
 		if err == nil {
-			By("Cleanup the specific resource instance ZitiWebhook")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, zitiwebhook)).To(Succeed())
 			// Wait for deletion to complete, including finalizer processing
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, typeNamespacedName, resource)
+				err := k8sClient.Get(ctx, typeNamespacedName, zitiwebhook)
 				return errors.IsNotFound(err)
 			}, timeout, interval).Should(BeTrue()) // Increase timeout for finalizer
 		} else if !errors.IsNotFound(err) {
-			// Fail the test if there was an unexpected error getting the resource
 			Expect(err).NotTo(HaveOccurred())
 		}
-		// Drain events after each test
+
+		By("Drainging events after each test")
 		Eventually(fakeRecorder.Events).ShouldNot(Receive())
 	})
 
