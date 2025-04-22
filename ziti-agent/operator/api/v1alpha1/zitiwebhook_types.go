@@ -324,7 +324,7 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 	timeoutSeconds := int32(30)
 	scopeAll := admissionregistrationv1.ScopeType("*")
 	return &ZitiWebhookSpec{
-		Name:               z.Spec.Name,
+		Name:               z.ObjectMeta.Name,
 		ZitiControllerName: z.Spec.ZitiControllerName,
 		Cert: CertificateSpecs{
 			Duration:      2160,
@@ -386,7 +386,7 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 				},
 			},
 			ClientConfig: ClientConfigSpec{
-				ServiceName: z.Spec.Name + "-service",
+				ServiceName: z.ObjectMeta.Name + "-service",
 				Namespace:   z.Namespace,
 				Path:        "/ziti-tunnel",
 				Port:        443,

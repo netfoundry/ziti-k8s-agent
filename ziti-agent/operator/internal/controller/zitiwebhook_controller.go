@@ -120,7 +120,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Merge defaults and ziticontroller specs if changes are detected
 	log.V(5).Info("ZitiWebhook Actual", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
 	defaultSpecs := zitiwebhook.GetDefaults()
-	log.V(5).Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", defaultSpecs)
+	log.V(2).Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", defaultSpecs)
 	err, ok := r.mergeSpecs(ctx, &zitiwebhook.Spec, defaultSpecs)
 	if err == nil && ok {
 		select {
@@ -176,44 +176,45 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Issuer")
-	} else {
-		switch {
+	} else if err == nil {
+		existingIssuerForPatch := actualStateIssuer.DeepCopy()
+		needsPatch := false
 
-		case !reflect.DeepEqual(actualStateIssuer.Spec, desiredStateIssuer.Spec):
-			log.V(4).Info("Updating Issuer", "Issuer.Actual", actualStateIssuer.Name, "Issuer.Desired", desiredStateIssuer.Name)
-			log.V(5).Info("Updating Issuer", "Issuer.Actual", actualStateIssuer.Spec, "Issuer.Desired", desiredStateIssuer.Spec)
-			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateIssuer, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.Update(ctx, desiredStateIssuer); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Issuer")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Issuer")
-		case !reflect.DeepEqual(actualStateIssuer.ObjectMeta.Labels, desiredStateIssuer.ObjectMeta.Labels):
-			log.V(4).Info("Updating Issuer Labels", "Issuer.Actual", actualStateIssuer.Name, "Issuer.Desired", desiredStateIssuer.Name)
-			log.V(5).Info("Updating Issuer Labels", "Issuer.Actual", actualStateIssuer.ObjectMeta.Labels, "Issuer.Desired", desiredStateIssuer.ObjectMeta.Labels)
-			existing := actualStateIssuer.DeepCopy()
+		if !reflect.DeepEqual(actualStateIssuer.ObjectMeta.Labels, desiredStateIssuer.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "Issuer.Name", actualStateIssuer.Name)
 			actualStateIssuer.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, actualStateIssuer, client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Issuer Labels")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Issuer Labels")
-		case !metav1.IsControlledBy(actualStateIssuer, zitiwebhook):
-			log.V(4).Info("Ownership is missing, re-establishing", "Issuer.Name", actualStateIssuer.Name)
-			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateIssuer, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.Update(ctx, actualStateIssuer); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Issuer Ownership")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Issuer")
-		default:
-			log.V(4).Info("Issuer is up to date", "Issuer.Name", actualStateIssuer.Name)
+			needsPatch = true
 		}
 
+		if !metav1.IsControlledBy(actualStateIssuer, zitiwebhook) {
+			log.V(4).Info("Ownership missing, preparing patch", "Issuer.Name", actualStateIssuer.Name)
+			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateIssuer, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual Issuer for patch")
+				return ctrl.Result{}, err
+			}
+			needsPatch = true
+		}
+
+		if !reflect.DeepEqual(actualStateIssuer.Spec, desiredStateIssuer.Spec) {
+			log.V(4).Info("Spec differs, preparing patch", "Issuer.Name", actualStateIssuer.Name)
+			actualStateIssuer.Spec = desiredStateIssuer.Spec
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to Issuer", "Issuer.Name", actualStateIssuer.Name)
+			if err := r.Patch(ctx, actualStateIssuer, client.MergeFrom(existingIssuerForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch Issuer")
+				log.Error(err, "Failed to patch Issuer")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched Issuer")
+		} else {
+			log.V(4).Info("Issuer is up to date", "Issuer.Name", actualStateIssuer.Name)
+		}
+	} else {
+		log.Error(err, "Failed to get Issuer")
+		return ctrl.Result{}, err
 	}
 
 	actualStateWebhookCert := &certmanagerv1.Certificate{}
@@ -232,43 +233,45 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Certificate")
-	} else {
-		switch {
-		case !reflect.DeepEqual(actualStateWebhookCert.Spec, desiredStateWebhookCert.Spec):
-			log.V(4).Info("Updating Certificate", "Certificate.Actual", actualStateWebhookCert.Name, "Certificate.Desired", desiredStateWebhookCert.Name)
-			log.V(5).Info("Updating Certificate", "Certificate.Actual", actualStateWebhookCert.Spec, "Certificate.Desired", desiredStateWebhookCert.Spec)
-			desiredStateWebhookCert.ObjectMeta.ResourceVersion = actualStateWebhookCert.ObjectMeta.ResourceVersion
-			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateWebhookCert, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.Update(ctx, desiredStateWebhookCert); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Certificate")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Certificate")
-		case !reflect.DeepEqual(actualStateWebhookCert.ObjectMeta.Labels, desiredStateWebhookCert.ObjectMeta.Labels):
-			log.V(4).Info("Updating Certificate Labels", "Certificate.Actual", actualStateWebhookCert.Name, "Certificate.Desired", desiredStateWebhookCert.Name)
-			log.V(5).Info("Updating Certificate Labels", "Certificate.Actual", actualStateWebhookCert.ObjectMeta.Labels, "Certificate.Desired", desiredStateWebhookCert.ObjectMeta.Labels)
-			existing := actualStateWebhookCert.DeepCopy()
+	} else if err == nil {
+		existingWebhookCertForPatch := actualStateWebhookCert.DeepCopy()
+		needsPatch := false
+
+		if !reflect.DeepEqual(actualStateWebhookCert.ObjectMeta.Labels, desiredStateWebhookCert.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "Certificate.Name", actualStateWebhookCert.Name)
 			actualStateWebhookCert.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, actualStateWebhookCert, client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Certificate Labels")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Certificate Labels")
-		case !metav1.IsControlledBy(actualStateWebhookCert, zitiwebhook):
-			log.V(4).Info("Ownership is missing, re-establishing", "Certificate.Name", actualStateWebhookCert.Name)
+			needsPatch = true
+		}
+
+		if !metav1.IsControlledBy(actualStateWebhookCert, zitiwebhook) {
+			log.V(4).Info("Ownership missing, preparing patch", "Certificate.Name", actualStateWebhookCert.Name)
 			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateWebhookCert, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual Certificate for patch")
 				return ctrl.Result{}, err
 			}
-			if err := r.Update(ctx, actualStateWebhookCert); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Certificate Ownership")
+			needsPatch = true
+		}
+
+		if !reflect.DeepEqual(actualStateWebhookCert.Spec, desiredStateWebhookCert.Spec) {
+			log.V(4).Info("Spec differs, preparing patch", "Certificate.Name", actualStateWebhookCert.Name)
+			actualStateWebhookCert.Spec = desiredStateWebhookCert.Spec
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to Certificate", "Certificate.Name", actualStateWebhookCert.Name)
+			if err := r.Patch(ctx, actualStateWebhookCert, client.MergeFrom(existingWebhookCertForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch Certificate")
+				log.Error(err, "Failed to patch Certificate")
 				return ctrl.Result{}, err
 			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Certificate")
-		default:
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched Certificate")
+		} else {
 			log.V(4).Info("Certificate is up to date", "Certificate.Name", actualStateWebhookCert.Name)
 		}
+	} else {
+		log.Error(err, "Failed to get Certificate")
+		return ctrl.Result{}, err
 	}
 
 	actualStateService := &corev1.Service{}
@@ -287,47 +290,51 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Service")
-	} else {
+	} else if err == nil {
+		existingServicetForPatch := actualStateService.DeepCopy()
+		needsPatch := false
+
+		if !reflect.DeepEqual(actualStateService.ObjectMeta.Labels, desiredStateService.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "Service.Name", actualStateService.Name)
+			actualStateService.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			needsPatch = true
+		}
+
+		if !metav1.IsControlledBy(actualStateService, zitiwebhook) {
+			log.V(4).Info("Ownership missing, preparing patch", "Service.Name", actualStateService.Name)
+			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateService, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual Service for patch")
+				return ctrl.Result{}, err
+			}
+			needsPatch = true
+		}
+
 		// Normalize desiredStateService to eliminate the difference in assigned IPs
 		if actualStateService.Spec.ClusterIP != "" || actualStateService.Spec.ClusterIPs == nil {
 			desiredStateService.Spec.ClusterIP = actualStateService.Spec.ClusterIP
 			desiredStateService.Spec.ClusterIPs = actualStateService.Spec.ClusterIPs
 		}
-		switch {
-		case !reflect.DeepEqual(actualStateService.Spec, desiredStateService.Spec):
-			log.V(4).Info("Updating Service", "Service.Actual", actualStateService.Name, "Service.Desired", desiredStateService.Name)
-			log.V(5).Info("Updating Service", "Service.Actual", actualStateService.Spec, "Service.Desired", desiredStateService.Spec)
-			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateService, r.Scheme); err != nil {
+
+		if !reflect.DeepEqual(actualStateService.Spec, desiredStateService.Spec) {
+			log.V(4).Info("Spec differs, preparing patch", "Service.Name", actualStateService.Name)
+			actualStateService.Spec = desiredStateService.Spec
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to Service", "Service.Name", actualStateService.Name)
+			if err := r.Patch(ctx, actualStateService, client.MergeFrom(existingServicetForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch Service")
+				log.Error(err, "Failed to patch Service")
 				return ctrl.Result{}, err
 			}
-			if err := r.Update(ctx, desiredStateService); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Service")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Service")
-		case !reflect.DeepEqual(actualStateService.ObjectMeta.Labels, desiredStateService.ObjectMeta.Labels):
-			log.V(4).Info("Updating Service Labels", "Service.Actual", actualStateService.Name, "Service.Desired", desiredStateService.Name)
-			log.V(5).Info("Updating Service Labels", "Service.Actual", actualStateService.ObjectMeta.Labels, "Service.Desired", desiredStateService.ObjectMeta.Labels)
-			existing := actualStateService.DeepCopy()
-			actualStateService.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, actualStateService, client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Service Labels")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Service Labels")
-		case !metav1.IsControlledBy(actualStateService, zitiwebhook):
-			log.V(4).Info("Ownership is missing, re-establishing", "Service.Name", actualStateService.Name)
-			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateService, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.Update(ctx, actualStateService); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Service Ownership")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Service")
-		default:
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched Service")
+		} else {
 			log.V(4).Info("Service is up to date", "Service.Name", actualStateService.Name)
 		}
+	} else {
+		log.Error(err, "Failed to get Service")
+		return ctrl.Result{}, err
 	}
 
 	actualStateServiceAccount := &corev1.ServiceAccount{}
@@ -348,46 +355,48 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ServiceAccount")
-	} else {
-		switch {
-		case !reflect.DeepEqual(actualStateServiceAccount.ImagePullSecrets, desiredStateServiceAccount.ImagePullSecrets) ||
-			!reflect.DeepEqual(actualStateServiceAccount.Secrets, desiredStateServiceAccount.Secrets) ||
-			!reflect.DeepEqual(actualStateServiceAccount.AutomountServiceAccountToken, desiredStateServiceAccount.AutomountServiceAccountToken):
-			log.V(4).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.Name, "ServiceAccount.Desired", desiredStateServiceAccount.Name)
-			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.ImagePullSecrets, "ServiceAccount.Desired", desiredStateServiceAccount.ImagePullSecrets)
-			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.Secrets, "ServiceAccount.Desired", desiredStateServiceAccount.Secrets)
-			log.V(5).Info("Updating ServiceAccount", "ServiceAccount.Actual", actualStateServiceAccount.AutomountServiceAccountToken, "ServiceAccount.Desired", desiredStateServiceAccount.AutomountServiceAccountToken)
-			if err := controllerutil.SetControllerReference(zitiwebhook, desiredStateServiceAccount, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.Update(ctx, desiredStateServiceAccount); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ServiceAccount")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ServiceAccount")
-		case !reflect.DeepEqual(actualStateServiceAccount.ObjectMeta.Labels, desiredStateServiceAccount.ObjectMeta.Labels):
-			log.V(4).Info("Updating ServiceAccount Labels", "ServiceAccount.Actual", actualStateServiceAccount.Name, "ServiceAccount.Desired", desiredStateServiceAccount.Name)
-			log.V(5).Info("Updating ServiceAccount Labels", "ServiceAccount.Actual", actualStateServiceAccount.ObjectMeta.Labels, "ServiceAccount.Desired", desiredStateServiceAccount.ObjectMeta.Labels)
-			existing := actualStateServiceAccount.DeepCopy()
+	} else if err == nil {
+		existingServiceAccountForPatch := actualStateServiceAccount.DeepCopy()
+		needsPatch := false
+
+		if !reflect.DeepEqual(actualStateServiceAccount.ObjectMeta.Labels, desiredStateServiceAccount.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "ServiceAccount.Name", actualStateServiceAccount.Name)
 			actualStateServiceAccount.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, actualStateServiceAccount, client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ServiceAccount Labels")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ServiceAccount Labels")
-		case !metav1.IsControlledBy(actualStateServiceAccount, zitiwebhook):
-			log.V(4).Info("Ownership is missing, re-establishing", "ServiceAccount.Name", actualStateServiceAccount.Name)
+		}
+
+		if !metav1.IsControlledBy(actualStateServiceAccount, zitiwebhook) {
+			log.V(4).Info("Ownership missing, preparing patch", "ServiceAccount.Name", actualStateServiceAccount.Name)
 			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateServiceAccount, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual ServiceAccount for patch")
 				return ctrl.Result{}, err
 			}
-			if err := r.Update(ctx, actualStateServiceAccount); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ServiceAccount Ownership")
+			needsPatch = true
+		}
+
+		if !reflect.DeepEqual(actualStateServiceAccount.ImagePullSecrets, desiredStateServiceAccount.ImagePullSecrets) ||
+			!reflect.DeepEqual(actualStateServiceAccount.Secrets, desiredStateServiceAccount.Secrets) ||
+			!reflect.DeepEqual(actualStateServiceAccount.AutomountServiceAccountToken, desiredStateServiceAccount.AutomountServiceAccountToken) {
+			log.V(4).Info("Spec differs, preparing patch", "ServiceAccount.Name", actualStateServiceAccount.Name)
+			actualStateServiceAccount.ImagePullSecrets = desiredStateServiceAccount.ImagePullSecrets
+			actualStateServiceAccount.Secrets = desiredStateServiceAccount.Secrets
+			actualStateServiceAccount.AutomountServiceAccountToken = desiredStateServiceAccount.AutomountServiceAccountToken
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to ServiceAccount", "ServiceAccount.Name", actualStateServiceAccount.Name)
+			if err := r.Patch(ctx, actualStateServiceAccount, client.MergeFrom(existingServiceAccountForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch ServiceAccount")
+				log.Error(err, "Failed to patch ServiceAccount")
 				return ctrl.Result{}, err
 			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for ServiceAccount")
-		default:
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched ServiceAccount")
+		} else {
 			log.V(4).Info("ServiceAccount is up to date", "ServiceAccount.Name", actualStateServiceAccount.Name)
 		}
+	} else {
+		log.Error(err, "Failed to get ServiceAccount")
+		return ctrl.Result{}, err
 	}
 
 	actualStateClusterRoleList := &rbacv1.ClusterRoleList{}
@@ -409,29 +418,38 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ClusterRole")
-	} else {
-		switch {
-		case !reflect.DeepEqual(actualStateClusterRoleList.Items[0].Rules, desiredStateClusterRole.Rules):
-			log.V(4).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Name, "ClusterRole.Desired", desiredStateClusterRole.Name)
-			log.V(5).Info("Updating ClusterRole", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Rules, "ClusterRole.Desired", desiredStateClusterRole.Rules)
-			if err := r.Update(ctx, desiredStateClusterRole); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRole")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRole")
-		case !reflect.DeepEqual(actualStateClusterRoleList.Items[0].ObjectMeta.Labels, desiredStateClusterRole.ObjectMeta.Labels):
-			log.V(4).Info("Updating ClusterRole Labels", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].Name, "ClusterRole.Desired", desiredStateClusterRole.Name)
-			log.V(5).Info("Updating ClusterRole Labels", "ClusterRole.Actual", actualStateClusterRoleList.Items[0].ObjectMeta.Labels, "ClusterRole.Desired", desiredStateClusterRole.ObjectMeta.Labels)
-			existing := actualStateClusterRoleList.Items[0].DeepCopy()
-			actualStateClusterRoleList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, &actualStateClusterRoleList.Items[0], client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRole Labels")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRole Labels")
-		default:
-			log.V(4).Info("ClusterRole is up to date", "ClusterRole.Name", actualStateClusterRoleList.Items[0].Name)
+	} else if err == nil {
+		existingCRForPatch := actualStateClusterRoleList.Items[0].DeepCopy()
+		needsPatch := false
+
+		// Note: Order matters in DeepEqual for slices. Ensure desiredState always generates rules in a consistent order.
+		if !reflect.DeepEqual(actualStateClusterRoleList.Items[0].Rules, desiredStateClusterRole.Rules) {
+			log.V(4).Info("Rules differ, preparing patch", "ClusterRole.Name", actualStateClusterRoleList.Items[0].Name)
+			actualStateClusterRoleList.Items[0].Rules = desiredStateClusterRole.Rules
+			needsPatch = true
 		}
+
+		if !reflect.DeepEqual(actualStateClusterRoleList.Items[0].ObjectMeta.Labels, desiredStateClusterRole.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "ClusterRole.Name", actualStateClusterRoleList.Items[0].Name)
+			actualStateClusterRoleList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to ClusterRole", "Name", actualStateClusterRoleList.Items[0].Name)
+			if err := r.Patch(ctx, &actualStateClusterRoleList.Items[0], client.MergeFrom(existingCRForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch ClusterRole")
+				log.Error(err, "Failed to patch ClusterRole")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched ClusterRole")
+		} else {
+			log.V(4).Info("ClusterRole is up to date", "Name", actualStateClusterRoleList.Items[0].Name)
+		}
+	} else {
+		// Handle other Get errors
+		log.Error(err, "Failed to get ClusterRole")
+		return ctrl.Result{}, err
 	}
 
 	actualStateClusterRoleBindingList := &rbacv1.ClusterRoleBindingList{}
@@ -454,30 +472,43 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new ClusterRoleBinding")
-	} else {
-		switch {
-		case !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].RoleRef, desiredStateClusterRoleBinding.RoleRef) || !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].Subjects, desiredStateClusterRoleBinding.Subjects):
-			log.V(4).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Name, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Name)
-			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].RoleRef, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.RoleRef)
-			log.V(5).Info("Updating ClusterRoleBinding", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Subjects, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Subjects)
-			if err := r.Update(ctx, desiredStateClusterRoleBinding); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRoleBinding")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRoleBinding")
-		case !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels, desiredStateClusterRoleBinding.ObjectMeta.Labels):
-			log.V(4).Info("Updating ClusterRoleBinding Labels", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].Name, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.Name)
-			log.V(5).Info("Updating ClusterRoleBinding Labels", "ClusterRoleBinding.Actual", actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels, "ClusterRoleBinding.Desired", desiredStateClusterRoleBinding.ObjectMeta.Labels)
-			existing := actualStateClusterRoleBindingList.Items[0].DeepCopy()
-			actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, &actualStateClusterRoleBindingList.Items[0], client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update ClusterRoleBinding Labels")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated ClusterRoleBinding Labels")
-		default:
-			log.V(4).Info("ClusterRoleBinding is up to date", "ClusterRoleBinding.Name", actualStateClusterRoleBindingList.Items[0].Name)
+	} else if err == nil {
+		existingCRBForPatch := actualStateClusterRoleBindingList.Items[0].DeepCopy()
+		needsPatch := false
+
+		if !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].RoleRef, desiredStateClusterRoleBinding.RoleRef) {
+			log.V(4).Info("RoleRef differs, preparing patch", "ClusterRoleBinding.Name", actualStateClusterRoleBindingList.Items[0].Name)
+			actualStateClusterRoleBindingList.Items[0].RoleRef = desiredStateClusterRoleBinding.RoleRef
+			needsPatch = true
 		}
+
+		// Note: Order matters in DeepEqual for slices. Ensure desiredState always generates subjects in a consistent order.
+		if !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].Subjects, desiredStateClusterRoleBinding.Subjects) {
+			log.V(4).Info("Subjects differ, preparing patch", "ClusterRoleBinding.Name", actualStateClusterRoleBindingList.Items[0].Name)
+			actualStateClusterRoleBindingList.Items[0].Subjects = desiredStateClusterRoleBinding.Subjects
+			needsPatch = true
+		}
+
+		if !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels, desiredStateClusterRoleBinding.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "ClusterRoleBinding.Name", actualStateClusterRoleBindingList.Items[0].Name)
+			actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to ClusterRoleBinding", "Name", actualStateClusterRoleBindingList.Items[0].Name)
+			if err := r.Patch(ctx, &actualStateClusterRoleBindingList.Items[0], client.MergeFrom(existingCRBForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch ClusterRoleBinding")
+				log.Error(err, "Failed to patch ClusterRoleBinding")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched ClusterRoleBinding")
+		} else {
+			log.V(4).Info("ClusterRoleBinding is up to date", "Name", actualStateClusterRoleBindingList.Items[0].Name)
+		}
+	} else {
+		log.Error(err, "Failed to get ClusterRoleBinding")
+		return ctrl.Result{}, err
 	}
 
 	actualStateMutatingWebhookConfigurationList := &admissionregistrationv1.MutatingWebhookConfigurationList{}
@@ -499,45 +530,52 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new MutatingWebhookConfiguration")
-	} else {
-		if len(desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle) == 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle) > 0 {
-			desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle = actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle
-			log.V(5).Info("Desired MutatingWebhookConfiguration", "CA BUndled", desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle)
-		}
-		desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion = actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.ResourceVersion
-		log.V(5).Info("Desired MutatingWebhookConfiguration", "ResourceVersion", desiredStateMutatingWebhookConfiguration.ObjectMeta.ResourceVersion)
-		switch {
-		case !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]):
-			log.V(4).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
-			log.V(5).Info("Updating MutatingWebhookConfiguration", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Webhooks[0])
-			if err := r.Update(ctx, desiredStateMutatingWebhookConfiguration); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update MutatingWebhookConfiguration")
-				return ctrl.Result{}, err
+	} else if err == nil {
+		existingWebhookForPatch := actualStateMutatingWebhookConfigurationList.Items[0].DeepCopy()
+		needsPatch := false
+		if len(desiredStateMutatingWebhookConfiguration.Webhooks) > 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks) > 0 {
+			if len(desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle) == 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle) > 0 {
+				log.V(4).Info("Preserving existing CABundle for MutatingWebhookConfiguration")
+				desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle = actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle
 			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration")
-		case !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels, desiredStateMutatingWebhookConfiguration.ObjectMeta.Labels):
-			log.V(4).Info("Updating MutatingWebhookConfiguration Labels", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
-			log.V(5).Info("Updating MutatingWebhookConfiguration Labels", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.ObjectMeta.Labels)
-			existing := actualStateMutatingWebhookConfigurationList.Items[0].DeepCopy()
+		} else {
+			log.V(4).Info("Warning: Webhooks slice is unexpectedly empty for MutatingWebhookConfiguration", "DesiredLen", len(desiredStateMutatingWebhookConfiguration.Webhooks), "ActualLen", len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks))
+			// TODO: Handle this case appropriately, maybe return an error or skip comparison
+		}
+
+		if len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks) != 1 || len(desiredStateMutatingWebhookConfiguration.Webhooks) != 1 ||
+			!reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]) {
+			log.V(4).Info("Webhooks differ, preparing patch", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
+			actualStateMutatingWebhookConfigurationList.Items[0].Webhooks = desiredStateMutatingWebhookConfiguration.Webhooks
+			needsPatch = true
+		}
+
+		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels, desiredStateMutatingWebhookConfiguration.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
 			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, &actualStateMutatingWebhookConfigurationList.Items[0], client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update MutatingWebhookConfiguration Labels")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration Labels")
-		case !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations, desiredStateMutatingWebhookConfiguration.ObjectMeta.Annotations):
-			log.V(4).Info("Updating MutatingWebhookConfiguration Annotations", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].Name, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.Name)
-			log.V(5).Info("Updating MutatingWebhookConfiguration Annotations", "MutatingWebhookConfiguration.Actual", actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations, "MutatingWebhookConfiguration.Desired", desiredStateMutatingWebhookConfiguration.ObjectMeta.Annotations)
-			existing := actualStateMutatingWebhookConfigurationList.Items[0].DeepCopy()
-			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations = getAnnotations(ctx, zitiwebhook)
-			if err := r.Patch(ctx, &actualStateMutatingWebhookConfigurationList.Items[0], client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update MutatingWebhookConfiguration Annotations")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated MutatingWebhookConfiguration Annotations")
-		default:
-			log.V(4).Info("MutatingWebhookConfiguration is up to date", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
+			needsPatch = true
 		}
+
+		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations, desiredStateMutatingWebhookConfiguration.ObjectMeta.Annotations) {
+			log.V(4).Info("Annotations differ, preparing patch", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
+			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations = getAnnotations(ctx, zitiwebhook)
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to MutatingWebhookConfiguration", "Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
+			if err := r.Patch(ctx, &actualStateMutatingWebhookConfigurationList.Items[0], client.MergeFrom(existingWebhookForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch MutatingWebhookConfiguration")
+				log.Error(err, "Failed to patch MutatingWebhookConfiguration")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched MutatingWebhookConfiguration")
+		} else {
+			log.V(4).Info("MutatingWebhookConfiguration is up to date", "Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
+		}
+	} else {
+		log.Error(err, "Failed to get MutatingWebhookConfiguration")
+		return ctrl.Result{}, err
 	}
 
 	actualStateWebhookDeployment := &appsv1.Deployment{}
@@ -557,42 +595,45 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Created", "Created a new Deployment")
-	} else {
-		switch {
-		case !reflect.DeepEqual(actualStateWebhookDeployment.Spec, desiredStateWebhookDeployment.Spec):
-			log.V(4).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Name, "Deployment.Desired", desiredStateWebhookDeployment.Name)
-			log.V(5).Info("Updating Deployment", "Deployment.Actual", actualStateWebhookDeployment.Spec, "Deployment.Desired", desiredStateWebhookDeployment.Spec)
-			if err := ctrl.SetControllerReference(zitiwebhook, desiredStateWebhookDeployment, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.Update(ctx, desiredStateWebhookDeployment); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Deployment")
-		case !reflect.DeepEqual(actualStateWebhookDeployment.ObjectMeta.Labels, desiredStateWebhookDeployment.ObjectMeta.Labels):
-			log.V(4).Info("Updating Deployment Labels", "Deployment.Actual", actualStateWebhookDeployment.Name, "Deployment.Desired", desiredStateWebhookDeployment.Name)
-			log.V(5).Info("Updating Deployment Labels", "Deployment.Actual", actualStateWebhookDeployment.ObjectMeta.Labels, "Deployment.Desired", desiredStateWebhookDeployment.ObjectMeta.Labels)
-			existing := actualStateWebhookDeployment.DeepCopy()
+	} else if err == nil {
+		existingWebhookDeploymentForPatch := actualStateWebhookDeployment.DeepCopy()
+		needsPatch := false
+
+		if !reflect.DeepEqual(actualStateWebhookDeployment.ObjectMeta.Labels, desiredStateWebhookDeployment.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "Deployment.Name", actualStateWebhookDeployment.Name)
 			actualStateWebhookDeployment.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
-			if err := r.Patch(ctx, actualStateWebhookDeployment, client.MergeFrom(existing)); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment Labels")
+			needsPatch = true
+		}
+
+		if !metav1.IsControlledBy(actualStateWebhookDeployment, zitiwebhook) {
+			log.V(4).Info("Ownership missing, preparing patch", "Deployment.Name", actualStateWebhookDeployment.Name)
+			if err := controllerutil.SetControllerReference(zitiwebhook, actualStateWebhookDeployment, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual Deployment for patch")
 				return ctrl.Result{}, err
 			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Updated Deployment Labels")
-		case !metav1.IsControlledBy(actualStateWebhookDeployment, zitiwebhook):
-			log.V(4).Info("Ownership is missing, re-establishing", "Deployment.Name", actualStateWebhookDeployment.Name)
-			if err := ctrl.SetControllerReference(zitiwebhook, actualStateWebhookDeployment, r.Scheme); err != nil {
+			needsPatch = true
+		}
+
+		if !reflect.DeepEqual(actualStateWebhookDeployment.Spec, desiredStateWebhookDeployment.Spec) {
+			log.V(4).Info("Spec differs, preparing patch", "Deployment.Name", actualStateWebhookDeployment.Name)
+			actualStateWebhookDeployment.Spec = desiredStateWebhookDeployment.Spec
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to Deployment", "Deployment.Name", actualStateWebhookDeployment.Name)
+			if err := r.Patch(ctx, actualStateWebhookDeployment, client.MergeFrom(existingWebhookDeploymentForPatch)); err != nil {
+				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to patch Deployment")
+				log.Error(err, "Failed to patch Deployment")
 				return ctrl.Result{}, err
 			}
-			if err := r.Update(ctx, actualStateWebhookDeployment); err != nil {
-				r.Recorder.Event(zitiwebhook, corev1.EventTypeWarning, "Failed", "Failed to update Deployment Ownership")
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Updated", "Re-established ownership for Deployment")
-		default:
+			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Patched", "Patched Deployment")
+		} else {
 			log.V(4).Info("Deployment is up to date", "Deployment.Name", actualStateWebhookDeployment.Name)
 		}
+	} else {
+		log.Error(err, "Failed to get Deployment")
+		return ctrl.Result{}, err
 	}
 
 	// Re-fetch the ZitiWebhook object before updating the status
