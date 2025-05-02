@@ -47,6 +47,9 @@ spec:
                 description: Controller Name
                 minLength: 10
                 type: string
+              zitiCtrlMgmtApi:
+                description: Ziti Controller Management Address
+                type: string
             required:
             - adminJwt
             - name

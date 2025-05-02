@@ -410,3 +410,19 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 		Revision: "1",
 	}
 }
+
+func (z *ZitiWebhook) GetDefaultLabels() map[string]string {
+	return map[string]string{
+		"app":                          z.Spec.Name,
+		"app.kubernetes.io/name":       z.Spec.Name + "-" + z.Namespace,
+		"app.kubernetes.io/part-of":    z.Spec.Name + "-operator",
+		"app.kubernetes.io/managed-by": z.Spec.Name + "-controller",
+		"app.kubernetes.io/component":  "webhook",
+	}
+}
+
+func (z *ZitiWebhook) GetDefaultAnnotations() map[string]string {
+	return map[string]string{
+		"cert-manager.io/inject-ca-from": z.Namespace + "/" + z.Spec.Name + "-admission-cert",
+	}
+}

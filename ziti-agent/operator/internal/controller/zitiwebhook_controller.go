@@ -25,7 +25,6 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
-	"github.com/golang-jwt/jwt/v5"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kubernetesv1alpha1 "github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/api/v1alpha1"
+	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/internal/utils"
 )
 
 const zitiWebhookFinalizer = "kubernetes.openziti.io/zitiwebhook"
@@ -120,8 +120,8 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Merge defaults and ziticontroller specs if changes are detected
 	log.V(5).Info("ZitiWebhook Actual", "Name", zitiwebhook.Name, "Specs", zitiwebhook.Spec)
 	defaultSpecs := zitiwebhook.GetDefaults()
-	log.V(2).Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", defaultSpecs)
-	err, ok := r.mergeSpecs(ctx, &zitiwebhook.Spec, defaultSpecs)
+	log.V(5).Info("ZitiWebhook Default", "Name", zitiwebhook.Name, "Specs", defaultSpecs)
+	err, ok := utils.MergeSpecs(ctx, &zitiwebhook.Spec, defaultSpecs)
 	if err == nil && ok {
 		select {
 		case ziticontroller := <-r.ZitiControllerChan:
@@ -129,8 +129,9 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.Recorder.Event(zitiwebhook, corev1.EventTypeNormal, "Update", "Using ZitiController from channel")
 			r.CachedZitiController = &ziticontroller
 			zitiwebhook.Spec.ZitiControllerName = r.CachedZitiController.Spec.Name
+			zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi = r.CachedZitiController.Spec.ZitiCtrlMgmtApi
 			if zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi == "" {
-				zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi, _ = getZitiControllerUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
+				zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi, _ = utils.GetUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
 				zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi = zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi + "/edge/management/v1"
 				log.V(5).Info("ZitiController URL", "ZitiCtrlMgmtApi", zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi)
 			}
@@ -138,8 +139,9 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			if r.CachedZitiController != nil {
 				log.V(5).Info("Cached ZitiController Spec", "Name", r.CachedZitiController.Spec.Name, "ZitiController.Spec", r.CachedZitiController.Spec)
 				zitiwebhook.Spec.ZitiControllerName = r.CachedZitiController.Spec.Name
+				zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi = r.CachedZitiController.Spec.ZitiCtrlMgmtApi
 				if zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi == "" {
-					zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi, _ = getZitiControllerUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
+					zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi, _ = utils.GetUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
 					zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi = zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi + "/edge/management/v1"
 					log.V(5).Info("ZitiController URL", "ZitiCtrlMgmtApi", zitiwebhook.Spec.DeploymentSpec.Env.ZitiCtrlMgmtApi)
 				}
@@ -182,7 +184,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateIssuer.ObjectMeta.Labels, desiredStateIssuer.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "Issuer.Name", actualStateIssuer.Name)
-			actualStateIssuer.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateIssuer.ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 			needsPatch = true
 		}
 
@@ -239,7 +241,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateWebhookCert.ObjectMeta.Labels, desiredStateWebhookCert.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "Certificate.Name", actualStateWebhookCert.Name)
-			actualStateWebhookCert.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateWebhookCert.ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 			needsPatch = true
 		}
 
@@ -296,7 +298,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateService.ObjectMeta.Labels, desiredStateService.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "Service.Name", actualStateService.Name)
-			actualStateService.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateService.ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 			needsPatch = true
 		}
 
@@ -361,7 +363,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateServiceAccount.ObjectMeta.Labels, desiredStateServiceAccount.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "ServiceAccount.Name", actualStateServiceAccount.Name)
-			actualStateServiceAccount.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateServiceAccount.ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 		}
 
 		if !metav1.IsControlledBy(actualStateServiceAccount, zitiwebhook) {
@@ -431,7 +433,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateClusterRoleList.Items[0].ObjectMeta.Labels, desiredStateClusterRole.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "ClusterRole.Name", actualStateClusterRoleList.Items[0].Name)
-			actualStateClusterRoleList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateClusterRoleList.Items[0].ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 			needsPatch = true
 		}
 
@@ -491,7 +493,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels, desiredStateClusterRoleBinding.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "ClusterRoleBinding.Name", actualStateClusterRoleBindingList.Items[0].Name)
-			actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateClusterRoleBindingList.Items[0].ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 			needsPatch = true
 		}
 
@@ -552,13 +554,13 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels, desiredStateMutatingWebhookConfiguration.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
-			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 			needsPatch = true
 		}
 
 		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations, desiredStateMutatingWebhookConfiguration.ObjectMeta.Annotations) {
 			log.V(4).Info("Annotations differ, preparing patch", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
-			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations = getAnnotations(ctx, zitiwebhook)
+			actualStateMutatingWebhookConfigurationList.Items[0].ObjectMeta.Annotations = zitiwebhook.GetDefaultAnnotations()
 			needsPatch = true
 		}
 
@@ -601,7 +603,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		if !reflect.DeepEqual(actualStateWebhookDeployment.ObjectMeta.Labels, desiredStateWebhookDeployment.ObjectMeta.Labels) {
 			log.V(4).Info("Labels differ, preparing patch", "Deployment.Name", actualStateWebhookDeployment.Name)
-			actualStateWebhookDeployment.ObjectMeta.Labels = getlabels(ctx, zitiwebhook)
+			actualStateWebhookDeployment.ObjectMeta.Labels = zitiwebhook.GetDefaultLabels()
 			needsPatch = true
 		}
 
@@ -641,11 +643,11 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// Create a copy *before* modifying the status
 		existing := zitiwebhook.DeepCopy()
 		// Update the status
-		zitiwebhook.Status.DeploymentConditions = convertDeploymentConditions(actualStateWebhookDeployment.Status.Conditions)
+		zitiwebhook.Status.DeploymentConditions = utils.ConvertDeploymentConditions(actualStateWebhookDeployment.Status.Conditions)
 		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.DeploymentConditions)
-		zitiwebhook.Status.IssuerConditions = convertIssuerConditions(actualStateIssuer.Status.Conditions)
+		zitiwebhook.Status.IssuerConditions = utils.ConvertIssuerConditions(actualStateIssuer.Status.Conditions)
 		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.IssuerConditions)
-		zitiwebhook.Status.CertificateConditions = convertCertificateConditions(actualStateWebhookCert.Status.Conditions)
+		zitiwebhook.Status.CertificateConditions = utils.ConvertCertificateConditions(actualStateWebhookCert.Status.Conditions)
 		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.CertificateConditions)
 		// Attempt to patch the status
 		if err := r.Status().Patch(ctx, zitiwebhook, client.MergeFrom(existing)); err != nil {
@@ -736,7 +738,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateIssuer(ctx context.Context, zitiw
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-ca-issuer",
 			Namespace: zitiwebhook.Namespace,
-			Labels:    getlabels(ctx, zitiwebhook),
+			Labels:    zitiwebhook.GetDefaultLabels(),
 		},
 		Spec: certmanagerv1.IssuerSpec{
 			IssuerConfig: certmanagerv1.IssuerConfig{
@@ -752,7 +754,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateCertificate(ctx context.Context, 
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-admission-cert",
 			Namespace: zitiwebhook.Namespace,
-			Labels:    getlabels(ctx, zitiwebhook),
+			Labels:    zitiwebhook.GetDefaultLabels(),
 		},
 		Spec: certmanagerv1.CertificateSpec{
 			CommonName: zitiwebhook.Spec.Name + "-service." + zitiwebhook.Namespace + ".svc.cluster.local",
@@ -794,7 +796,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateService(ctx context.Context, ziti
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-service",
 			Namespace: zitiwebhook.Namespace,
-			Labels:    getlabels(ctx, zitiwebhook),
+			Labels:    zitiwebhook.GetDefaultLabels(),
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
@@ -811,7 +813,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateService(ctx context.Context, ziti
 			InternalTrafficPolicy: &cluster,
 			IPFamilies:            []corev1.IPFamily{corev1.IPv4Protocol},
 			IPFamilyPolicy:        &singleStack,
-			Selector:              filterLabels(getlabels(ctx, zitiwebhook)),
+			Selector:              utils.FilterLabels(zitiwebhook.GetDefaultLabels()),
 			SessionAffinity:       corev1.ServiceAffinityNone,
 			Type:                  corev1.ServiceTypeClusterIP,
 		},
@@ -824,7 +826,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateServiceAccount(ctx context.Contex
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-service-account",
 			Namespace: zitiwebhook.Namespace,
-			Labels:    getlabels(ctx, zitiwebhook),
+			Labels:    zitiwebhook.GetDefaultLabels(),
 		},
 		ImagePullSecrets:             zitiwebhook.Spec.ServiceAccount.ImagePullSecrets,
 		Secrets:                      zitiwebhook.Spec.ServiceAccount.Secrets,
@@ -837,7 +839,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateClusterRole(ctx context.Context, 
 	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   zitiwebhook.Spec.Name + "-cluster-role",
-			Labels: getlabels(ctx, zitiwebhook),
+			Labels: zitiwebhook.GetDefaultLabels(),
 		},
 		Rules: zitiwebhook.Spec.ClusterRoleSpec.Rules,
 	}
@@ -848,7 +850,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateClusterRoleBinding(ctx context.Co
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   zitiwebhook.Spec.Name + "-cluster-role-binding",
-			Labels: getlabels(ctx, zitiwebhook),
+			Labels: zitiwebhook.GetDefaultLabels(),
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
@@ -870,8 +872,8 @@ func (r *ZitiWebhookReconciler) getDesiredStateMutatingWebhookConfiguration(ctx 
 	return &admissionregistrationv1.MutatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        zitiwebhook.Spec.Name + "-mutating-webhook-configuration",
-			Labels:      getlabels(ctx, zitiwebhook),
-			Annotations: getAnnotations(ctx, zitiwebhook),
+			Labels:      zitiwebhook.GetDefaultLabels(),
+			Annotations: zitiwebhook.GetDefaultAnnotations(),
 		},
 		Webhooks: []admissionregistrationv1.MutatingWebhook{
 			{
@@ -905,16 +907,16 @@ func (r *ZitiWebhookReconciler) getDesiredStateDeploymentConfiguration(ctx conte
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zitiwebhook.Spec.Name + "-deployment",
 			Namespace: zitiwebhook.Namespace,
-			Labels:    getlabels(ctx, zitiwebhook),
+			Labels:    zitiwebhook.GetDefaultLabels(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &zitiwebhook.Spec.DeploymentSpec.Replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: filterLabels(getlabels(ctx, zitiwebhook)),
+				MatchLabels: utils.FilterLabels(zitiwebhook.GetDefaultLabels()),
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: getlabels(ctx, zitiwebhook),
+					Labels: zitiwebhook.GetDefaultLabels(),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -1069,224 +1071,4 @@ func (r *ZitiWebhookReconciler) getDesiredStateDeploymentConfiguration(ctx conte
 			RevisionHistoryLimit:    &zitiwebhook.Spec.DeploymentSpec.RevisionHistoryLimit,
 		},
 	}
-}
-
-func (r *ZitiWebhookReconciler) mergeSpecs(ctx context.Context, current, desired any) (error, bool) {
-	log := log.FromContext(ctx)
-	ok := false
-	log.V(5).Info("Merging Structs", "Current", current, "Desired", desired)
-
-	currentVal := reflect.ValueOf(current)
-	desiredVal := reflect.ValueOf(desired)
-
-	if currentVal.Kind() != reflect.Ptr {
-		log.V(5).Info("Current is not a pointer, creating a pointer to it")
-		currentPtr := reflect.New(currentVal.Type())
-		currentPtr.Elem().Set(currentVal)
-		currentVal = currentPtr
-	}
-	if desiredVal.Kind() != reflect.Ptr {
-		log.V(5).Info("Desired is not a pointer, creating a pointer to it")
-		desiredPtr := reflect.New(desiredVal.Type())
-		desiredPtr.Elem().Set(desiredVal)
-		desiredVal = desiredPtr
-	}
-
-	for i := range currentVal.Elem().NumField() {
-		log.V(5).Info("Setting fields", "Field", currentVal.Elem().Type().Field(i).Name, "Value", currentVal.Elem().Field(i))
-
-		if r.isManagedField(ctx, currentVal.Elem().Type().Field(i).Name) {
-			log.V(5).Info("IsMangedField", "Field", currentVal.Elem().Type().Field(i).Name, "Value", currentVal.Elem().Field(i).Interface())
-
-			if r.isZeroValue(ctx, currentVal.Elem().Field(i)) && !r.isZeroValue(ctx, desiredVal.Elem().Field(i)) {
-
-				log.V(5).Info("Current fields", "Field", currentVal.Elem().Type().Field(i).Name, "Value", currentVal.Elem().Field(i).Interface())
-				log.V(5).Info("Desired fields", "Field", desiredVal.Elem().Type().Field(i).Name, "Value", desiredVal.Elem().Field(i).Interface())
-				if currentVal.Elem().Field(i).CanSet() {
-					currentVal.Elem().Field(i).Set(desiredVal.Elem().Field(i))
-					ok = true
-				} else {
-					return fmt.Errorf("cannot set field %s", currentVal.Elem().Type().Field(i).Name), ok
-				}
-			}
-
-			if !r.isZeroValue(ctx, currentVal.Elem().Field(i)) && !r.isZeroValue(ctx, desiredVal.Elem().Field(i)) {
-
-				currentSubVal := currentVal.Elem().Field(i).Addr()
-				desiredSubVal := desiredVal.Elem().Field(i).Addr()
-
-				if currentSubVal.Elem().Kind() == reflect.Struct {
-					for j := range currentSubVal.Elem().NumField() {
-						log.V(5).Info("Setting subFields", "SubField", currentSubVal.Elem().Type().Field(j).Name, "Value", currentSubVal.Elem().Field(j).Interface())
-						log.V(5).Info("Setting subFields", "SubField", desiredSubVal.Elem().Type().Field(j).Name, "Value", desiredSubVal.Elem().Field(j).Interface())
-						if r.isZeroValue(ctx, currentSubVal.Elem().Field(j)) && !r.isZeroValue(ctx, desiredSubVal.Elem().Field(j)) {
-							if currentSubVal.Elem().Field(j).CanSet() {
-								currentSubVal.Elem().Field(j).Set(desiredSubVal.Elem().Field(j))
-								ok = true
-							}
-						}
-
-						currentSub2Val := currentSubVal.Elem().Field(j).Addr()
-						desiredSub2Val := desiredSubVal.Elem().Field(j).Addr()
-
-						if currentSub2Val.Elem().Kind() == reflect.Struct {
-							for k := range currentSub2Val.Elem().NumField() {
-								log.V(5).Info("Setting sub2Fields", "Sub2Field", currentSub2Val.Elem().Type().Field(k).Name, "Value", currentSub2Val.Elem().Field(k).Interface())
-								log.V(5).Info("Setting sub2Fields", "Sub2Field", desiredSub2Val.Elem().Type().Field(k).Name, "Value", desiredSub2Val.Elem().Field(k).Interface())
-								if r.isZeroValue(ctx, currentSub2Val.Elem().Field(k)) && !r.isZeroValue(ctx, desiredSub2Val.Elem().Field(k)) {
-									if currentSub2Val.Elem().Field(k).CanSet() {
-										currentSub2Val.Elem().Field(k).Set(desiredSub2Val.Elem().Field(k))
-										log.V(2).Info("Setting sub2Fields", "Sub2Field", currentSub2Val.Elem().Type().Field(k).Name, "Value", currentSub2Val.Elem().Field(k).Interface())
-										log.V(2).Info("Setting sub2Fields", "Sub2Field", desiredSub2Val.Elem().Type().Field(k).Name, "Value", desiredSub2Val.Elem().Field(k).Interface())
-										ok = true
-									}
-								}
-							}
-						}
-					}
-				}
-
-			}
-		}
-	}
-	log.V(5).Info("Merged Structs", "Current", currentVal.Elem().Interface(), "Desired", desiredVal.Elem().Interface())
-	return nil, ok
-}
-
-func (r *ZitiWebhookReconciler) isManagedField(ctx context.Context, fieldName string) bool {
-	_ = log.FromContext(ctx)
-	switch fieldName {
-	case "Name", "ZitiControllerName", "Cert", "DeploymentSpec", "MutatingWebhookSpec", "ClusterRoleSpec", "ServiceAccount", "Revision":
-		return true
-	default:
-		return false
-	}
-}
-
-func (r *ZitiWebhookReconciler) isZeroValue(ctx context.Context, v reflect.Value) bool {
-	_ = log.FromContext(ctx)
-	if !v.IsValid() {
-		return true
-	}
-	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface:
-		return v.IsNil()
-	case reflect.Slice, reflect.Map, reflect.Chan:
-		return v.IsNil() || v.Len() == 0
-	case reflect.String:
-		return v.Len() == 0
-	case reflect.Bool:
-		return !v.Bool()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return v.Int() == 0
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return v.Uint() == 0
-	case reflect.Float32, reflect.Float64:
-		return v.Float() == 0
-	case reflect.Complex64, reflect.Complex128:
-		return v.Complex() == 0
-	case reflect.Struct:
-		return reflect.DeepEqual(v.Interface(), reflect.Zero(v.Type()).Interface())
-	default:
-		return v.IsZero()
-	}
-}
-
-func getlabels(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) map[string]string {
-	_ = log.FromContext(ctx)
-	return map[string]string{
-		"app":                          zitiwebhook.Spec.Name,
-		"app.kubernetes.io/name":       zitiwebhook.Spec.Name + "-" + zitiwebhook.Namespace,
-		"app.kubernetes.io/part-of":    zitiwebhook.Spec.Name + "-operator",
-		"app.kubernetes.io/managed-by": zitiwebhook.Spec.Name + "-controller",
-		"app.kubernetes.io/component":  "webhook",
-	}
-}
-
-func filterLabels(allLabels map[string]string) map[string]string {
-	filtered := make(map[string]string)
-	if val, ok := allLabels["app"]; ok {
-		filtered["app"] = val
-	}
-	if val, ok := allLabels["app.kubernetes.io/name"]; ok {
-		filtered["app.kubernetes.io/name"] = val
-	}
-	return filtered
-}
-
-func getAnnotations(ctx context.Context, zitiwebhook *kubernetesv1alpha1.ZitiWebhook) map[string]string {
-	_ = log.FromContext(ctx)
-	return map[string]string{
-		"cert-manager.io/inject-ca-from": zitiwebhook.Namespace + "/" + zitiwebhook.Spec.Name + "-admission-cert",
-	}
-}
-
-func convertDeploymentConditions(conds []appsv1.DeploymentCondition) []appsv1.DeploymentCondition {
-	result := make([]appsv1.DeploymentCondition, 0, len(conds))
-	for _, c := range conds {
-		result = append(result, appsv1.DeploymentCondition{
-			Type:               appsv1.DeploymentConditionType(c.Type),
-			Status:             corev1.ConditionStatus(c.Status),
-			LastTransitionTime: c.LastTransitionTime,
-			LastUpdateTime:     c.LastUpdateTime,
-			Reason:             c.Reason,
-			Message:            c.Message,
-		})
-	}
-	return result
-}
-
-func convertIssuerConditions(conds []certmanagerv1.IssuerCondition) []certmanagerv1.IssuerCondition {
-	result := make([]certmanagerv1.IssuerCondition, 0, len(conds))
-	for _, c := range conds {
-		result = append(result, certmanagerv1.IssuerCondition{
-			Type:               certmanagerv1.IssuerConditionType(c.Type),
-			Status:             c.Status,
-			LastTransitionTime: c.LastTransitionTime,
-			Reason:             c.Reason,
-			Message:            c.Message,
-		})
-	}
-	return result
-}
-
-func convertCertificateConditions(conds []certmanagerv1.CertificateCondition) []certmanagerv1.CertificateCondition {
-	result := make([]certmanagerv1.CertificateCondition, 0, len(conds))
-	for _, c := range conds {
-		result = append(result, certmanagerv1.CertificateCondition{
-			Type:               certmanagerv1.CertificateConditionType(c.Type),
-			Status:             c.Status,
-			LastTransitionTime: c.LastTransitionTime,
-			Reason:             c.Reason,
-			Message:            c.Message,
-		})
-	}
-	return result
-}
-
-func decodeJWT(tokenString string) (jwt.MapClaims, error) {
-	token, _, err := new(jwt.Parser).ParseUnverified(tokenString, jwt.MapClaims{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse JWT: %w", err)
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, fmt.Errorf("failed to extract claims from JWT")
-	}
-
-	return claims, nil
-}
-
-func getZitiControllerUrlFromJwt(tokenString string) (string, error) {
-
-	claims, err := decodeJWT(tokenString)
-	if err != nil {
-		return "", err
-	}
-	issuer, err := claims.GetIssuer()
-	if err != nil {
-		return "", err
-	}
-	return issuer, nil
 }

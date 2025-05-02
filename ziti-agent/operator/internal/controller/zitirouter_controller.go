@@ -18,8 +18,13 @@ package controller
 
 import (
 	"context"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -31,6 +36,7 @@ import (
 type ZitiRouterReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
+	Recorder           record.EventRecorder
 	ZitiControllerChan chan kubernetesv1alpha1.ZitiController
 }
 
@@ -49,23 +55,36 @@ type ZitiRouterReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ZitiRouterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	var err error
-	log.Info("ZitiRouter Reconciliation starting")
+	log.V(2).Info("ZitiRouter Reconciliation started")
 
 	zitirouter := &kubernetesv1alpha1.ZitiRouter{}
-	if err = r.Get(ctx, req.NamespacedName, zitirouter); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
+	if err := r.Get(ctx, req.NamespacedName, zitirouter); err != nil && apierrors.IsNotFound(err) {
+		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, nil
+	// _, err := r.getRouterConfigs(ctx, zitirouter)
+
+	log.V(2).Info("ZitiRouter Reconciliation complete", "name", req.Name)
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ZitiRouterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kubernetesv1alpha1.ZitiRouter{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&corev1.ConfigMap{}).
 		Complete(r)
+}
+
+func (r *ZitiRouterReconciler) getRouterConfigs(ctx context.Context, router *kubernetesv1alpha1.ZitiRouter) (*kubernetesv1alpha1.ZitiRouterSpec, error) {
+	_ = log.FromContext(ctx)
+	log.Log.V(2).Info("ZitiRouter Spec", "Spec", router.Spec)
+	return &router.Spec, nil
+}
+
+func (r *ZitiRouterReconciler) getZitiControllerChan() chan kubernetesv1alpha1.ZitiController {
+	return r.ZitiControllerChan
 }

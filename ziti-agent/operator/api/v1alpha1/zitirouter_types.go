@@ -17,7 +17,13 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
+	"github.com/openziti/edge-api/rest_model"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -28,8 +34,392 @@ type ZitiRouterSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of ZitiRouter. Edit zitirouter_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Router Name
+	// +kubebuilder:validation:MinLength=10
+	Name string `json:"name,omitempty"`
+
+	// Controller CR Name
+	ZitiControllerName string `json:"zitiControllerName,omitempty"`
+
+	// Controller DNS name
+	ZitiCtrlMgmtApi string `json:"zitiCtrlMgmtApi,omitempty"`
+
+	Model RouterCreateModel `json:"model,omitempty"`
+
+	// Router Configuration
+	Config Config `json:"config,omitempty"`
+
+	// Deployment Specs
+	Deployment RouterDeploymentSpec `json:"deployment,omitempty"`
+}
+
+type RouterDeploymentSpec struct {
+	// +kubebuilder:default=2
+	Replicas        int32                     `json:"replicas,omitempty"`
+	Labels          map[string]string         `json:"labels,omitempty"`
+	Annotations     map[string]string         `json:"annotations,omitempty"`
+	Container       corev1.Container          `json:"container,omitempty"`
+	HostNetwork     bool                      `json:"hostNetwork,omitempty"`
+	DNSConfig       corev1.PodDNSConfig       `json:"dnsConfig,omitempty"`
+	DNSPolicy       corev1.DNSPolicy          `json:"dnsPolicy,omitempty"`
+	SecurityContext corev1.PodSecurityContext `json:"securityContext,omitempty"`
+	Volumes         []corev1.Volume           `json:"volumes,omitempty"`
+	Strategy        appsv1.DeploymentStrategy `json:"strategy,omitempty"`
+	// Progress Deadline
+	// +kubebuilder:default:=600
+	// +kubebuilder:validation:Minimum=0
+	ProgressDeadlineSeconds int32 `json:"progressDeadlineSeconds,omitempty"`
+	// Revision History Limit
+	// +kubebuilder:default:=10
+	// +kubebuilder:validation:Minimum=0
+	RevisionHistoryLimit int32 `json:"revisionHistoryLimit,omitempty"`
+	// Log Verbose Level
+	// +kubebuilder:default:=2
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=5
+	LogLevel int32 `json:"logLevel,omitempty"`
+}
+
+type RouterCreateModel struct {
+
+	// app data
+	AppData Tags `json:"appData,omitempty"`
+	// router cost
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
+	Cost int64 `json:"cost,omitempty"`
+	// disabled
+	// +kubebuilder:default=false
+	Disabled bool `json:"disabled,omitempty"`
+	// Is tunneler enabled
+	// +kubebuilder:default=false
+	IsTunnelerEnabled bool `json:"isTunnelerEnabled,omitempty"`
+	// name
+	Name string `json:"name"`
+	// no traversal
+	// +kubebuilder:default=false
+	NoTraversal bool `json:"noTraversal,omitempty"`
+	// role attributes
+	RoleAttributes rest_model.Attributes `json:"roleAttributes,omitempty"`
+	// tag
+	Tags Tags `json:"tags,omitempty"`
+}
+
+type Tags struct {
+	SubTags map[string]string `json:"subTags,omitempty"`
+}
+
+type Config struct {
+	Identity       Identity            `json:"identity,omitempty"`
+	EnableDebugOps bool                `json:"enableDebugOps,omitempty"`
+	Forwarder      ForwarderOptions    `json:"forwarder,omitempty"`
+	Trace          Trace               `json:"trace,omitempty"`
+	Profile        Profile             `json:"profile,omitempty"`
+	Ctrl           Ctrl                `json:"ctrl,omitempty"`
+	Link           Link                `json:"link,omitempty"`
+	Dialers        []EdgeDialer        `json:"dialers,omitempty"`
+	Listeners      []EdgeListener      `json:"listeners,omitempty"`
+	Transport      map[string]string   `json:"transport,omitempty"`
+	Metrics        Metrics             `json:"metrics,omitempty"`
+	HealthChecks   HealthChecks        `json:"healthChecks,omitempty"`
+	ConnectEvents  ConnectEventsConfig `json:"connectEvents,omitempty"`
+	Plugins        []string            `json:"plugins,omitempty"`
+	Edge           EdgeConfig          `json:"edge,omitempty"`
+	Web            WebConfig           `json:"web,omitempty"`
+	Proxy          map[string]string   `json:"proxy,omitempty"`
+}
+
+type Identity struct {
+	Key            string       `json:"key,omitempty"`
+	Cert           string       `json:"cert,omitempty"`
+	ServerCert     string       `json:"server_cert,omitempty"`
+	ServerKey      string       `json:"server_key,omitempty"`
+	AltServerCerts []ServerPair `json:"alt_server_certs,omitempty"`
+	CA             string       `json:"ca,omitempty"`
+}
+
+type ServerPair struct {
+	ServerCert string `json:"server_cert,omitempty"`
+	ServerKey  string `json:"server_key,omitempty"`
+}
+
+type Trace struct {
+	Path string `json:"path,omitempty"`
+}
+
+type Metrics struct {
+	ReportInterval        int64 `json:"reportInterval,omitempty"`
+	IntervalAgeThreshold  int64 `json:"intervalAgeThreshold,omitempty"`
+	MessageQueueSize      int   `json:"messageQueueSize,omitempty"`
+	EventQueueSize        int   `json:"eventQueueSize,omitempty"`
+	EnableDataDelayMetric bool  `json:"enableDataDelayMetric,omitempty"`
+}
+
+type HealthChecks struct {
+	CtrlPingCheck CtrlPingCheck `json:"ctrlPingCheck,omitempty"`
+	LinkCheck     LinkCheck     `json:"linkCheck,omitempty"`
+}
+
+type CtrlPingCheck struct {
+	Interval     int64 `json:"interval,omitempty"`
+	Timeout      int64 `json:"timeout,omitempty"`
+	InitialDelay int64 `json:"initialDelay,omitempty"`
+}
+
+type LinkCheck struct {
+	MinLinks     int   `json:"minLinks,omitempty"`
+	Interval     int64 `json:"interval,omitempty"`
+	InitialDelay int64 `json:"initialDelay,omitempty"`
+}
+
+type Profile struct {
+	Memory Memory `json:"memory,omitempty"`
+	CPU    CPU    `json:"cpu,omitempty"`
+}
+
+type Memory struct {
+	Path       string `json:"path,omitempty"`
+	Interval   int64  `json:"interval,omitempty"`
+	IntervalMs int64  `json:"intervalMs,omitempty"`
+}
+
+type CPU struct {
+	Path string `json:"path,omitempty"`
+}
+
+type Ctrl struct {
+	Endpoint              string           `json:"endpoint,omitempty"`
+	Endpoints             []string         `json:"endpoints,omitempty"`
+	Bind                  string           `json:"bind,omitempty"`
+	DefaultRequestTimeout int64            `json:"defaultRequestTimeout,omitempty"`
+	Options               ChannelOptions   `json:"options,omitempty"`
+	EndpointsFile         string           `json:"endpointsFile,omitempty"`
+	Heartbeats            HeartbeatOptions `json:"heartbeats,omitempty"`
+}
+
+type HeartbeatOptions struct {
+	SendInterval             int64 `json:"sendInterval,omitempty"`
+	CheckInterval            int64 `json:"checkInterval,omitempty"`
+	CloseUnresponsiveTimeout int64 `json:"closeUnresponsiveTimeout,omitempty"`
+}
+
+type ChannelOptions struct {
+	OutQueueSize           int   `json:"outQueueSize,omitempty"`
+	MaxQueuedConnects      int   `json:"maxQueuedConnects,omitempty"`
+	MaxOutstandingConnects int   `json:"maxOutstandingConnects,omitempty"`
+	ConnectTimeoutMs       int64 `json:"connectTimeoutMs,omitempty"`
+	WriterTimeout          int64 `json:"writerTimeout,omitempty"`
+}
+
+type Link struct {
+	Listeners []LinkListener `json:"listeners,omitempty"`
+	Dialers   []LinkDialer   `json:"dialers,omitempty"`
+}
+
+type LinkDialer struct {
+	// Indicates if a single connection should be made for all data or separate connections
+	Split                bool             `json:"split,omitempty"`
+	Binding              string           `json:"binding,omitempty"`
+	Bind                 string           `json:"bind,omitempty"`
+	Groups               []string         `json:"groups,omitempty"`
+	Options              ChannelOptions   `json:"options,omitempty"`
+	HealthyDialBackoff   BackoffParamters `json:"healthyDialBackoff,omitempty"`
+	UnhealthyDialBackoff BackoffParamters `json:"unhealthyDialBackoff,omitempty"`
+}
+
+type LinkListener struct {
+	Binding   string `json:"binding,omitempty"`
+	Bind      string `json:"bind,omitempty"`
+	Advertise string `json:"advertise,omitempty"`
+	// Dialers will only attempt to dial listeners who have at least one group in common with them
+	Groups  []string       `json:"groups,omitempty"`
+	Options ChannelOptions `json:"options,omitempty"`
+}
+
+type XgressOptions struct {
+	Mtu int32 `json:"mtu,omitempty"`
+	// +kubebuilder:default=false
+	RandomDrops bool `json:"randomDrops,omitempty"`
+	// if randomDrops is enabled, will drop 1 in N payloads, used for testing only
+	// +kubebuilder:default=100
+	Drop1InN int32 `json:"drop1InN,omitempty"`
+	// The number of transmit payload to queue
+	// +kubebuilder:default=1
+	TxQueueSize int32 `json:"txQueueSize,omitempty"`
+	// optional integer that sets the starting window sizes
+	// +kubebuilder:default=16384
+
+	TxPortalStartSize int `json:"txPortalStartSize,omitempty"`
+	// Optional integer that sets the minimum window size
+	// +kubebuilder:default=16384
+	TxPortalMinSize int32 `json:"txPortalMinSize,omitempty"`
+	// Optional integer that sets the maximum window size
+	// +kubebuilder:default=410241024
+	TxPortalMaxSize int32 `json:"txPortalMaxSize,omitempty"`
+	// Optional number of successful transmits that triggers the window size to be scaled by txPortalIncreaseScale
+	// +kubebuilder:default=224
+	TxPortalIncreaseThresh int32 `json:"txPortalIncreaseThresh,omitempty"`
+	// Optional scale factor to increase the window size by
+	// +kubebuilder:default="1.0"
+	TxPortalIncreaseScale string `json:"txPortalIncreaseScale,omitempty"`
+	// Optional number of retransmissions that triggers the window size to be scaled by txPortalRetxScale
+	// +kubebuilder:default=64
+	TxPortalRetxThresh int32 `json:"txPortalRetxThresh,omitempty"`
+	// Optional factor used to scale the window size when txPortalRetxThresh is reached
+	// +kubebuilder:default="0.75"
+	TxPortalRetxScale string `json:"txPortalRetxScale,omitempty"`
+	// Optional number of duplicate ACKs that triggers the window size to be scaled by txPortalDupAckScale
+	// +kubebuilder:default=64
+	TxPortalDupAckThresh int32 `json:"txPortalDupAckThresh,omitempty"`
+	// Optional factor used to scale the window size when txPortalDupAckThresh is reached
+	// +kubebuilder:default="0.9"
+	TxPortalDupAckScale string `json:"txPortalDupAckScale,omitempty"`
+	// Optional size of the receive buffer
+	// +kubebuilder:default=410241024
+
+	RxBufferSize int32 `json:"rxBufferSize,omitempty"`
+	// Optional number of milliseconds to wait before attempting to retransmit
+	// +kubebuilder:default=200
+	RetxStartMs int32 `json:"retxStartMs,omitempty"`
+	// Optional factor to scale retxStartMs based on RTT
+	// +kubebuilder:default="1.5"
+	RetxScale string `json:"retxScale,omitempty"`
+	// Optional number of milliseconds to add to retxStartMs when calculating new retransmission thresholds
+	// +kubebuilder:default=0
+	RetxAddMs int32 `json:"retxAddMs,omitempty"`
+	// Optional amount of time to wait for buffers to empty before closing a connection in seconds
+	// +kubebuilder:default=30
+
+	MaxCloseWaitMs int64 `json:"maxCloseWaitMs,omitempty"`
+	// Optional amount of time to wait for circuit creation in seconds
+	// +kubebuilder:default=30
+	GetCircuitTimeout int64 `json:"getCircuitTimeout,omitempty"`
+	// Optional amount of time to wait for a circuit to start in seconds
+	// +kubebuilder:default=180
+	CircuitStartTimeout int64 `json:"circuitStartTimeout,omitempty"`
+	// Optional amount of time to wait for dialed connections to connect in seconds
+	// +kubebuilder:default=0
+	ConnectTimeout int64 `json:"connectTimeout,omitempty"`
+}
+
+type BackoffParamters struct {
+	// Duration specifying the minimum time between dial attempts in ms
+	// Default is 1m
+	// +kubebuilder:validation:Minimum=10
+	// +kubebuilder:validation:Maximum=8.64e+7
+	MinRetryInterval int64 `json:"minRetryInterval,omitempty"`
+	// Duration specifying the maximum time between dial attempts in ms
+	// Default is 1h
+	// +kubebuilder:validation:Minimum=10
+	// +kubebuilder:validation:Maximum=8.64e+7
+	MaxRetryInterval int64 `json:"maxRetryInterval,omitempty"`
+	// Factor by which to increase the retry interval between failed dial attempts
+	// Default is 10
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	RetryBackoffFactor int `json:"retryBackoffFactor,omitempty"`
+}
+
+type EdgeListener struct {
+	Binding string      `json:"binding,omitempty"`
+	Bind    string      `json:"address,omitempty"`
+	Options EdgeOptions `json:"options,omitempty"`
+}
+
+type EdgeDialer struct {
+	Binding string        `json:"binding,omitempty"`
+	Options XgressOptions `json:"options,omitempty"`
+}
+
+type EdgeOptions struct {
+	Advertise string        `json:"advertise,omitempty"`
+	Options   XgressOptions `json:"options,omitempty"`
+}
+
+type ConnectEventsConfig struct {
+	Enabled          bool  `json:"enabled,omitempty"`
+	BatchInterval    int64 `json:"batchInterval,omitempty"`
+	MaxQueuedEvents  int64 `json:"maxQueuedEvents,omitempty"`
+	FullSyncInterval int64 `json:"fullSyncInterval,omitempty"`
+}
+
+type ForwarderOptions struct {
+	FaultTxInterval          int64  `json:"faultTxInterval,omitempty"`
+	IdleCircuitTimeout       int64  `json:"idleCircuitTimeout,omitempty"`
+	IdleTxInterval           int64  `json:"idleTxInterval,omitempty"`
+	LinkDialQueueLength      uint16 `json:"linkDialQueueLength,omitempty"`
+	LinkDialWorkerCount      uint16 `json:"linkDialWorkerCount,omitempty"`
+	RateLimitedQueueLength   uint16 `json:"rateLimitedQueueLength,omitempty"`
+	RateLimitedWorkerCount   uint16 `json:"rateLimitedWorkerCount,omitempty"`
+	UnresponsiveLinkTimeout  int64  `json:"unresponsiveLinkTimeout,omitempty"`
+	XgressCloseCheckInterval int64  `json:"xgressCloseCheckInterval,omitempty"`
+	XgressDialQueueLength    uint16 `json:"xgressDialQueueLength,omitempty"`
+	XgressDialWorkerCount    uint16 `json:"xgressDialWorkerCount,omitempty"`
+	XgressDialDwellTime      int64  `json:"xgressDialDwellTime,omitempty"`
+}
+
+type EdgeConfig struct {
+	ApiProxy                   ApiProxy `json:"apiProxy,omitempty"`
+	Csr                        Csr      `json:"csr,omitempty"`
+	HeartbeatIntervalSeconds   int      `json:"heartbeatIntervalSeconds,omitempty"`
+	SessionValidateChunkSize   uint32   `json:"sessionValidateChunkSize,omitempty"`
+	SessionValidateMinInterval int64    `json:"sessionValidateMinInterval,omitempty"`
+	SessionValidateMaxInterval int64    `json:"sessionValidateMaxInterval,omitempty"`
+	ForceExtendEnrollment      bool     `json:"forceExtendEnrollment,omitempty"`
+	Db                         string   `json:"db,omitempty"`
+	DbSaveIntervalSeconds      int64    `json:"dbSaveIntervalSeconds,omitempty"`
+}
+
+type Csr struct {
+	Sans               Sans   `json:"sans,omitempty"`
+	Country            string `json:"country,omitempty"`
+	Locality           string `json:"locality,omitempty"`
+	Organization       string `json:"organization,omitempty"`
+	OrganizationalUnit string `json:"organizationalUnit,omitempty"`
+	Province           string `json:"province,omitempty"`
+}
+
+type ApiProxy struct {
+	Listener string `json:"listener,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+}
+
+type Sans struct {
+	DnsAddresses      []string `json:"dnsAddresses,omitempty"`
+	IpAddresses       []string `json:"ipAddresses,omitempty"`
+	IpAddressesParsed []byte   `json:"ipAddressesParsed,omitempty"`
+	EmailAddresses    []string `json:"emailAddresses,omitempty"`
+	UriAddresses      []string `json:"uriAddresses,omitempty"`
+}
+
+type WebConfig struct {
+	// +kubebuilder:default="health-check"
+	Name string `json:"name,omitempty"`
+	// +kubebuilder:default={{"interface":"0.0.0.0:8081","address":""}}
+	BindPoints []WebBindpoint `json:"bindPoints,omitempty"`
+	// +kubebuilder:default={{"binding":"health-checks"}}
+	Apis    []WebApi   `json:"apis,omitempty"`
+	Options WebOptions `json:"options,omitempty"`
+}
+
+type WebBindpoint struct {
+	Interface  string   `json:"interface,omitempty"`
+	Identity   Identity `json:"identity,omitempty"`
+	Address    string   `json:"address,omitempty"`
+	NewAddress string   `json:"newAddress,omitempty"`
+}
+
+type WebApi struct {
+	Binding string `json:"binding,omitempty"`
+}
+
+type WebOptions struct {
+	IdleTimeout   int64  `json:"idleTimeout,omitempty"`
+	ReadTimeout   int64  `json:"readTimeout,omitempty"`
+	WriteTimeout  int64  `json:"writeTimeout,omitempty"`
+	MinTlsVersion string `json:"minTlsVersion,omitempty"`
+	MaxTlsVersion string `json:"maxTlsVersion,omitempty"`
 }
 
 // ZitiRouterStatus defines the observed state of ZitiRouter
@@ -61,4 +451,221 @@ type ZitiRouterList struct {
 
 func init() {
 	SchemeBuilder.Register(&ZitiRouter{}, &ZitiRouterList{})
+}
+
+func (r *ZitiRouter) GetDefaultRouterPodSpec() corev1.PodSpec {
+	return corev1.PodSpec{
+		Containers: []corev1.Container{
+			{
+				Name:            "ziti-router",
+				Image:           "docker.io/openziti/ziti-router:latest",
+				ImagePullPolicy: "Always",
+				Args: []string{
+					"run",
+					"/etc/ziti/config/ziti-router.yaml",
+				},
+				Command: []string{
+					"/entrypoint.bash",
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name:  "ZITI_ENROLL_TOKEN",
+						Value: "",
+					},
+					{
+						Name:  "ZITI_BOOTSTRAP",
+						Value: "true",
+					},
+					{
+						Name:  " ZITI_BOOTSTRAP_ENROLLMENT",
+						Value: "true",
+					},
+					{
+						Name:  " ZITI_BOOTSTRAP_CONFIG",
+						Value: "false",
+					},
+					{
+						Name:  " ZITI_AUTO_RENEW_CERTS",
+						Value: "true",
+					},
+					{
+						Name:  " ZITI_HOME",
+						Value: "/etc/ziti/config",
+					},
+					{
+						Name:  "ZITI_ROUTER_NAME",
+						Value: r.Spec.Name,
+					},
+				},
+				LivenessProbe: &corev1.Probe{
+					InitialDelaySeconds: 10,
+					TimeoutSeconds:      1,
+					PeriodSeconds:       10,
+					SuccessThreshold:    1,
+					FailureThreshold:    3,
+					ProbeHandler: corev1.ProbeHandler{
+						Exec: &corev1.ExecAction{
+							Command: []string{
+								"/bin/sh",
+								"-c",
+								"ziti agent stats",
+							},
+						},
+					},
+				},
+				ReadinessProbe: &corev1.Probe{
+					InitialDelaySeconds: 10,
+					TimeoutSeconds:      1,
+					PeriodSeconds:       10,
+					SuccessThreshold:    1,
+					FailureThreshold:    3,
+					ProbeHandler: corev1.ProbeHandler{
+						Exec: &corev1.ExecAction{
+							Command: []string{
+								"/bin/sh",
+								"-c",
+								"ziti agent stats",
+							},
+						},
+					},
+				},
+				Resources:                corev1.ResourceRequirements{},
+				TerminationMessagePath:   "/dev/termination-log",
+				TerminationMessagePolicy: "File",
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "config-data",
+						MountPath: "/etc/ziti/config",
+					},
+					{
+						Name:      "ziti-router-config",
+						MountPath: "/etc/ziti/config/ziti-router.yaml",
+						SubPath:   "ziti-router.yaml",
+					},
+				},
+			},
+		},
+		HostNetwork:   false,
+		DNSConfig:     &corev1.PodDNSConfig{},
+		DNSPolicy:     corev1.DNSClusterFirstWithHostNet,
+		RestartPolicy: corev1.RestartPolicyAlways,
+		SchedulerName: "default-scheduler",
+		SecurityContext: &corev1.PodSecurityContext{
+			FSGroup: &[]int64{2171}[0],
+		},
+		TerminationGracePeriodSeconds: &[]int64{30}[0],
+		Volumes: []corev1.Volume{
+			{
+				Name: "config-data",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: r.Spec.Name,
+					},
+				},
+			},
+			{
+				Name: "ziti-router-config",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						DefaultMode: &[]int32{292}[0],
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: r.Spec.Name + "-config",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (r *ZitiRouter) GetDefaultStrategy() appsv1.DeploymentStrategy {
+	return appsv1.DeploymentStrategy{
+		Type: appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &intstr.IntOrString{
+				Type:   intstr.String,
+				StrVal: "25%",
+			},
+			MaxSurge: &intstr.IntOrString{
+				Type:   intstr.String,
+				StrVal: "25%",
+			},
+		},
+	}
+}
+
+func (r *ZitiRouter) GetDefaultLabels() map[string]string {
+	return map[string]string{
+		"app":                          r.Spec.Name,
+		"app.kubernetes.io/name":       r.Spec.Name + "-" + r.Namespace,
+		"app.kubernetes.io/part-of":    r.Spec.Name + "-operator",
+		"app.kubernetes.io/managed-by": r.Spec.Name + "-controller",
+		"app.kubernetes.io/component":  "router",
+		"router.openziti.io/enabled":   "true",
+	}
+}
+
+func (r *ZitiRouter) GetDefaultAnnotations() map[string]string {
+	return map[string]string{}
+}
+
+func (r *ZitiRouter) GetDefaultFinalizer() []string {
+	return []string{
+		"kubernetes.openziti.io/zitirouter",
+	}
+}
+
+func (r *ZitiRouter) GetDefaultServiceAccountName() string {
+	return r.Spec.Name + "-service-account"
+}
+func (r *ZitiRouter) GetDefaultServiceName() string {
+	return r.Spec.Name + "-service"
+}
+
+func (r *ZitiRouter) GetDefaultConfigMapName() string {
+	return r.Spec.Name + "-config"
+}
+
+func (r *ZitiRouter) GetDefaultConfigMapKey() string {
+	return r.Spec.Name + "-config.yaml"
+}
+
+func (r *ZitiRouter) GetDefaultConfigMapData() map[string]string {
+
+	configTemplate := `
+v: 3
+identity:
+  cert: /etc/ziti/config/cert.pem
+  key: /etc/ziti/config/key.pem
+  server_cert: /etc/ziti/config/server.cert.pem
+  server_key: /etc/ziti/config/server.key.pem
+  ca: /etc/ziti/config/ca.pem
+
+ctrl:
+  endpoint: %s
+
+link:
+  dialers:
+    - binding: transport
+
+listeners:
+  - binding: edge
+    address: tls:0.0.0.0:9433
+    options:
+      advertise: %s:443
+      connectTimeoutMs: 5000
+      getSessionTimeout: 60s
+
+web:
+  - name: health-checks
+    bindPoints:
+      - interface: 0.0.0.0:8081
+    apis:
+      - binding: health-checks
+	}
+`
+	configTemplate = fmt.Sprintf(configTemplate, r.Spec.Config.Ctrl.Endpoint, fmt.Sprintf(r.Spec.Name, ".", r.Namespace, ".svc"))
+	return map[string]string{
+		r.GetDefaultConfigMapKey(): configTemplate,
+	}
 }

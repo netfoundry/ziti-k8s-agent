@@ -37,6 +37,9 @@ type ZitiControllerSpec struct {
 	// +kubebuilder:validation:Required
 	//+kubebuilder:validation:Pattern:=`^([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_\-\+\/=]*)`
 	AdminJwt string `json:"adminJwt"`
+
+	// Ziti Controller Management Address
+	ZitiCtrlMgmtApi string `json:"zitiCtrlMgmtApi,omitempty"`
 }
 
 // ZitiControllerStatus defines the observed state of ZitiController
