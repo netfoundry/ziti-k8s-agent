@@ -18,26 +18,33 @@ package controller
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kubernetesv1alpha1 "github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/api/v1alpha1"
+	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/internal/utils"
 )
 
 // ZitiRouterReconciler reconciles a ZitiRouter object
 type ZitiRouterReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	Recorder           record.EventRecorder
-	ZitiControllerChan chan kubernetesv1alpha1.ZitiController
+	Scheme               *runtime.Scheme
+	Recorder             record.EventRecorder
+	ZitiControllerChan   chan kubernetesv1alpha1.ZitiController
+	CachedZitiController *kubernetesv1alpha1.ZitiController
 }
 
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitirouters,verbs=get;list;watch;create;update;patch;delete
@@ -62,7 +69,291 @@ func (r *ZitiRouterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	// _, err := r.getRouterConfigs(ctx, zitirouter)
+	// Merge defaults and ziticontroller specs if changes are detected
+	log.V(5).Info("zitirouter Actual", "Name", zitirouter.Name, "Specs", zitirouter.Spec)
+	defaultSpecs := zitirouter.GetDefaults()
+	log.V(5).Info("zitirouter Default", "Name", zitirouter.Name, "Specs", defaultSpecs)
+	err, ok := utils.MergeSpecs(ctx, &zitirouter.Spec, defaultSpecs)
+	if err == nil && ok {
+		select {
+		case ziticontroller := <-r.ZitiControllerChan:
+			log.V(5).Info("ZitiController Spec", "Name", ziticontroller.Spec.Name, "ZitiController.Spec", ziticontroller.Spec)
+			r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Update", "Using ZitiController from channel")
+			r.CachedZitiController = &ziticontroller
+			zitirouter.Spec.ZitiControllerName = r.CachedZitiController.Spec.Name
+			zitirouter.Spec.ZitiCtrlMgmtApi = r.CachedZitiController.Spec.ZitiCtrlMgmtApi
+			if zitirouter.Spec.ZitiCtrlMgmtApi == "" {
+				zitirouter.Spec.ZitiCtrlMgmtApi, _ = utils.GetUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
+				zitirouter.Spec.ZitiCtrlMgmtApi = zitirouter.Spec.ZitiCtrlMgmtApi + "/edge/management/v1"
+				log.V(5).Info("ZitiController URL", "ZitiCtrlMgmtApi", zitirouter.Spec.ZitiCtrlMgmtApi)
+			}
+			if zitirouter.Spec.Config.Ctrl.Endpoint == "" {
+				host, port, _ := utils.GetHostAndPort(zitirouter.Spec.ZitiCtrlMgmtApi)
+				zitirouter.Spec.Config.Ctrl.Endpoint = "tls:" + host + ":" + port
+			}
+		default:
+			if r.CachedZitiController != nil {
+				log.V(5).Info("Cached ZitiController Spec", "Name", r.CachedZitiController.Spec.Name, "ZitiController.Spec", r.CachedZitiController.Spec)
+				zitirouter.Spec.ZitiControllerName = r.CachedZitiController.Spec.Name
+				zitirouter.Spec.ZitiCtrlMgmtApi = r.CachedZitiController.Spec.ZitiCtrlMgmtApi
+				if zitirouter.Spec.ZitiCtrlMgmtApi == "" {
+					zitirouter.Spec.ZitiCtrlMgmtApi, _ = utils.GetUrlFromJwt(r.CachedZitiController.Spec.AdminJwt)
+					zitirouter.Spec.ZitiCtrlMgmtApi = zitirouter.Spec.ZitiCtrlMgmtApi + "/edge/management/v1"
+					log.V(5).Info("ZitiController URL", "ZitiCtrlMgmtApi", zitirouter.Spec.ZitiCtrlMgmtApi)
+				}
+				if zitirouter.Spec.Config.Ctrl.Endpoint == "" {
+					host, port, _ := utils.GetHostAndPort(zitirouter.Spec.ZitiCtrlMgmtApi)
+					zitirouter.Spec.Config.Ctrl.Endpoint = "tls:" + host + ":" + port
+				}
+			} else {
+				log.V(5).Info("No ZitiController Spec available")
+				r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "No ZitiController Spec available")
+			}
+		}
+		if err := r.Update(ctx, zitirouter); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Merged", "Merged default specs to zitirouter")
+		log.V(2).Info("zitirouter Merged", "Name", zitirouter.Name, "Specs", zitirouter.Spec)
+	} else if err != nil {
+		log.V(5).Info("zitirouter Spec merge failed", "Name", zitirouter.Name, "Error", err)
+		log.V(5).Info("zitirouter Spec merge failed", "Name", zitirouter.Name, "Ok is", ok)
+		r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "zitirouter Spec merge failed")
+		return ctrl.Result{}, err
+	}
+
+	actualStateConfigMap := &corev1.ConfigMap{}
+	desiredStateConfigMap := r.getDesiredStateConfigMap(ctx, zitirouter)
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: zitirouter.Namespace,
+		Name:      zitirouter.Spec.Name + "-config",
+	}, actualStateConfigMap); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new ConfigMap", "ConfigMap.Namespace", desiredStateConfigMap.Namespace, "ConfigMap.Name", desiredStateConfigMap.Name)
+		log.V(5).Info("Creating a new ConfigMap", "ConfigMap.Namespace", desiredStateConfigMap.Namespace, "ConfigMap.Spec", desiredStateConfigMap.Data)
+		if err := controllerutil.SetControllerReference(zitirouter, desiredStateConfigMap, r.Scheme); err != nil {
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to set controller reference")
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateConfigMap); err != nil {
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to create ConfigMap")
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Created", "Created a new ConfigMap")
+	} else if err == nil {
+		existingConfigMapForPatch := actualStateConfigMap.DeepCopy()
+		needsPatch := false
+		if !reflect.DeepEqual(actualStateConfigMap.ObjectMeta.Labels, desiredStateConfigMap.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "ConfigMap.Name", actualStateConfigMap.Name)
+			actualStateConfigMap.ObjectMeta.Labels = zitirouter.GetDefaultLabels()
+			needsPatch = true
+		}
+		if !metav1.IsControlledBy(actualStateConfigMap, zitirouter) {
+			log.V(4).Info("Ownership missing, preparing patch", "ConfigMap.Name", actualStateConfigMap.Name)
+			if err := controllerutil.SetControllerReference(zitirouter, actualStateConfigMap, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual ConfigMap for patch")
+				return ctrl.Result{}, err
+			}
+			needsPatch = true
+		}
+		if !reflect.DeepEqual(actualStateConfigMap.Data, desiredStateConfigMap.Data) {
+			log.V(4).Info("Data differs, preparing patch", "ConfigMap.Name", actualStateConfigMap.Name)
+			log.V(4).Info("Data differs, preparing patch", "ConfigMap.Data", actualStateConfigMap.Data)
+			log.V(4).Info("Data differs, preparing patch", "Desired.Data", desiredStateConfigMap.Data)
+			actualStateConfigMap.Data = desiredStateConfigMap.Data
+			needsPatch = true
+		}
+		if needsPatch {
+			log.V(4).Info("Applying patch to ConfigMap", "ConfigMap.Name", actualStateConfigMap.Name)
+			if err := r.Patch(ctx, actualStateConfigMap, client.MergeFrom(existingConfigMapForPatch)); err != nil {
+				r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to patch ConfigMap")
+				log.Error(err, "Failed to patch ConfigMap")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Patched", "Patched ConfigMap")
+		} else {
+			log.V(4).Info("ConfigMap is up to date", "ConfigMap.Name", actualStateConfigMap.Name)
+		}
+	} else {
+		log.Error(err, "Failed to get ConfigMap")
+		return ctrl.Result{}, err
+	}
+
+	actualStateService := &corev1.Service{}
+	desiredStateService := r.getDesiredStateService(ctx, zitirouter)
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: zitirouter.Namespace,
+		Name:      zitirouter.Spec.Name + "-service",
+	}, actualStateService); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new Service", "Service.Namespace", desiredStateService.Namespace, "Service.Name", desiredStateService.Name)
+		log.V(5).Info("Creating a new Service", "Service.Namespace", desiredStateService.Namespace, "Service.Spec", desiredStateService.Spec)
+		if err := controllerutil.SetControllerReference(zitirouter, desiredStateService, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateService); err != nil {
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to create Service")
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Created", "Created a new Service")
+	} else if err == nil {
+		existingServicetForPatch := actualStateService.DeepCopy()
+		needsPatch := false
+
+		if !reflect.DeepEqual(actualStateService.ObjectMeta.Labels, desiredStateService.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "Service.Name", actualStateService.Name)
+			actualStateService.ObjectMeta.Labels = zitirouter.GetDefaultLabels()
+			needsPatch = true
+		}
+
+		if !metav1.IsControlledBy(actualStateService, zitirouter) {
+			log.V(4).Info("Ownership missing, preparing patch", "Service.Name", actualStateService.Name)
+			if err := controllerutil.SetControllerReference(zitirouter, actualStateService, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual Service for patch")
+				return ctrl.Result{}, err
+			}
+			needsPatch = true
+		}
+
+		// Normalize desiredStateService to eliminate the difference in assigned IPs
+		if actualStateService.Spec.ClusterIP != "" || actualStateService.Spec.ClusterIPs == nil {
+			desiredStateService.Spec.ClusterIP = actualStateService.Spec.ClusterIP
+			desiredStateService.Spec.ClusterIPs = actualStateService.Spec.ClusterIPs
+		}
+
+		if !reflect.DeepEqual(actualStateService.Spec, desiredStateService.Spec) {
+			log.V(4).Info("Spec differs, preparing patch", "Service.Name", actualStateService.Name)
+			actualStateService.Spec = desiredStateService.Spec
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to Service", "Service.Name", actualStateService.Name)
+			if err := r.Patch(ctx, actualStateService, client.MergeFrom(existingServicetForPatch)); err != nil {
+				r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to patch Service")
+				log.Error(err, "Failed to patch Service")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Patched", "Patched Service")
+		} else {
+			log.V(4).Info("Service is up to date", "Service.Name", actualStateService.Name)
+		}
+	} else {
+		log.Error(err, "Failed to get Service")
+		return ctrl.Result{}, err
+	}
+
+	actualStatePvc := &corev1.PersistentVolumeClaim{}
+	desiredStatePvc := r.getDesiredStatePvc(ctx, zitirouter)
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: zitirouter.Namespace,
+		Name:      zitirouter.Spec.Name,
+	}, actualStatePvc); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new PersistentVolumeClaim", "PVC.Namespace", desiredStatePvc.Namespace, "PVC.Name", desiredStatePvc.Name)
+		log.V(5).Info("Creating a new PersistentVolumeClaim", "PVC.Namespace", desiredStatePvc.Namespace, "PVC.Spec", desiredStatePvc.Spec)
+		if err := controllerutil.SetControllerReference(zitirouter, desiredStatePvc, r.Scheme); err != nil {
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to set controller reference")
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStatePvc); err != nil {
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to create PersistentVolumeClaim")
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Created", "Created a new PersistentVolumeClaim")
+	} else if err == nil {
+		existingPvcForPatch := actualStatePvc.DeepCopy()
+		needsPatch := false
+		if !reflect.DeepEqual(actualStatePvc.ObjectMeta.Labels, desiredStatePvc.ObjectMeta.Labels) {
+			log.V(2).Info("Labels differ, preparing patch", "PVC.Name", actualStatePvc.Name)
+			actualStatePvc.ObjectMeta.Labels = zitirouter.GetDefaultLabels()
+			needsPatch = true
+		}
+		if !metav1.IsControlledBy(actualStatePvc, zitirouter) {
+			log.V(4).Info("Ownership missing, preparing patch", "PVC.Name", actualStatePvc.Name)
+			if err := controllerutil.SetControllerReference(zitirouter, actualStatePvc, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual PVC for patch")
+				return ctrl.Result{}, err
+			}
+			needsPatch = true
+		}
+		// if !reflect.DeepEqual(&actualStatePvc.Spec.Resources.Requests, &desiredStatePvc.Spec.Resources.Requests) {
+		// 	log.V(2).Info("Resource requests differ, preparing patch", "Actual.Requests", actualStatePvc.Spec.Resources.Requests)
+		// 	log.V(2).Info("Resource requests differ, preparing patch", "Desired.Requests", desiredStatePvc.Spec.Resources.Requests)
+		// 	actualStatePvc.Spec.Resources.Requests = desiredStatePvc.Spec.Resources.Requests
+		// 	needsPatch = true
+		// }
+		if needsPatch {
+			log.V(4).Info("Applying patch to PVC", "PVC.Name", actualStatePvc.Name)
+			if err := r.Patch(ctx, actualStatePvc, client.MergeFrom(existingPvcForPatch)); err != nil {
+				r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to patch PersistentVolumeClaim")
+				log.Error(err, "Failed to patch PersistentVolumeClaim")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Patched", "Patched PersistentVolumeClaim")
+		} else {
+			log.V(4).Info("PersistentVolumeClaim is up to date", "PVC.Name", actualStatePvc.Name)
+		}
+	} else {
+		log.Error(err, "Failed to get PersistentVolumeClaim")
+		return ctrl.Result{}, err
+	}
+
+	actualStateRouterDeployment := &appsv1.Deployment{}
+	desiredStateRouterDeployment := r.getDesiredStateDeploymentConfiguration(ctx, zitirouter)
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: zitirouter.Namespace,
+		Name:      zitirouter.Spec.Name + "-deployment",
+	}, actualStateRouterDeployment); err != nil && apierrors.IsNotFound(err) {
+		log.V(4).Info("Creating a new Deployment", "Deployment.Namespace", desiredStateRouterDeployment.Namespace, "Deployment.Name", desiredStateRouterDeployment.Name)
+		log.V(5).Info("Creating a new Deployment", "Deployment.Namespace", desiredStateRouterDeployment.Namespace, "Deployment.Spec", desiredStateRouterDeployment.Spec)
+		if err := ctrl.SetControllerReference(zitirouter, desiredStateRouterDeployment, r.Scheme); err != nil {
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to set controller reference")
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredStateRouterDeployment); err != nil {
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to create Deployment")
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Created", "Created a new Deployment")
+	} else if err == nil {
+		existingWebhookDeploymentForPatch := actualStateRouterDeployment.DeepCopy()
+		needsPatch := false
+
+		if !reflect.DeepEqual(actualStateRouterDeployment.ObjectMeta.Labels, desiredStateRouterDeployment.ObjectMeta.Labels) {
+			log.V(4).Info("Labels differ, preparing patch", "Deployment.Name", actualStateRouterDeployment.Name)
+			actualStateRouterDeployment.ObjectMeta.Labels = zitirouter.GetDefaultLabels()
+			needsPatch = true
+		}
+
+		if !metav1.IsControlledBy(actualStateRouterDeployment, zitirouter) {
+			log.V(4).Info("Ownership missing, preparing patch", "Deployment.Name", actualStateRouterDeployment.Name)
+			if err := controllerutil.SetControllerReference(zitirouter, actualStateRouterDeployment, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on actual Deployment for patch")
+				return ctrl.Result{}, err
+			}
+			needsPatch = true
+		}
+
+		if !reflect.DeepEqual(actualStateRouterDeployment.Spec, desiredStateRouterDeployment.Spec) {
+			log.V(4).Info("Spec differs, preparing patch", "Deployment.Spec", actualStateRouterDeployment.Spec)
+			log.V(4).Info("Spec differs, preparing patch", "Desired.Spec", desiredStateRouterDeployment.Spec)
+			actualStateRouterDeployment.Spec = desiredStateRouterDeployment.Spec
+			needsPatch = true
+		}
+
+		if needsPatch {
+			log.V(4).Info("Applying patch to Deployment", "Deployment.Name", actualStateRouterDeployment.Name)
+			if err := r.Patch(ctx, actualStateRouterDeployment, client.MergeFrom(existingWebhookDeploymentForPatch)); err != nil {
+				r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to patch Deployment")
+				log.Error(err, "Failed to patch Deployment")
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(zitirouter, corev1.EventTypeNormal, "Patched", "Patched Deployment")
+		} else {
+			log.V(4).Info("Deployment is up to date", "Deployment.Name", actualStateRouterDeployment.Name)
+		}
+	} else {
+		log.Error(err, "Failed to get Deployment")
+		return ctrl.Result{}, err
+	}
 
 	log.V(2).Info("ZitiRouter Reconciliation complete", "name", req.Name)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -70,21 +361,115 @@ func (r *ZitiRouterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ZitiRouterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("zitirouter-controller")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kubernetesv1alpha1.ZitiRouter{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
 		Complete(r)
 }
 
-func (r *ZitiRouterReconciler) getRouterConfigs(ctx context.Context, router *kubernetesv1alpha1.ZitiRouter) (*kubernetesv1alpha1.ZitiRouterSpec, error) {
+func (r *ZitiRouterReconciler) getDesiredStateConfigMap(ctx context.Context, zitirouter *kubernetesv1alpha1.ZitiRouter) *corev1.ConfigMap {
 	_ = log.FromContext(ctx)
-	log.Log.V(2).Info("ZitiRouter Spec", "Spec", router.Spec)
-	return &router.Spec, nil
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zitirouter.Spec.Name + "-config",
+			Namespace: zitirouter.Namespace,
+			Labels:    zitirouter.GetDefaultLabels(),
+		},
+		Data: zitirouter.GetDefaultConfigMapData(),
+	}
 }
 
-func (r *ZitiRouterReconciler) getZitiControllerChan() chan kubernetesv1alpha1.ZitiController {
-	return r.ZitiControllerChan
+func (r *ZitiRouterReconciler) getDesiredStateService(ctx context.Context, zitirouter *kubernetesv1alpha1.ZitiRouter) *corev1.Service {
+	_ = log.FromContext(ctx)
+	cluster := corev1.ServiceInternalTrafficPolicyCluster
+	singleStack := corev1.IPFamilyPolicySingleStack
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zitirouter.Spec.Name + "-service",
+			Namespace: zitirouter.Namespace,
+			Labels:    zitirouter.GetDefaultLabels(),
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Name:     zitirouter.Spec.Deployment.Container.Ports[0].Name,
+					Protocol: zitirouter.Spec.Deployment.Container.Ports[0].Protocol,
+					Port:     zitirouter.Spec.Deployment.Container.Ports[0].ContainerPort,
+					TargetPort: intstr.IntOrString{
+						Type:   intstr.Int,
+						IntVal: zitirouter.Spec.Deployment.Container.Ports[0].ContainerPort,
+					},
+				},
+			},
+			InternalTrafficPolicy: &cluster,
+			IPFamilies:            []corev1.IPFamily{corev1.IPv4Protocol},
+			IPFamilyPolicy:        &singleStack,
+			Selector:              utils.FilterLabels(zitirouter.GetDefaultLabels()),
+			SessionAffinity:       corev1.ServiceAffinityNone,
+			Type:                  corev1.ServiceTypeClusterIP,
+		},
+	}
+}
+
+func (r *ZitiRouterReconciler) getDesiredStatePvc(ctx context.Context, zitirouter *kubernetesv1alpha1.ZitiRouter) *corev1.PersistentVolumeClaim {
+	_ = log.FromContext(ctx)
+	PersistentVolumeFilesystem := corev1.PersistentVolumeFilesystem
+	StorageClassNameStandard := "standard"
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zitirouter.Spec.Name,
+			Namespace: zitirouter.Namespace,
+			Labels:    zitirouter.GetDefaultLabels(),
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: *resource.NewQuantity(50*1024*1024, resource.BinarySI),
+				},
+			},
+			StorageClassName: &StorageClassNameStandard,
+			VolumeMode:       &PersistentVolumeFilesystem,
+		},
+	}
+}
+
+func (r *ZitiRouterReconciler) getDesiredStateDeploymentConfiguration(ctx context.Context, zitirouter *kubernetesv1alpha1.ZitiRouter) *appsv1.Deployment {
+	_ = log.FromContext(ctx)
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      zitirouter.Spec.Name + "-deployment",
+			Namespace: zitirouter.Namespace,
+			Labels:    zitirouter.Spec.Deployment.Labels,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &zitirouter.Spec.Deployment.Replicas,
+			Selector: &zitirouter.Spec.Deployment.Selector,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      zitirouter.Spec.Deployment.Labels,
+					Annotations: zitirouter.Spec.Deployment.Annotations,
+				},
+				Spec: corev1.PodSpec{
+					Containers:                    []corev1.Container{zitirouter.Spec.Deployment.Container},
+					HostNetwork:                   zitirouter.Spec.Deployment.HostNetwork,
+					DNSConfig:                     &zitirouter.Spec.Deployment.DNSConfig,
+					DNSPolicy:                     zitirouter.Spec.Deployment.DNSPolicy,
+					SchedulerName:                 zitirouter.Spec.Deployment.SchedulerName,
+					RestartPolicy:                 zitirouter.Spec.Deployment.RestartPolicy,
+					SecurityContext:               &corev1.PodSecurityContext{},
+					TerminationGracePeriodSeconds: &zitirouter.Spec.Deployment.TerminationGracePeriodSeconds,
+					Volumes:                       zitirouter.Spec.Deployment.Volumes,
+				},
+			},
+			Strategy:                zitirouter.Spec.Deployment.Strategy,
+			ProgressDeadlineSeconds: &zitirouter.Spec.Deployment.ProgressDeadlineSeconds,
+			RevisionHistoryLimit:    &zitirouter.Spec.Deployment.RevisionHistoryLimit,
+		},
+	}
 }

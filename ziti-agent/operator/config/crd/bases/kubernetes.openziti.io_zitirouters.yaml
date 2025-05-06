@@ -736,6 +736,7 @@ spec:
                   annotations:
                     additionalProperties:
                       type: string
+                    default: {}
                     type: object
                   container:
                     description: A single application container that you want to run
@@ -2166,6 +2167,7 @@ spec:
                     - name
                     type: object
                   dnsConfig:
+                    default: {}
                     description: |-
                       PodDNSConfig defines the DNS parameters of a pod in addition to
                       those generated from DNSPolicy.
@@ -2211,13 +2213,23 @@ spec:
                         x-kubernetes-list-type: atomic
                     type: object
                   dnsPolicy:
+                    default: ClusterFirstWithHostNet
                     description: DNSPolicy defines how a pod's DNS will be configured.
+                    enum:
+                    - ClusterFirst
+                    - ClusterFirstWithHostNet
+                    - Default
                     type: string
                   hostNetwork:
+                    default: false
+                    enum:
+                    - true
+                    - false
                     type: boolean
                   labels:
                     additionalProperties:
                       type: string
+                    default: {}
                     type: object
                   logLevel:
                     default: 2
@@ -2236,13 +2248,29 @@ spec:
                     default: 2
                     format: int32
                     type: integer
+                  restartPolicy:
+                    default: Always
+                    description: |-
+                      RestartPolicy describes how the container should be restarted.
+                      Only one of the following restart policies may be specified.
+                      If none of the following policies is specified, the default one
+                      is RestartPolicyAlways.
+                    enum:
+                    - Always
+                    - OnFailure
+                    - Never
+                    type: string
                   revisionHistoryLimit:
                     default: 10
                     description: Revision History Limit
                     format: int32
                     minimum: 0
                     type: integer
+                  schedulerName:
+                    default: default-scheduler
+                    type: string
                   securityContext:
+                    default: {}
                     description: |-
                       PodSecurityContext holds pod-level security attributes and common container settings.
                       Some fields are also present in container.securityContext.  Field values of
@@ -2477,6 +2505,56 @@ spec:
                             type: string
                         type: object
                     type: object
+                  selector:
+                    default: {}
+                    description: |-
+                      A label selector is a label query over a set of resources. The result of matchLabels and
+                      matchExpressions are ANDed. An empty label selector matches all objects. A null
+                      label selector matches no objects.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
                   strategy:
                     description: DeploymentStrategy describes how to replace existing
                       pods with new ones.
@@ -2525,6 +2603,10 @@ spec:
                           Default is RollingUpdate.
                         type: string
                     type: object
+                  terminationGracePeriodSeconds:
+                    default: 30
+                    format: int64
+                    type: integer
                   volumes:
                     items:
                       description: Volume represents a named volume in a pod that

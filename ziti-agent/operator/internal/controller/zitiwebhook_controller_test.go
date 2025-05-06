@@ -499,37 +499,41 @@ var _ = Describe("ZitiWebhook Controller", func() {
 							},
 						},
 					},
-					MutatingWebhookSpec: kubernetesv1alpha1.MutatingWebhookSpec{
-						ObjectSelector: &metav1.LabelSelector{ // Change selector
-							MatchLabels: map[string]string{"app": "test"},
-						},
-						NamespaceSelector: &metav1.LabelSelector{ // Change selector
-							MatchExpressions: []metav1.LabelSelectorRequirement{
-								{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system", "cert-manager"}}, // Add cert-manager
-							}},
-						SideEffectType:          &sideEffectClass,
-						FailurePolicy:           &failurePolicy,
-						TimeoutSeconds:          &timeoutSeconds,
-						MatchPolicy:             &matchPolicy,
-						ReinvocationPolicy:      &reinvocationPolicy,
-						AdmissionReviewVersions: []string{"v1", "v1beta1"}, // Add v1beta1
-						Rules: []admissionregistrationv1.RuleWithOperations{ // Change rules
-							{
-								Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}, // Removed Delete
-								Rule: admissionregistrationv1.Rule{
-									APIGroups:   []string{"*"},
-									APIVersions: []string{"v1"}, // Removed v1beta1
-									Resources:   []string{"pods"},
-									Scope:       &[]admissionregistrationv1.ScopeType{admissionregistrationv1.NamespacedScope}[0], // Changed scope
+					MutatingWebhookSpec: []admissionregistrationv1.MutatingWebhook{
+						{
+							ObjectSelector: &metav1.LabelSelector{ // Change selector
+								MatchLabels: map[string]string{"app": "test"},
+							},
+							NamespaceSelector: &metav1.LabelSelector{ // Change selector
+								MatchExpressions: []metav1.LabelSelectorRequirement{
+									{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system", "cert-manager"}}, // Add cert-manager
+								}},
+							SideEffects:             &sideEffectClass,
+							FailurePolicy:           &failurePolicy,
+							TimeoutSeconds:          &timeoutSeconds,
+							MatchPolicy:             &matchPolicy,
+							ReinvocationPolicy:      &reinvocationPolicy,
+							AdmissionReviewVersions: []string{"v1", "v1beta1"}, // Add v1beta1
+							Rules: []admissionregistrationv1.RuleWithOperations{ // Change rules
+								{
+									Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}, // Removed Delete
+									Rule: admissionregistrationv1.Rule{
+										APIGroups:   []string{"*"},
+										APIVersions: []string{"v1"}, // Removed v1beta1
+										Resources:   []string{"pods"},
+										Scope:       &[]admissionregistrationv1.ScopeType{admissionregistrationv1.NamespacedScope}[0], // Changed scope
+									},
 								},
 							},
-						},
-						ClientConfig: kubernetesv1alpha1.ClientConfigSpec{
-							ServiceName: resourceName + "-service", // Keep service name consistent unless intended change
-							Namespace:   resourceNamespace,
-							Path:        "/ziti-tunnel-v2", // Changed path
-							Port:        9443,              // Keep port consistent unless intended change
-							CaBundle:    "notReal",         // CABundle is usually managed, avoid setting directly unless testing specific override
+							ClientConfig: admissionregistrationv1.WebhookClientConfig{
+								Service: &admissionregistrationv1.ServiceReference{
+									Name:      resourceName + "-service",
+									Namespace: resourceNamespace,
+									Path:      &[]string{"/ziti-tunnel-v2"}[0],
+									Port:      &[]int32{9443}[0],
+								},
+								CABundle: []byte("notReal"),
+							},
 						},
 					},
 					DeploymentSpec: kubernetesv1alpha1.DeploymentSpec{

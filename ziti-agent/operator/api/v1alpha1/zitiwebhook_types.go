@@ -48,7 +48,7 @@ type ZitiWebhookSpec struct {
 	DeploymentSpec DeploymentSpec `json:"deploymentSpec,omitempty"`
 
 	// Mutating Webhook Specs
-	MutatingWebhookSpec MutatingWebhookSpec `json:"mutatingWebhookSpec,omitempty"`
+	MutatingWebhookSpec []admissionregistrationv1.MutatingWebhook `json:"mutatingWebhookSpec,omitempty"`
 
 	// Cluster Role Specs
 	ClusterRoleSpec ClusterRoleSpec `json:"clusterRoleSpec,omitempty"`
@@ -189,73 +189,73 @@ type DeploymentEnvVars struct {
 	ZitiRoleKey string `json:"zitiRoleKey,omitempty"`
 }
 
-type MutatingWebhookSpec struct {
+// type MutatingWebhookSpec struct {
 
-	// Object Selector
-	// +kubebuilder:default:={}
-	ObjectSelector *metav1.LabelSelector `json:"objectSelector,omitempty"`
+// 	// Object Selector
+// 	// +kubebuilder:default:={}
+// 	ObjectSelector *metav1.LabelSelector `json:"objectSelector,omitempty"`
 
-	// Namespace Selector
-	// +kubebuilder:default:={matchExpressions: {{key: "kubernetes.io/metadata.name", operator: NotIn, values: {"kube-system"}}, {key: "tunnel.openziti.io/enabled", operator: In, values: {"true", "false"}}}}
-	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+// 	// Namespace Selector
+// 	// +kubebuilder:default:={matchExpressions: {{key: "kubernetes.io/metadata.name", operator: NotIn, values: {"kube-system"}}, {key: "tunnel.openziti.io/enabled", operator: In, values: {"true", "false"}}}}
+// 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
-	// Webhook Side EfFect
-	// +kubebuilder:validation:Enum:=None;Unknown;Some;NoneOnDryRun
-	// +kubebuilder:default:=None
-	SideEffectType *admissionregistrationv1.SideEffectClass `json:"sideEffectType,omitempty"`
+// 	// Webhook Side EfFect
+// 	// +kubebuilder:validation:Enum:=None;Unknown;Some;NoneOnDryRun
+// 	// +kubebuilder:default:=None
+// 	SideEffectType *admissionregistrationv1.SideEffectClass `json:"sideEffectType,omitempty"`
 
-	// Webhook Failure Policy
-	// +kubebuilder:default:=Fail
-	// +kubebuilder:validation:Enum:=Ignore;Fail
-	FailurePolicy *admissionregistrationv1.FailurePolicyType `json:"failurePolicy,omitempty"`
+// 	// Webhook Failure Policy
+// 	// +kubebuilder:default:=Fail
+// 	// +kubebuilder:validation:Enum:=Ignore;Fail
+// 	FailurePolicy *admissionregistrationv1.FailurePolicyType `json:"failurePolicy,omitempty"`
 
-	// Webhook Timeout
-	// +kubebuilder:default:=30
-	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
+// 	// Webhook Timeout
+// 	// +kubebuilder:default:=30
+// 	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
 
-	// Webhook Match Policy
-	// +kubebuilder:default:=Equivalent
-	// +kubebuilder:validation:Enum:=Exact;Equivalent
-	MatchPolicy *admissionregistrationv1.MatchPolicyType `json:"matchPolicy,omitempty"`
+// 	// Webhook Match Policy
+// 	// +kubebuilder:default:=Equivalent
+// 	// +kubebuilder:validation:Enum:=Exact;Equivalent
+// 	MatchPolicy *admissionregistrationv1.MatchPolicyType `json:"matchPolicy,omitempty"`
 
-	// Webhook Reinvocation Policy
-	// +kubebuilder:default:=Never
-	// +kubebuilder:validation:Enum:=Never;IfNeeded
-	ReinvocationPolicy *admissionregistrationv1.ReinvocationPolicyType `json:"reinvocationPolicy,omitempty"`
+// 	// Webhook Reinvocation Policy
+// 	// +kubebuilder:default:=Never
+// 	// +kubebuilder:validation:Enum:=Never;IfNeeded
+// 	ReinvocationPolicy *admissionregistrationv1.ReinvocationPolicyType `json:"reinvocationPolicy,omitempty"`
 
-	// Wenhoo Admission Review Versions
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:default:={"v1"}
-	AdmissionReviewVersions []string `json:"admissionReviewVersions,omitempty"`
+// 	// Wenhoo Admission Review Versions
+// 	// +kubebuilder:validation:MinItems=1
+// 	// +kubebuilder:default:={"v1"}
+// 	AdmissionReviewVersions []string `json:"admissionReviewVersions,omitempty"`
 
-	// Webhook Rules
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:default:={{"operations":{"CREATE","UPDATE","DELETE"},"apiGroups":{"*"},"apiVersions":{"v1","v1beta1"},"resources":{"pods"},"scope":"*"}}
-	Rules []admissionregistrationv1.RuleWithOperations `json:"rules,omitempty"`
+// 	// Webhook Rules
+// 	// +kubebuilder:validation:MinItems=1
+// 	// +kubebuilder:default:={{"operations":{"CREATE","UPDATE","DELETE"},"apiGroups":{"*"},"apiVersions":{"v1","v1beta1"},"resources":{"pods"},"scope":"*"}}
+// 	Rules []admissionregistrationv1.RuleWithOperations `json:"rules,omitempty"`
 
-	// Webhook Client Config
-	ClientConfig ClientConfigSpec `json:"clientConfig,omitempty"`
-}
+// 	// Webhook Client Config
+// 	ClientConfig ClientConfigSpec `json:"clientConfig,omitempty"`
+// }
 
-type ClientConfigSpec struct {
-	// Webhook Service Name
-	ServiceName string `json:"serviceName,omitempty"`
+// type ClientConfigSpec struct {
+// 	// Webhook Service Name
+// 	ServiceName string `json:"serviceName,omitempty"`
 
-	// Webhook Service Namespace
-	Namespace string `json:"namespace,omitempty"`
+// 	// Webhook Service Namespace
+// 	Namespace string `json:"namespace,omitempty"`
 
-	// Webhook Service Path
-	// +kubebuilder:default:=/ziti-tunnel
-	Path string `json:"path,omitempty"`
+// 	// Webhook Service Path
+// 	// +kubebuilder:default:=/ziti-tunnel
+// 	Path string `json:"path,omitempty"`
 
-	// Webhook Service Port
-	// +kubebuilder:default:=443
-	Port int32 `json:"port,omitempty"`
+// 	// Webhook Service Port
+// 	// +kubebuilder:default:=443
+// 	Port int32 `json:"port,omitempty"`
 
-	// Webhook Service Ca Bundle
-	// +kubebuilder:default:=""
-	CaBundle string `json:"caBundle,omitempty"`
-}
+// 	// Webhook Service Ca Bundle
+// 	// +kubebuilder:default:=""
+// 	CaBundle string `json:"caBundle,omitempty"`
+// }
 
 type ClusterRoleSpec struct {
 	// Cluster Role Rules
@@ -321,7 +321,6 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 	failurePolicyFail := admissionregistrationv1.Fail
 	matchPolicyEquivalent := admissionregistrationv1.Equivalent
 	reinvocationPolicyNever := admissionregistrationv1.NeverReinvocationPolicy
-	timeoutSeconds := int32(30)
 	scopeAll := admissionregistrationv1.ScopeType("*")
 	return &ZitiWebhookSpec{
 		Name:               z.ObjectMeta.Name,
@@ -361,36 +360,76 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 			RevisionHistoryLimit:          10,
 			LogLevel:                      2,
 		},
-		MutatingWebhookSpec: MutatingWebhookSpec{
-			ObjectSelector:          &metav1.LabelSelector{},
-			NamespaceSelector:       &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system"}}, {Key: "tunnel.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}}}},
-			SideEffectType:          &sideEffectClassNone,
-			FailurePolicy:           &failurePolicyFail,
-			TimeoutSeconds:          &timeoutSeconds,
-			MatchPolicy:             &matchPolicyEquivalent,
-			ReinvocationPolicy:      &reinvocationPolicyNever,
-			AdmissionReviewVersions: []string{"v1"},
-			Rules: []admissionregistrationv1.RuleWithOperations{
-				{
-					Operations: []admissionregistrationv1.OperationType{
-						admissionregistrationv1.Create,
-						admissionregistrationv1.Update,
-						admissionregistrationv1.Delete,
-					},
-					Rule: admissionregistrationv1.Rule{
-						APIGroups:   []string{"*"},
-						APIVersions: []string{"v1", "v1beta1"},
-						Resources:   []string{"pods"},
-						Scope:       &scopeAll,
+		MutatingWebhookSpec: []admissionregistrationv1.MutatingWebhook{
+			{
+				Name:                    "tunnel.ziti.webhook",
+				ObjectSelector:          &metav1.LabelSelector{},
+				NamespaceSelector:       &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system"}}, {Key: "tunnel.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}}}},
+				SideEffects:             &sideEffectClassNone,
+				FailurePolicy:           &failurePolicyFail,
+				TimeoutSeconds:          &[]int32{30}[0],
+				MatchPolicy:             &matchPolicyEquivalent,
+				ReinvocationPolicy:      &reinvocationPolicyNever,
+				AdmissionReviewVersions: []string{"v1"},
+				Rules: []admissionregistrationv1.RuleWithOperations{
+					{
+						Operations: []admissionregistrationv1.OperationType{
+							admissionregistrationv1.Create,
+							admissionregistrationv1.Update,
+							admissionregistrationv1.Delete,
+						},
+						Rule: admissionregistrationv1.Rule{
+							APIGroups:   []string{"*"},
+							APIVersions: []string{"v1", "v1beta1"},
+							Resources:   []string{"pods"},
+							Scope:       &scopeAll,
+						},
 					},
 				},
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Name:      z.ObjectMeta.Name + "-service",
+						Namespace: z.Namespace,
+						Path:      &[]string{"/ziti-tunnel"}[0],
+						Port:      &[]int32{9443}[0],
+					},
+					CABundle: []byte{},
+				},
 			},
-			ClientConfig: ClientConfigSpec{
-				ServiceName: z.ObjectMeta.Name + "-service",
-				Namespace:   z.Namespace,
-				Path:        "/ziti-tunnel",
-				Port:        443,
-				CaBundle:    "",
+			{
+				Name:                    "router.ziti.webhook",
+				ObjectSelector:          &metav1.LabelSelector{},
+				NamespaceSelector:       &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system"}}, {Key: "router.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}}}},
+				SideEffects:             &sideEffectClassNone,
+				FailurePolicy:           &failurePolicyFail,
+				TimeoutSeconds:          &[]int32{30}[0],
+				MatchPolicy:             &matchPolicyEquivalent,
+				ReinvocationPolicy:      &reinvocationPolicyNever,
+				AdmissionReviewVersions: []string{"v1"},
+				Rules: []admissionregistrationv1.RuleWithOperations{
+					{
+						Operations: []admissionregistrationv1.OperationType{
+							admissionregistrationv1.Create,
+							admissionregistrationv1.Update,
+							admissionregistrationv1.Delete,
+						},
+						Rule: admissionregistrationv1.Rule{
+							APIGroups:   []string{"*"},
+							APIVersions: []string{"v1", "v1beta1"},
+							Resources:   []string{"pods"},
+							Scope:       &scopeAll,
+						},
+					},
+				},
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Name:      z.ObjectMeta.Name + "-service",
+						Namespace: z.Namespace,
+						Path:      &[]string{"/ziti-router"}[0],
+						Port:      &[]int32{9443}[0],
+					},
+					CABundle: []byte{},
+				},
 			},
 		},
 		ClusterRoleSpec: ClusterRoleSpec{

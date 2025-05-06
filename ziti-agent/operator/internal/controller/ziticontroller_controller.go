@@ -22,7 +22,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -73,7 +72,7 @@ func (r *ZitiControllerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Deep copy the fetched resource
-	existingZitiController := ziticontroller.DeepCopy()
+	// existingZitiController := ziticontroller.DeepCopy()
 
 	foundAdminSecret := &corev1.Secret{}
 	if err := r.Get(ctx, client.ObjectKey{
@@ -96,24 +95,24 @@ func (r *ZitiControllerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	// Determine if the spec has changed
-	specChanged := !reflect.DeepEqual(existingZitiController.Spec, ziticontroller.Spec)
+	// // Determine if the spec has changed
+	// specChanged := !reflect.DeepEqual(existingZitiController.Spec, ziticontroller.Spec)
 
-	// Check if the channel is empty only on the first access
-	if !r.channelChecked {
-		select {
-		case <-r.ZitiControllerChan:
-			log.V(2).Info("ZitiController channel not empty on first access")
-		default:
-			r.ZitiControllerChan <- *ziticontroller
-			log.V(2).Info("ZitiController channel is empty on first access and written to")
-		}
-		r.channelChecked = true
-	}
-	if specChanged {
+	// // Check if the channel is empty only on the first access
+	// if !r.channelChecked {
+	select {
+	case <-r.ZitiControllerChan:
+		log.V(2).Info("ZitiController channel not empty on first access")
+	default:
 		r.ZitiControllerChan <- *ziticontroller
-		log.V(2).Info("ZitiController spec changed, sending update to channel")
+		log.V(2).Info("ZitiController channel is empty on first access and written to")
 	}
+	// 	r.channelChecked = true
+	// }
+	// if specChanged {
+	// 	r.ZitiControllerChan <- *ziticontroller
+	// 	log.V(2).Info("ZitiController spec changed, sending update to channel")
+	// }
 
 	log.V(2).Info("ZitiController Reconciliation finished")
 	return ctrl.Result{RequeueAfter: time.Minute}, nil

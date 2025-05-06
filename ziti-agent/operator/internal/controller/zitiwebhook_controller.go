@@ -803,7 +803,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateService(ctx context.Context, ziti
 				{
 					Name:     "https",
 					Protocol: corev1.ProtocolTCP,
-					Port:     zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Port,
+					Port:     *zitiwebhook.Spec.MutatingWebhookSpec[0].ClientConfig.Service.Port,
 					TargetPort: intstr.IntOrString{
 						Type:   intstr.Int,
 						IntVal: zitiwebhook.Spec.DeploymentSpec.Port,
@@ -875,29 +875,7 @@ func (r *ZitiWebhookReconciler) getDesiredStateMutatingWebhookConfiguration(ctx 
 			Labels:      zitiwebhook.GetDefaultLabels(),
 			Annotations: zitiwebhook.GetDefaultAnnotations(),
 		},
-		Webhooks: []admissionregistrationv1.MutatingWebhook{
-			{
-				Name: "tunnel.ziti.webhook",
-				ClientConfig: admissionregistrationv1.WebhookClientConfig{
-					Service: &admissionregistrationv1.ServiceReference{
-						Name:      zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.ServiceName,
-						Namespace: zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Namespace,
-						Port:      &zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Port,
-						Path:      &zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.Path,
-					},
-					CABundle: []byte(zitiwebhook.Spec.MutatingWebhookSpec.ClientConfig.CaBundle),
-				},
-				Rules:                   zitiwebhook.Spec.MutatingWebhookSpec.Rules,
-				ObjectSelector:          zitiwebhook.Spec.MutatingWebhookSpec.ObjectSelector,
-				NamespaceSelector:       zitiwebhook.Spec.MutatingWebhookSpec.NamespaceSelector,
-				SideEffects:             zitiwebhook.Spec.MutatingWebhookSpec.SideEffectType,
-				TimeoutSeconds:          zitiwebhook.Spec.MutatingWebhookSpec.TimeoutSeconds,
-				MatchPolicy:             zitiwebhook.Spec.MutatingWebhookSpec.MatchPolicy,
-				FailurePolicy:           zitiwebhook.Spec.MutatingWebhookSpec.FailurePolicy,
-				AdmissionReviewVersions: zitiwebhook.Spec.MutatingWebhookSpec.AdmissionReviewVersions,
-				ReinvocationPolicy:      zitiwebhook.Spec.MutatingWebhookSpec.ReinvocationPolicy,
-			},
-		},
+		Webhooks: zitiwebhook.Spec.MutatingWebhookSpec,
 	}
 }
 

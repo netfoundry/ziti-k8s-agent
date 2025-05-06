@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"fmt"
 
+	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/operator/internal/utils"
 	"github.com/openziti/edge-api/rest_model"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -55,16 +56,33 @@ type ZitiRouterSpec struct {
 
 type RouterDeploymentSpec struct {
 	// +kubebuilder:default=2
-	Replicas        int32                     `json:"replicas,omitempty"`
-	Labels          map[string]string         `json:"labels,omitempty"`
-	Annotations     map[string]string         `json:"annotations,omitempty"`
-	Container       corev1.Container          `json:"container,omitempty"`
-	HostNetwork     bool                      `json:"hostNetwork,omitempty"`
-	DNSConfig       corev1.PodDNSConfig       `json:"dnsConfig,omitempty"`
-	DNSPolicy       corev1.DNSPolicy          `json:"dnsPolicy,omitempty"`
+	Replicas int32 `json:"replicas,omitempty"`
+	// +kubebuilder:default={}
+	Selector metav1.LabelSelector `json:"selector,omitempty"`
+	// +kubebuilder:default={}
+	Labels map[string]string `json:"labels,omitempty"`
+	// +kubebuilder:default={}
+	Annotations map[string]string `json:"annotations,omitempty"`
+	Container   corev1.Container  `json:"container,omitempty"`
+	// +kubebuilder:default=false
+	// +kubebuilder:validation:Enum=true;false
+	HostNetwork bool `json:"hostNetwork,omitempty"`
+	// +kubebuilder:default={}
+	DNSConfig corev1.PodDNSConfig `json:"dnsConfig,omitempty"`
+	// +kubebuilder:default=ClusterFirstWithHostNet
+	// +kubebuilder:validation:Enum=ClusterFirst;ClusterFirstWithHostNet;Default
+	DNSPolicy corev1.DNSPolicy `json:"dnsPolicy,omitempty"`
+	// +kubebuilder:default=default-scheduler
+	SchedulerName string `json:"schedulerName,omitempty"`
+	// +kubebuilder:default=Always
+	// +kubebuilder:validation:Enum=Always;OnFailure;Never
+	RestartPolicy corev1.RestartPolicy `json:"restartPolicy,omitempty"`
+	// +kubebuilder:default={}
 	SecurityContext corev1.PodSecurityContext `json:"securityContext,omitempty"`
-	Volumes         []corev1.Volume           `json:"volumes,omitempty"`
-	Strategy        appsv1.DeploymentStrategy `json:"strategy,omitempty"`
+	// +kubebuilder:default=30
+	TerminationGracePeriodSeconds int64                     `json:"terminationGracePeriodSeconds,omitempty"`
+	Volumes                       []corev1.Volume           `json:"volumes,omitempty"`
+	Strategy                      appsv1.DeploymentStrategy `json:"strategy,omitempty"`
 	// Progress Deadline
 	// +kubebuilder:default:=600
 	// +kubebuilder:validation:Minimum=0
@@ -453,126 +471,150 @@ func init() {
 	SchemeBuilder.Register(&ZitiRouter{}, &ZitiRouterList{})
 }
 
-func (r *ZitiRouter) GetDefaultRouterPodSpec() corev1.PodSpec {
-	return corev1.PodSpec{
-		Containers: []corev1.Container{
-			{
-				Name:            "ziti-router",
-				Image:           "docker.io/openziti/ziti-router:latest",
-				ImagePullPolicy: "Always",
-				Args: []string{
-					"run",
-					"/etc/ziti/config/ziti-router.yaml",
-				},
-				Command: []string{
-					"/entrypoint.bash",
-				},
-				Env: []corev1.EnvVar{
-					{
-						Name:  "ZITI_ENROLL_TOKEN",
-						Value: "",
-					},
-					{
-						Name:  "ZITI_BOOTSTRAP",
-						Value: "true",
-					},
-					{
-						Name:  " ZITI_BOOTSTRAP_ENROLLMENT",
-						Value: "true",
-					},
-					{
-						Name:  " ZITI_BOOTSTRAP_CONFIG",
-						Value: "false",
-					},
-					{
-						Name:  " ZITI_AUTO_RENEW_CERTS",
-						Value: "true",
-					},
-					{
-						Name:  " ZITI_HOME",
-						Value: "/etc/ziti/config",
-					},
-					{
-						Name:  "ZITI_ROUTER_NAME",
-						Value: r.Spec.Name,
+func (r *ZitiRouter) GetDefaults() *ZitiRouterSpec {
+	return &ZitiRouterSpec{
+		Name:               r.Name,
+		ZitiControllerName: r.Spec.ZitiControllerName,
+		ZitiCtrlMgmtApi:    r.Spec.ZitiCtrlMgmtApi,
+		Deployment: RouterDeploymentSpec{
+			Replicas: 2,
+			Selector: metav1.LabelSelector{
+				MatchLabels: utils.FilterLabels(r.GetDefaultLabels()),
+			},
+			Labels:        r.GetDefaultLabels(),
+			Annotations:   r.GetDefaultAnnotations(),
+			Container:     r.GetDefaultContainer(),
+			HostNetwork:   false,
+			DNSConfig:     corev1.PodDNSConfig{},
+			DNSPolicy:     corev1.DNSClusterFirstWithHostNet,
+			RestartPolicy: corev1.RestartPolicyAlways,
+			SchedulerName: "default-scheduler",
+			SecurityContext: corev1.PodSecurityContext{
+				FSGroup: &[]int64{2171}[0],
+			},
+			TerminationGracePeriodSeconds: 30,
+			Volumes: []corev1.Volume{
+				{
+					Name: "config-data",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: r.Name,
+						},
 					},
 				},
-				LivenessProbe: &corev1.Probe{
-					InitialDelaySeconds: 10,
-					TimeoutSeconds:      1,
-					PeriodSeconds:       10,
-					SuccessThreshold:    1,
-					FailureThreshold:    3,
-					ProbeHandler: corev1.ProbeHandler{
-						Exec: &corev1.ExecAction{
-							Command: []string{
-								"/bin/sh",
-								"-c",
-								"ziti agent stats",
+				{
+					Name: "ziti-router-config",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							DefaultMode: &[]int32{292}[0],
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: r.Name + "-config",
 							},
 						},
 					},
 				},
-				ReadinessProbe: &corev1.Probe{
-					InitialDelaySeconds: 10,
-					TimeoutSeconds:      1,
-					PeriodSeconds:       10,
-					SuccessThreshold:    1,
-					FailureThreshold:    3,
-					ProbeHandler: corev1.ProbeHandler{
-						Exec: &corev1.ExecAction{
-							Command: []string{
-								"/bin/sh",
-								"-c",
-								"ziti agent stats",
-							},
-						},
-					},
-				},
-				Resources:                corev1.ResourceRequirements{},
-				TerminationMessagePath:   "/dev/termination-log",
-				TerminationMessagePolicy: "File",
-				VolumeMounts: []corev1.VolumeMount{
-					{
-						Name:      "config-data",
-						MountPath: "/etc/ziti/config",
-					},
-					{
-						Name:      "ziti-router-config",
-						MountPath: "/etc/ziti/config/ziti-router.yaml",
-						SubPath:   "ziti-router.yaml",
+			},
+			Strategy:                r.GetDefaultStrategy(),
+			ProgressDeadlineSeconds: 600,
+			RevisionHistoryLimit:    10,
+			LogLevel:                2,
+		},
+	}
+}
+
+func (r *ZitiRouter) GetDefaultContainer() corev1.Container {
+	return corev1.Container{
+		Name:            "ziti-router",
+		Image:           "docker.io/openziti/ziti-router:latest",
+		ImagePullPolicy: "Always",
+		Args: []string{
+			"run",
+			"/etc/ziti/config/ziti-router.yaml",
+		},
+		Command: []string{
+			"/entrypoint.bash",
+		},
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "edge",
+				ContainerPort: 9443,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Env: []corev1.EnvVar{
+			{
+				Name:  "ZITI_ENROLL_TOKEN",
+				Value: "",
+			},
+			{
+				Name:  "ZITI_BOOTSTRAP",
+				Value: "true",
+			},
+			{
+				Name:  "ZITI_BOOTSTRAP_ENROLLMENT",
+				Value: "true",
+			},
+			{
+				Name:  "ZITI_BOOTSTRAP_CONFIG",
+				Value: "false",
+			},
+			{
+				Name:  "ZITI_AUTO_RENEW_CERTS",
+				Value: "true",
+			},
+			{
+				Name:  "ZITI_HOME",
+				Value: "/etc/ziti/config",
+			},
+			{
+				Name:  "ZITI_ROUTER_NAME",
+				Value: r.Name,
+			},
+		},
+		LivenessProbe: &corev1.Probe{
+			InitialDelaySeconds: 10,
+			TimeoutSeconds:      1,
+			PeriodSeconds:       10,
+			SuccessThreshold:    1,
+			FailureThreshold:    3,
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{
+						"/bin/sh",
+						"-c",
+						"ziti agent stats",
 					},
 				},
 			},
 		},
-		HostNetwork:   false,
-		DNSConfig:     &corev1.PodDNSConfig{},
-		DNSPolicy:     corev1.DNSClusterFirstWithHostNet,
-		RestartPolicy: corev1.RestartPolicyAlways,
-		SchedulerName: "default-scheduler",
-		SecurityContext: &corev1.PodSecurityContext{
-			FSGroup: &[]int64{2171}[0],
-		},
-		TerminationGracePeriodSeconds: &[]int64{30}[0],
-		Volumes: []corev1.Volume{
-			{
-				Name: "config-data",
-				VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: r.Spec.Name,
+		ReadinessProbe: &corev1.Probe{
+			InitialDelaySeconds: 10,
+			TimeoutSeconds:      1,
+			PeriodSeconds:       10,
+			SuccessThreshold:    1,
+			FailureThreshold:    3,
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{
+						"/bin/sh",
+						"-c",
+						"ziti agent stats",
 					},
 				},
 			},
+		},
+		Resources:                corev1.ResourceRequirements{},
+		TerminationMessagePath:   "/dev/termination-log",
+		TerminationMessagePolicy: "File",
+		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name: "ziti-router-config",
-				VolumeSource: corev1.VolumeSource{
-					ConfigMap: &corev1.ConfigMapVolumeSource{
-						DefaultMode: &[]int32{292}[0],
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: r.Spec.Name + "-config",
-						},
-					},
-				},
+				Name:      "config-data",
+				MountPath: "/etc/ziti/config",
+			},
+			{
+				Name:      "ziti-router-config",
+				MountPath: "/etc/ziti/config/ziti-router.yaml",
+				SubPath:   "ziti-router.yaml",
 			},
 		},
 	}
@@ -596,10 +638,10 @@ func (r *ZitiRouter) GetDefaultStrategy() appsv1.DeploymentStrategy {
 
 func (r *ZitiRouter) GetDefaultLabels() map[string]string {
 	return map[string]string{
-		"app":                          r.Spec.Name,
-		"app.kubernetes.io/name":       r.Spec.Name + "-" + r.Namespace,
-		"app.kubernetes.io/part-of":    r.Spec.Name + "-operator",
-		"app.kubernetes.io/managed-by": r.Spec.Name + "-controller",
+		"app":                          r.Name,
+		"app.kubernetes.io/name":       r.Name + "-" + r.Namespace,
+		"app.kubernetes.io/part-of":    r.Name + "-operator",
+		"app.kubernetes.io/managed-by": r.Name + "-controller",
 		"app.kubernetes.io/component":  "router",
 		"router.openziti.io/enabled":   "true",
 	}
@@ -615,19 +657,24 @@ func (r *ZitiRouter) GetDefaultFinalizer() []string {
 	}
 }
 
-func (r *ZitiRouter) GetDefaultServiceAccountName() string {
-	return r.Spec.Name + "-service-account"
+func (r *ZitiRouter) GetDefaultDeploymentName() string {
+	return r.Name + "-deployment"
 }
+
+func (r *ZitiRouter) GetDefaultServiceAccountName() string {
+	return r.Name + "-service-account"
+}
+
 func (r *ZitiRouter) GetDefaultServiceName() string {
-	return r.Spec.Name + "-service"
+	return r.Name + "-service"
 }
 
 func (r *ZitiRouter) GetDefaultConfigMapName() string {
-	return r.Spec.Name + "-config"
+	return r.Name + "-config"
 }
 
 func (r *ZitiRouter) GetDefaultConfigMapKey() string {
-	return r.Spec.Name + "-config.yaml"
+	return r.Name + "-config.yaml"
 }
 
 func (r *ZitiRouter) GetDefaultConfigMapData() map[string]string {
@@ -662,9 +709,8 @@ web:
       - interface: 0.0.0.0:8081
     apis:
       - binding: health-checks
-	}
 `
-	configTemplate = fmt.Sprintf(configTemplate, r.Spec.Config.Ctrl.Endpoint, fmt.Sprintf(r.Spec.Name, ".", r.Namespace, ".svc"))
+	configTemplate = fmt.Sprintf(configTemplate, r.Spec.Config.Ctrl.Endpoint, fmt.Sprintf("%s-service.%s.svc.cluster.local", r.ObjectMeta.Name, r.Namespace))
 	return map[string]string{
 		r.GetDefaultConfigMapKey(): configTemplate,
 	}

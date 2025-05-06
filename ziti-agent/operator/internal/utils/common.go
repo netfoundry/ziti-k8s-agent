@@ -19,6 +19,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"reflect"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -31,7 +32,7 @@ import (
 func MergeSpecs(ctx context.Context, current, desired any) (error, bool) {
 	log := log.FromContext(ctx)
 	ok := false
-	log.V(5).Info("Merging Structs", "Current", current, "Desired", desired)
+	log.V(4).Info("Merging Structs", "Current", current, "Desired", desired)
 
 	currentVal := reflect.ValueOf(current)
 	desiredVal := reflect.ValueOf(desired)
@@ -93,8 +94,8 @@ func MergeSpecs(ctx context.Context, current, desired any) (error, bool) {
 								if IsZeroValue(ctx, currentSub2Val.Elem().Field(k)) && !IsZeroValue(ctx, desiredSub2Val.Elem().Field(k)) {
 									if currentSub2Val.Elem().Field(k).CanSet() {
 										currentSub2Val.Elem().Field(k).Set(desiredSub2Val.Elem().Field(k))
-										log.V(2).Info("Setting sub2Fields", "Sub2Field", currentSub2Val.Elem().Type().Field(k).Name, "Value", currentSub2Val.Elem().Field(k).Interface())
-										log.V(2).Info("Setting sub2Fields", "Sub2Field", desiredSub2Val.Elem().Type().Field(k).Name, "Value", desiredSub2Val.Elem().Field(k).Interface())
+										log.V(4).Info("Setting sub2Fields", "Sub2Field", currentSub2Val.Elem().Type().Field(k).Name, "Value", currentSub2Val.Elem().Field(k).Interface())
+										log.V(4).Info("Setting sub2Fields", "Sub2Field", desiredSub2Val.Elem().Type().Field(k).Name, "Value", desiredSub2Val.Elem().Field(k).Interface())
 										ok = true
 									}
 								}
@@ -114,6 +115,8 @@ func IsManagedField(ctx context.Context, fieldName string) bool {
 	_ = log.FromContext(ctx)
 	switch fieldName {
 	case "Name", "ZitiControllerName", "Cert", "DeploymentSpec", "MutatingWebhookSpec", "ClusterRoleSpec", "ServiceAccount", "Revision":
+		return true
+	case "ZitiCtrlMgmtApi", "Model", "Config", "Deployment":
 		return true
 	default:
 		return false
@@ -228,4 +231,25 @@ func GetUrlFromJwt(tokenString string) (string, error) {
 		return "", err
 	}
 	return issuer, nil
+}
+
+func GetHostAndPort(urlString string) (string, string, error) {
+	parsedURL, err := url.Parse(urlString)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	host := parsedURL.Hostname()
+	port := parsedURL.Port()
+
+	if port == "" {
+		switch parsedURL.Scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+
+	return host, port, nil
 }
