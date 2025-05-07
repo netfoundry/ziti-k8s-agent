@@ -10,14 +10,19 @@ import (
 	rest_model_edge "github.com/openziti/edge-api/rest_model"
 	"github.com/openziti/sdk-golang/ziti"
 	"github.com/openziti/sdk-golang/ziti/enroll"
+	"k8s.io/klog/v2"
 )
 
-func CreateEdgeRouter(name string, options *rest_model_edge.EdgeRouterCreate, edge *rest_management_api_client.ZitiEdgeManagement) (*edge_router.CreateEdgeRouterCreated, error) {
+func CreateEdgeRouter(options *rest_model_edge.EdgeRouterCreate, edge *rest_management_api_client.ZitiEdgeManagement) (*edge_router.CreateEdgeRouterCreated, error) {
 	req := edge_router.NewCreateEdgeRouterParams()
 	req.EdgeRouter = options
 	req.SetTimeout(30 * time.Second)
 	resp, err := edge.EdgeRouter.CreateEdgeRouter(req, nil)
 	if err != nil {
+		if options != nil {
+			klog.Infof("Router Name: %v", *options.Name)
+		}
+		klog.Errorf("failed to create edge router: %+v", err)
 		return nil, err
 	}
 	return resp, nil

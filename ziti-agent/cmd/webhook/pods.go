@@ -418,19 +418,25 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, 
 
 func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
+	routerName, err := buildZitiIdentityName(zh.Config.Prefix, &pod.ObjectMeta, uid)
+	if err != nil {
+		return failureResponse(response, err)
+	}
+
 	options := &rest_model_edge.EdgeRouterCreate{
 		AppData:           nil,
 		Cost:              &zh.Config.RouterConfig.Cost,
 		Disabled:          &zh.Config.RouterConfig.Disabled,
 		IsTunnelerEnabled: zh.Config.RouterConfig.IsTunnelerEnabled,
-		Name:              &pod.Name,
+		Name:              &routerName,
+		NoTraversal:       &isNotTrue,
 		RoleAttributes:    &zh.Config.RouterConfig.RoleAttributes,
 		Tags:              nil,
 	}
 
 	_, err = zh.ZC.updateZitiRouter(
 		ctx,
-		pod.Name,
+		routerName,
 		options,
 	)
 	if err != nil {
@@ -439,7 +445,7 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 
 	identityToken, err := zh.ZC.getZitiRouterToken(
 		ctx,
-		pod.Name,
+		routerName,
 	)
 	if err != nil {
 		return failureResponse(response, err)
@@ -447,12 +453,14 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 
 	jsonPatch = []JsonPatchEntry{
 		{
-			OP:   "add",
-			Path: "/spec/containers/0/env/-",
-			Value: corev1.EnvVar{
-				Name:  "ZITI_ENROLL_TOKEN",
-				Value: identityToken,
-			},
+			OP:    "replace",
+			Path:  "/spec/containers/0/env/0/value",
+			Value: identityToken,
+		},
+		{
+			OP:    "replace",
+			Path:  "/spec/containers/0/env/7/value",
+			Value: routerName,
 		},
 	}
 
@@ -471,7 +479,7 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	if zh.Config.ZitiType == zitiTypeRouter {
 
-		if err := zh.ZC.deleteZitiRouter(ctx, pod.Name); err != nil {
+		if err := zh.ZC.deleteZitiRouter(ctx, pod.Spec.Containers[0].Env[7].Value); err != nil {
 			return failureResponse(response, err)
 		}
 
@@ -701,7 +709,7 @@ func (zc *zitiClient) updateZitiRouter(ctx context.Context, name string, options
 		return nil, err
 	}
 	if len(routerDetails.GetPayload().Data) == 0 {
-		routerDetails, err := zitiedge.CreateEdgeRouter(name, options, zc.client)
+		routerDetails, err := zitiedge.CreateEdgeRouter(options, zc.client)
 		if err != nil {
 			return nil, err
 		}
