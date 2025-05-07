@@ -568,7 +568,11 @@ func (r *ZitiRouter) GetDefaultContainer() corev1.Container {
 			},
 			{
 				Name:  "ZITI_ROUTER_NAME",
-				Value: r.Name,
+				Value: r.ObjectMeta.Name,
+			},
+			{
+				Name:  "ZITI_ROUTER_IDENTITY_NAME",
+				Value: "",
 			},
 		},
 		LivenessProbe: &corev1.Probe{
@@ -674,19 +678,19 @@ func (r *ZitiRouter) GetDefaultConfigMapName() string {
 }
 
 func (r *ZitiRouter) GetDefaultConfigMapKey() string {
-	return r.Name + "-config.yaml"
+	return "ziti-router.yaml"
 }
 
 func (r *ZitiRouter) GetDefaultConfigMapData() map[string]string {
 
+	edgeAddress := fmt.Sprintf("%s-service.%s.svc", r.ObjectMeta.Name, r.Namespace)
 	configTemplate := `
 v: 3
 identity:
-  cert: /etc/ziti/config/cert.pem
-  key: /etc/ziti/config/key.pem
-  server_cert: /etc/ziti/config/server.cert.pem
-  server_key: /etc/ziti/config/server.key.pem
-  ca: /etc/ziti/config/ca.pem
+  cert: /etc/ziti/config/%s.cert
+  server_cert: /etc/ziti/config/%s.server.chain.cert
+  key: /etc/ziti/config/%s.key
+  ca: /etc/ziti/config/%s.cas
 
 ctrl:
   endpoint: %s
@@ -703,14 +707,40 @@ listeners:
       connectTimeoutMs: 5000
       getSessionTimeout: 60s
 
+edge:
+  csr:
+    country: US
+    province: NC
+    locality: Charlotte
+    organization: NetFoundry
+    organizationalUnit: Ziti
+    sans:
+      dns:
+        - localhost
+        - %s
+      ip:
+        - 127.0.0.1
+      email:
+      uri:
+
 web:
-  - name: health-checks
+  - name: health-check
     bindPoints:
       - interface: 0.0.0.0:8081
+        address: 0.0.0.0:8081 	
     apis:
       - binding: health-checks
 `
-	configTemplate = fmt.Sprintf(configTemplate, r.Spec.Config.Ctrl.Endpoint, fmt.Sprintf("%s-service.%s.svc.cluster.local", r.ObjectMeta.Name, r.Namespace))
+	configTemplate = fmt.Sprintf(
+		configTemplate,
+		r.ObjectMeta.Name,
+		r.ObjectMeta.Name,
+		r.ObjectMeta.Name,
+		r.ObjectMeta.Name,
+		r.Spec.Config.Ctrl.Endpoint,
+		edgeAddress,
+		edgeAddress,
+	)
 	return map[string]string{
 		r.GetDefaultConfigMapKey(): configTemplate,
 	}

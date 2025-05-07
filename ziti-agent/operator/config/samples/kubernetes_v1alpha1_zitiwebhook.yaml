@@ -6,14 +6,16 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: zitiwebhook-sample
   namespace: ziti
-# spec:
+spec:
   # name: zitiwebhook-sample
   # zitiControllerName: ziticontroller-sample
-  # deploymentSpec:
+  deploymentSpec:
+    image: ziti-k8s-agent
+    imageVersion: local
     # env:
     #   # zitiCtrlMgmtApi: https://8ed15bea-5603-485e-8579-a2971d2da684.production.netfoundry.io:443/edge/management/v1
       # sidecarImageVersion: 1.4.2
-  # #   logLevel: 4
+    logLevel: 4
   #   replicas: 1
 
   # mutatingWebhookSpec:
