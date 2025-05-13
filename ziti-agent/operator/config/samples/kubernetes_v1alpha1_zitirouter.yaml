@@ -6,4 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: zitirouter-sample
 spec:
-  # TODO(user): Add fields here
+  deployment:
+    replicas: 2
+    container:
+      name: ziti-router
+      image: docker.io/openziti/ziti-router:1.2.2

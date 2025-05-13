@@ -80,17 +80,19 @@ type RouterDeploymentSpec struct {
 	// +kubebuilder:default={}
 	SecurityContext corev1.PodSecurityContext `json:"securityContext,omitempty"`
 	// +kubebuilder:default=30
-	TerminationGracePeriodSeconds int64                     `json:"terminationGracePeriodSeconds,omitempty"`
-	Volumes                       []corev1.Volume           `json:"volumes,omitempty"`
-	Strategy                      appsv1.DeploymentStrategy `json:"strategy,omitempty"`
-	// Progress Deadline
-	// +kubebuilder:default:=600
+	TerminationGracePeriodSeconds int64                            `json:"terminationGracePeriodSeconds,omitempty"`
+	Volumes                       []corev1.Volume                  `json:"volumes,omitempty"`
+	UpdateStrategy                appsv1.StatefulSetUpdateStrategy `json:"strategy,omitempty"`
+	// Minimum number of seconds for which a newly created pod should be ready
+	// +kubebuilder:default:=10
 	// +kubebuilder:validation:Minimum=0
-	ProgressDeadlineSeconds int32 `json:"progressDeadlineSeconds,omitempty"`
+	MinReadySeconds int32 `json:"progressDeadlineSeconds,omitempty"`
 	// Revision History Limit
 	// +kubebuilder:default:=10
 	// +kubebuilder:validation:Minimum=0
-	RevisionHistoryLimit int32 `json:"revisionHistoryLimit,omitempty"`
+	RevisionHistoryLimit int32                       `json:"revisionHistoryLimit,omitempty"`
+	StorageClassName     string                      `json:"storageClassName,omitempty"`
+	VolumeMode           corev1.PersistentVolumeMode `json:"volumeMode,omitempty"`
 	// Log Verbose Level
 	// +kubebuilder:default:=2
 	// +kubebuilder:validation:Minimum=0
@@ -495,7 +497,7 @@ func (r *ZitiRouter) GetDefaults() *ZitiRouterSpec {
 			TerminationGracePeriodSeconds: 30,
 			Volumes: []corev1.Volume{
 				{
-					Name: "config-data",
+					Name: r.Name,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: r.Name,
@@ -514,10 +516,12 @@ func (r *ZitiRouter) GetDefaults() *ZitiRouterSpec {
 					},
 				},
 			},
-			Strategy:                r.GetDefaultStrategy(),
-			ProgressDeadlineSeconds: 600,
-			RevisionHistoryLimit:    10,
-			LogLevel:                2,
+			UpdateStrategy:       r.GetDefaultStrategy(),
+			MinReadySeconds:      10,
+			RevisionHistoryLimit: 10,
+			StorageClassName:     "standard",
+			VolumeMode:           corev1.PersistentVolumeFilesystem,
+			LogLevel:             2,
 		},
 	}
 }
@@ -612,27 +616,24 @@ func (r *ZitiRouter) GetDefaultContainer() corev1.Container {
 		TerminationMessagePolicy: "File",
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      "config-data",
+				Name:      r.Name,
 				MountPath: "/etc/ziti/config",
 			},
 			{
 				Name:      "ziti-router-config",
-				MountPath: "/etc/ziti/config/ziti-router.yaml",
-				SubPath:   "ziti-router.yaml",
+				MountPath: "/etc/ziti/config/" + r.GetDefaultConfigMapKey(),
+				SubPath:   r.GetDefaultConfigMapKey(),
 			},
 		},
 	}
 }
 
-func (r *ZitiRouter) GetDefaultStrategy() appsv1.DeploymentStrategy {
-	return appsv1.DeploymentStrategy{
-		Type: appsv1.RollingUpdateDeploymentStrategyType,
-		RollingUpdate: &appsv1.RollingUpdateDeployment{
+func (r *ZitiRouter) GetDefaultStrategy() appsv1.StatefulSetUpdateStrategy {
+	return appsv1.StatefulSetUpdateStrategy{
+		Type: appsv1.RollingUpdateStatefulSetStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateStatefulSetStrategy{
+			Partition: &[]int32{0}[0],
 			MaxUnavailable: &intstr.IntOrString{
-				Type:   intstr.String,
-				StrVal: "25%",
-			},
-			MaxSurge: &intstr.IntOrString{
 				Type:   intstr.String,
 				StrVal: "25%",
 			},
@@ -673,6 +674,14 @@ func (r *ZitiRouter) GetDefaultServiceName() string {
 	return r.Name + "-service"
 }
 
+func (r *ZitiRouter) GetDefaultServicePort() int32 {
+	return 443
+}
+
+func (r *ZitiRouter) GetDefaultClusterDomain() string {
+	return "cluster.local"
+}
+
 func (r *ZitiRouter) GetDefaultConfigMapName() string {
 	return r.Name + "-config"
 }
@@ -683,9 +692,8 @@ func (r *ZitiRouter) GetDefaultConfigMapKey() string {
 
 func (r *ZitiRouter) GetDefaultConfigMapData() map[string]string {
 
-	edgeAddress := fmt.Sprintf("%s-service.%s.svc", r.ObjectMeta.Name, r.Namespace)
-	configTemplate := `
-v: 3
+	edgeAddress := fmt.Sprintf("%s-service.%s.svc.%s", r.ObjectMeta.Name, r.Namespace, r.GetDefaultClusterDomain())
+	configTemplate := `v: 3
 identity:
   cert: /etc/ziti/config/%s.cert
   server_cert: /etc/ziti/config/%s.server.chain.cert
@@ -701,9 +709,9 @@ link:
 
 listeners:
   - binding: edge
-    address: tls:0.0.0.0:9433
+    address: tls:0.0.0.0:%d
     options:
-      advertise: %s:443
+      advertise: %s:%d
       connectTimeoutMs: 5000
       getSessionTimeout: 60s
 
@@ -738,7 +746,9 @@ web:
 		r.ObjectMeta.Name,
 		r.ObjectMeta.Name,
 		r.Spec.Config.Ctrl.Endpoint,
+		r.Spec.Deployment.Container.Ports[0].ContainerPort,
 		edgeAddress,
+		r.GetDefaultServicePort(),
 		edgeAddress,
 	)
 	return map[string]string{

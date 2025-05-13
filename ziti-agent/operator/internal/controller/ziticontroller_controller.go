@@ -22,6 +22,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -43,15 +44,15 @@ import (
 // ZitiControllerReconciler reconciles a ZitiController object
 type ZitiControllerReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	ZitiControllerChan chan kubernetesv1alpha1.ZitiController
-	channelChecked     bool
+	Scheme                *runtime.Scheme
+	WebhookControllerChan chan<- *kubernetesv1alpha1.ZitiController
+	RouterControllerChan  chan<- *kubernetesv1alpha1.ZitiController
+	channelChecked        bool
 }
 
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=ziticontrollers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=ziticontrollers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=ziticontrollers/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -72,7 +73,7 @@ func (r *ZitiControllerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Deep copy the fetched resource
-	// existingZitiController := ziticontroller.DeepCopy()
+	existingZitiController := ziticontroller.DeepCopy()
 
 	foundAdminSecret := &corev1.Secret{}
 	if err := r.Get(ctx, client.ObjectKey{
@@ -96,23 +97,32 @@ func (r *ZitiControllerReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// // Determine if the spec has changed
-	// specChanged := !reflect.DeepEqual(existingZitiController.Spec, ziticontroller.Spec)
+	specChanged := !reflect.DeepEqual(existingZitiController.Spec, ziticontroller.Spec)
 
-	// // Check if the channel is empty only on the first access
-	// if !r.channelChecked {
-	select {
-	case <-r.ZitiControllerChan:
-		log.V(2).Info("ZitiController channel not empty on first access")
-	default:
-		r.ZitiControllerChan <- *ziticontroller
-		log.V(2).Info("ZitiController channel is empty on first access and written to")
+	// Check if the channel is empty only on the first access
+	if !r.channelChecked {
+		select {
+		case r.WebhookControllerChan <- ziticontroller:
+			log.V(2).Info("ZitiController spec changed, sending update to channel")
+		default:
+			log.V(2).Info("ZitiController channel is empty on first access and written to")
+		}
+
+		select {
+		case r.RouterControllerChan <- ziticontroller:
+			log.V(2).Info("ZitiController spec changed, sending update to channel")
+		default:
+			log.V(2).Info("ZitiController channel is empty on first access and written to")
+		}
+		r.channelChecked = true
 	}
-	// 	r.channelChecked = true
-	// }
-	// if specChanged {
-	// 	r.ZitiControllerChan <- *ziticontroller
-	// 	log.V(2).Info("ZitiController spec changed, sending update to channel")
-	// }
+	if specChanged {
+		r.WebhookControllerChan <- ziticontroller
+		log.V(2).Info("ZitiController spec changed, sending update to webhook channel")
+
+		r.RouterControllerChan <- ziticontroller
+		log.V(2).Info("ZitiController spec changed, sending update to router channel")
+	}
 
 	log.V(2).Info("ZitiController Reconciliation finished")
 	return ctrl.Result{RequeueAfter: time.Minute}, nil

@@ -63,7 +63,8 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	zitiControllerChan := make(chan kubernetesv1alpha1.ZitiController, 10) // Buffered channel
+	zitiControllerToWebhookChan := make(chan *kubernetesv1alpha1.ZitiController, 10) // Buffered
+	zitiControllerToRouterChan := make(chan *kubernetesv1alpha1.ZitiController, 10)  // Buffered
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -153,7 +154,7 @@ func main() {
 	if err = (&controller.ZitiWebhookReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
-		ZitiControllerChan: zitiControllerChan,
+		ZitiControllerChan: zitiControllerToWebhookChan,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ZitiWebhook")
 		os.Exit(1)
@@ -161,15 +162,16 @@ func main() {
 	if err = (&controller.ZitiRouterReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
-		ZitiControllerChan: zitiControllerChan,
+		ZitiControllerChan: zitiControllerToRouterChan,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ZitiRouter")
 		os.Exit(1)
 	}
 	if err = (&controller.ZitiControllerReconciler{
-		Client:             mgr.GetClient(),
-		Scheme:             mgr.GetScheme(),
-		ZitiControllerChan: zitiControllerChan,
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		WebhookControllerChan: zitiControllerToWebhookChan,
+		RouterControllerChan:  zitiControllerToRouterChan,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ZitiController")
 		os.Exit(1)
