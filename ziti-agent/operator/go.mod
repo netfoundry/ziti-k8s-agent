@@ -7,8 +7,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/onsi/ginkgo/v2 v2.21.0
 	github.com/onsi/gomega v1.35.1
-	github.com/openziti/channel/v4 v4.0.6
-	github.com/openziti/identity v1.0.101
+	github.com/openziti/edge-api v0.26.42
 	github.com/openziti/sdk-golang v0.25.1
 	k8s.io/api v0.32.3
 	k8s.io/apimachinery v0.32.3
@@ -50,7 +49,6 @@ require (
 	github.com/go-resty/resty/v2 v2.16.5 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/cel-go v0.22.1 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
@@ -84,8 +82,8 @@ require (
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
 	github.com/openziti/channel/v3 v3.0.39 // indirect
-	github.com/openziti/edge-api v0.26.42 // indirect
 	github.com/openziti/foundation/v2 v2.0.59 // indirect
+	github.com/openziti/identity v1.0.101 // indirect
 	github.com/openziti/metrics v1.3.0 // indirect
 	github.com/openziti/secretstream v0.1.32 // indirect
 	github.com/openziti/transport/v2 v2.0.168 // indirect

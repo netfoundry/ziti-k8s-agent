@@ -1,5 +1,10 @@
 # Image URL to use all building/pushing image targets
-IMG ?= ziti-operator:local
+# Image tag, default to 'latest' if not specified
+IMG_TAG ?= latest
+# Set to empty string to use the default repository
+IMG_REPO ?= openziti/ziti-operator
+IMG ?= $(IMG_REPO):$(IMG_TAG) # Modify IMG to use the IMG_TAG
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
 

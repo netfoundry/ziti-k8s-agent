@@ -10,8 +10,8 @@ spec:
   # name: zitiwebhook-sample
   # zitiControllerName: ziticontroller-sample
   deploymentSpec:
-    image: ziti-k8s-agent
-    imageVersion: local
+    image: elblag91/ziti-k8s-agent
+    imageVersion: 0.3.8
     # env:
     #   # zitiCtrlMgmtApi: https://8ed15bea-5603-485e-8579-a2971d2da684.production.netfoundry.io:443/edge/management/v1
       # sidecarImageVersion: 1.4.2

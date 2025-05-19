@@ -53,6 +53,7 @@ type ZitiControllerReconciler struct {
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=ziticontrollers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=ziticontrollers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=ziticontrollers/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

@@ -260,7 +260,7 @@ type DeploymentEnvVars struct {
 type ClusterRoleSpec struct {
 	// Cluster Role Rules
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:default:={{"apiGroups":{"*"},"resources":{"services","namespaces"},"verbs":{"get","list","watch"}}}
+	// +kubebuilder:default:={{"apiGroups":{""},"resources":{"services","namespaces"},"verbs":{"get","list","watch"}}}
 	Rules []rbacv1.PolicyRule `json:"rules,omitempty"`
 }
 
@@ -379,7 +379,7 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 							admissionregistrationv1.Delete,
 						},
 						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"*"},
+							APIGroups:   []string{""},
 							APIVersions: []string{"v1", "v1beta1"},
 							Resources:   []string{"pods"},
 							Scope:       &scopeAll,
@@ -414,7 +414,7 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 							admissionregistrationv1.Delete,
 						},
 						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"*"},
+							APIGroups:   []string{""},
 							APIVersions: []string{"v1", "v1beta1"},
 							Resources:   []string{"pods"},
 							Scope:       &scopeAll,
@@ -435,7 +435,7 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 		ClusterRoleSpec: ClusterRoleSpec{
 			Rules: []rbacv1.PolicyRule{
 				{
-					APIGroups: []string{"*"},
+					APIGroups: []string{""},
 					Resources: []string{"services", "namespaces"},
 					Verbs:     []string{"get", "list", "watch"},
 				},

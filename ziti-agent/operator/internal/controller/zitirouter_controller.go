@@ -47,14 +47,17 @@ type ZitiRouterReconciler struct {
 	CachedZitiController *kubernetesv1alpha1.ZitiController
 }
 
-const (
-	orphanPvcAnnotationPrefix    = "zitirouter.kubernetes.openziti.io/"
-	orphanPvcTimestampAnnotation = orphanPvcAnnotationPrefix + "orphaned-since"
-)
+// const (
+// 	orphanPvcAnnotationPrefix    = "zitirouter.kubernetes.openziti.io/"
+// 	orphanPvcTimestampAnnotation = orphanPvcAnnotationPrefix + "orphaned-since"
+// )
 
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitirouters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitirouters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubernetes.openziti.io,resources=zitirouters/finalizers,verbs=update
+// +kubebuilder:rbac:groups="apps",resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -390,7 +393,7 @@ func (r *ZitiRouterReconciler) getDesiredStateStatefulSetConfiguration(ctx conte
 					DNSPolicy:                     zitirouter.Spec.Deployment.DNSPolicy,
 					SchedulerName:                 zitirouter.Spec.Deployment.SchedulerName,
 					RestartPolicy:                 zitirouter.Spec.Deployment.RestartPolicy,
-					SecurityContext:               &corev1.PodSecurityContext{},
+					SecurityContext:               &zitirouter.Spec.Deployment.SecurityContext,
 					TerminationGracePeriodSeconds: &zitirouter.Spec.Deployment.TerminationGracePeriodSeconds,
 					Volumes:                       zitirouter.Spec.Deployment.Volumes,
 				},

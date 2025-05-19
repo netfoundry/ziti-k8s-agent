@@ -406,6 +406,16 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, 
 			"127.0.0.1",
 			zh.Config.ResolverIp,
 		},
+		Options: []corev1.PodDNSConfigOption{
+			{
+				Name:  "ndots",
+				Value: &[]string{"5"}[0],
+			},
+			{
+				Name:  "edns0",
+				Value: &[]string{"true"}[0],
+			},
+		},
 	}
 
 	if len(searchDomains) > 0 {
