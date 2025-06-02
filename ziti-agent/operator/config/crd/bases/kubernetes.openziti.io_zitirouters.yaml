@@ -14,7 +14,19 @@ spec:
     singular: zitirouter
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: The number of desired replicas
+      jsonPath: .spec.deployment.replicas
+      name: Replicas
+      type: integer
+    - description: The number of ready replicas
+      jsonPath: .status.replicas
+      name: Ready
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: ZitiRouter is the Schema for the zitirouters API
@@ -4456,9 +4468,20 @@ spec:
             type: object
           status:
             description: ZitiRouterStatus defines the observed state of ZitiRouter
+            properties:
+              replicas:
+                description: |-
+                  INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+                  Important: Run "make" to regenerate code after modifying this file
+                format: int32
+                type: integer
             type: object
         type: object
     served: true
     storage: true
     subresources:
+      scale:
+        labelSelectorPath: .status.selector
+        specReplicasPath: .spec.deployment.replicas
+        statusReplicasPath: .status.replicas
       status: {}

@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: elblag91/ziti-operator
-  newTag: 0.1.6
+  newTag: 0.1.4

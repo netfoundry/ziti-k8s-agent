@@ -651,6 +651,9 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.IssuerConditions)
 		zitiwebhook.Status.CertificateConditions = utils.ConvertCertificateConditions(actualStateWebhookCert.Status.Conditions)
 		log.V(5).Info("ZitiWebhook Conditions", "Conditions", zitiwebhook.Status.CertificateConditions)
+		zitiwebhook.Status.Replicas = actualStateWebhookDeployment.Status.ReadyReplicas
+		log.V(5).Info("ZitiWebhook Ready Replicas", "Ready Replicas", zitiwebhook.Status.Replicas)
+
 		// Attempt to patch the status
 		if err := r.Status().Patch(ctx, zitiwebhook, client.MergeFrom(existing)); err != nil {
 			log.Error(err, "Failed to patch ZitiWebhook status")

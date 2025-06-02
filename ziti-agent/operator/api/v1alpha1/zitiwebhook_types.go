@@ -260,7 +260,7 @@ type DeploymentEnvVars struct {
 type ClusterRoleSpec struct {
 	// Cluster Role Rules
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:default:={{"apiGroups":{""},"resources":{"services","namespaces"},"verbs":{"get","list","watch"}}}
+	// +kubebuilder:default:={{"apiGroups":{""},"resources":{"services","namespaces"},"verbs":{"get","list","watch"}},{"apiGroups":{""},"resources":{"persistentvolumeclaims"},"verbs":{"get","delete"}}}
 	Rules []rbacv1.PolicyRule `json:"rules,omitempty"`
 }
 
@@ -280,6 +280,7 @@ type ZitiWebhookStatus struct {
 	// Conditions is a list of conditions that describe the ZitiWebhook Status
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	Ready      bool               `json:"ready,omitempty"`
+	Replicas   int32              `json:"replicas,omitempty"`
 
 	// Conditions is a list of conditions that describe the ZitiWebhook Deployment Status
 	DeploymentConditions []appsv1.DeploymentCondition `json:"deploymentConditions,omitempty"`
@@ -293,7 +294,10 @@ type ZitiWebhookStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-
+// +kubebuilder:subresource:scale:specpath=.spec.deploymentSpec.replicas,statuspath=.status.replicas,selectorpath=.status.selector
+// +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".spec.deploymentSpec.replicas",description="The number of desired replicas"
+// +kubebuilder:printcolumn:name="Ready",type="integer",JSONPath=".status.replicas",description="The number of ready replicas"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // ZitiWebhook is the Schema for the zitiwebhooks API
 type ZitiWebhook struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -331,7 +335,7 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 			Organizations: []string{"netfoundry"},
 		},
 		DeploymentSpec: DeploymentSpec{
-			Replicas:        1,
+			Replicas:        2,
 			Image:           "netfoundry/ziti-k8s-agent",
 			ImageVersion:    "latest",
 			ImagePullPolicy: "IfNotPresent",
@@ -398,8 +402,8 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 			},
 			{
 				Name:                    "router.ziti.webhook",
-				ObjectSelector:          &metav1.LabelSelector{},
-				NamespaceSelector:       &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system"}}, {Key: "router.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}}}},
+				ObjectSelector:          &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "router.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}}}},
+				NamespaceSelector:       &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system"}}}},
 				SideEffects:             &sideEffectClassNone,
 				FailurePolicy:           &failurePolicyFail,
 				TimeoutSeconds:          &[]int32{30}[0],
@@ -438,6 +442,11 @@ func (z *ZitiWebhook) GetDefaults() *ZitiWebhookSpec {
 					APIGroups: []string{""},
 					Resources: []string{"services", "namespaces"},
 					Verbs:     []string{"get", "list", "watch"},
+				},
+				{
+					APIGroups: []string{""},
+					Resources: []string{"persistentvolumeclaims"},
+					Verbs:     []string{"get", "delete"},
 				},
 			},
 		},

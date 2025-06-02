@@ -25,6 +25,7 @@ var (
 	isNotTrue    bool  = false
 	isPrivileged bool  = false
 	jsonPatch    []JsonPatchEntry
+	pvc          *corev1.PersistentVolumeClaim
 )
 
 const (
@@ -60,6 +61,8 @@ type clusterClient struct {
 type clusterClientIntf interface {
 	getClusterService(ctx context.Context, namespace string, name string, opts metav1.GetOptions) (*corev1.Service, error)
 	findNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error)
+	getPvcByOption(ctx context.Context, namespace string, name string, opts metav1.GetOptions) (*corev1.PersistentVolumeClaim, error)
+	deletePvc(ctx context.Context, namespace string, name string) error
 }
 
 type zitiClient struct {
@@ -493,6 +496,19 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 			return failureResponse(response, err)
 		}
 
+		if pvc, err = zh.KC.getPvcByOption(ctx, pod.Namespace, pod.Labels[labelApp]+"-"+pod.Name, metav1.GetOptions{}); err != nil {
+			klog.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err)
+			return failureResponse(response, fmt.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err))
+		}
+
+		if pvc != nil && pvc.Name != "" {
+			if err := zh.KC.deletePvc(ctx, pod.Namespace, pvc.Name); err != nil {
+				klog.Errorf("failed to delete PVC %s for router %s: %v", pvc.Name, pod.Spec.Containers[0].Env[7].Value, err)
+				return failureResponse(response, fmt.Errorf("failed to delete PVC %s for router %s: %v", pvc.Name, pod.Spec.Containers[0].Env[7].Value, err))
+			}
+			klog.V(3).Infof("deleted PVC %s for router %s", pvc.Name, pod.Spec.Containers[0].Env[7].Value)
+		}
+
 	} else {
 
 		// Attempt to find a sidecar container identity first.
@@ -560,6 +576,14 @@ func (cc *clusterClient) findNamespaceByOption(ctx context.Context, name string,
 
 func (cc *clusterClient) getClusterService(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.Service, error) {
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+func (cc *clusterClient) getPvcByOption(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.PersistentVolumeClaim, error) {
+	return cc.client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+func (cc *clusterClient) deletePvc(ctx context.Context, namespace string, name string) error {
+	return cc.client.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
 // create a ziti identity with a conventional name from the prefix, pod metadta, and admission request uid

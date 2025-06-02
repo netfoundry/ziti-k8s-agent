@@ -6,6 +6,6 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: zitirouter-sample
   namespace: ziti-router
-spec:
-  deployment:
-    replicas: 2
+# spec:
+#   deployment:
+#     replicas: 2

@@ -309,6 +309,27 @@ func (r *ZitiRouterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
+	// Re-fetch the ZitiRouter object before updating the status
+	if err := r.Get(ctx, req.NamespacedName, zitirouter); err == nil {
+		// Create a copy *before* modifying the status
+		existing := zitirouter.DeepCopy()
+		// Update the status
+		// zitirouter.Status.DeploymentConditions = utils.ConvertDeploymentConditions(actualStaterouterDeployment.Status.Conditions)
+		// log.V(5).Info("Zitirouter Conditions", "Conditions", zitirouter.Status.DeploymentConditions)
+		zitirouter.Status.Replicas = actualStateRouterStatefulSet.Status.ReadyReplicas
+		log.V(5).Info("Zitirouter Ready Replicas", "Ready Replicas", zitirouter.Status.Replicas)
+
+		// Attempt to patch the status
+		if err := r.Status().Patch(ctx, zitirouter, client.MergeFrom(existing)); err != nil {
+			log.Error(err, "Failed to patch Zitirouter status")
+			r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to update Zitirouter status")
+			return ctrl.Result{}, err
+		}
+	} else {
+		r.Recorder.Event(zitirouter, corev1.EventTypeWarning, "Failed", "Failed to get Zitirouter")
+		return ctrl.Result{}, err
+	}
+
 	log.V(2).Info("ZitiRouter Reconciliation complete", "name", req.Name)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }

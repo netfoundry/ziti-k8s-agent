@@ -214,12 +214,17 @@ var _ = Describe("ZitiWebhook Controller", func() {
 				Expect(serviceAccount.ObjectMeta.Labels).To(HaveKeyWithValue("app.kubernetes.io/component", "webhook"))
 
 				By("Verifying the ClusterRole specs")
-				Expect(clusterRole.Rules).To(HaveLen(1))
-				Expect(clusterRole.Rules[0].APIGroups).To(Equal([]string{"*"}))
+				Expect(clusterRole.Rules).To(HaveLen(2))
+				Expect(clusterRole.Rules[0].APIGroups).To(Equal([]string{""}))
 				Expect(clusterRole.Rules[0].Resources).To(Equal([]string{"services", "namespaces"}))
 				Expect(clusterRole.Rules[0].Verbs).To(Equal([]string{"get", "list", "watch"}))
 				Expect(clusterRole.Rules[0].ResourceNames).To(BeEmpty())
 				Expect(clusterRole.Rules[0].NonResourceURLs).To(BeEmpty())
+				Expect(clusterRole.Rules[1].APIGroups).To(Equal([]string{""}))
+				Expect(clusterRole.Rules[1].Resources).To(Equal([]string{"persistentvolumeclaims"}))
+				Expect(clusterRole.Rules[1].Verbs).To(Equal([]string{"get", "delete"}))
+				Expect(clusterRole.Rules[1].ResourceNames).To(BeEmpty())
+				Expect(clusterRole.Rules[1].NonResourceURLs).To(BeEmpty())
 				Expect(clusterRole.ObjectMeta.Labels).To(HaveKeyWithValue("app", zitiwebhook.Spec.Name))
 				Expect(clusterRole.ObjectMeta.Labels).To(HaveKeyWithValue("app.kubernetes.io/name", zitiwebhook.Spec.Name+"-"+zitiwebhook.Namespace))
 				Expect(clusterRole.ObjectMeta.Labels).To(HaveKeyWithValue("app.kubernetes.io/part-of", zitiwebhook.Spec.Name+"-operator"))
@@ -227,7 +232,7 @@ var _ = Describe("ZitiWebhook Controller", func() {
 				Expect(clusterRole.ObjectMeta.Labels).To(HaveKeyWithValue("app.kubernetes.io/component", "webhook"))
 
 				By("Verifying the MutatingWebhookConfiguration specs")
-				Expect(mutatingWebhook.Webhooks).To(HaveLen(1))
+				Expect(mutatingWebhook.Webhooks).To(HaveLen(2))
 				Expect(mutatingWebhook.Webhooks[0].ObjectSelector).To(Equal(&metav1.LabelSelector{}))
 				Expect(mutatingWebhook.Webhooks[0].NamespaceSelector).To(Equal(&metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -242,15 +247,40 @@ var _ = Describe("ZitiWebhook Controller", func() {
 				Expect(mutatingWebhook.Webhooks[0].AdmissionReviewVersions).To(Equal([]string{"v1"}))
 				Expect(mutatingWebhook.Webhooks[0].Rules).To(HaveLen(1))
 				Expect(mutatingWebhook.Webhooks[0].Rules[0].Operations).To(Equal([]admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update, admissionregistrationv1.Delete}))
-				Expect(mutatingWebhook.Webhooks[0].Rules[0].Rule.APIGroups).To(Equal([]string{"*"}))
+				Expect(mutatingWebhook.Webhooks[0].Rules[0].Rule.APIGroups).To(Equal([]string{""}))
 				Expect(mutatingWebhook.Webhooks[0].Rules[0].Rule.APIVersions).To(Equal([]string{"v1", "v1beta1"}))
 				Expect(mutatingWebhook.Webhooks[0].Rules[0].Rule.Resources).To(Equal([]string{"pods"}))
 				Expect(*mutatingWebhook.Webhooks[0].Rules[0].Rule.Scope).To(Equal(admissionregistrationv1.AllScopes))
 				Expect(mutatingWebhook.Webhooks[0].ClientConfig.Service.Name).To(Equal(resourceName + "-service"))
 				Expect(mutatingWebhook.Webhooks[0].ClientConfig.Service.Namespace).To(Equal(resourceNamespace))
 				Expect(*mutatingWebhook.Webhooks[0].ClientConfig.Service.Path).To(Equal("/ziti-tunnel"))
-				Expect(*mutatingWebhook.Webhooks[0].ClientConfig.Service.Port).To(Equal(int32(443)))
+				Expect(*mutatingWebhook.Webhooks[0].ClientConfig.Service.Port).To(Equal(int32(9443)))
 				Expect(mutatingWebhook.Webhooks[0].ClientConfig.CABundle).To(Equal([]byte{}))
+				Expect(mutatingWebhook.Webhooks[1].ObjectSelector).To(Equal(&metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{Key: "router.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}},
+					}}))
+				Expect(mutatingWebhook.Webhooks[1].NamespaceSelector).To(Equal(&metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"kube-system"}},
+					}}))
+				Expect(mutatingWebhook.Webhooks[1].SideEffects).To(Equal(&[]admissionregistrationv1.SideEffectClass{admissionregistrationv1.SideEffectClassNone}[0]))
+				Expect(mutatingWebhook.Webhooks[1].FailurePolicy).To(Equal(&[]admissionregistrationv1.FailurePolicyType{admissionregistrationv1.Fail}[0]))
+				Expect(mutatingWebhook.Webhooks[1].TimeoutSeconds).To(Equal(&[]int32{30}[0]))
+				Expect(mutatingWebhook.Webhooks[1].MatchPolicy).To(Equal(&[]admissionregistrationv1.MatchPolicyType{admissionregistrationv1.Equivalent}[0]))
+				Expect(mutatingWebhook.Webhooks[1].ReinvocationPolicy).To(Equal(&[]admissionregistrationv1.ReinvocationPolicyType{admissionregistrationv1.NeverReinvocationPolicy}[0]))
+				Expect(mutatingWebhook.Webhooks[1].AdmissionReviewVersions).To(Equal([]string{"v1"}))
+				Expect(mutatingWebhook.Webhooks[1].Rules).To(HaveLen(1))
+				Expect(mutatingWebhook.Webhooks[1].Rules[0].Operations).To(Equal([]admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update, admissionregistrationv1.Delete}))
+				Expect(mutatingWebhook.Webhooks[1].Rules[0].Rule.APIGroups).To(Equal([]string{""}))
+				Expect(mutatingWebhook.Webhooks[1].Rules[0].Rule.APIVersions).To(Equal([]string{"v1", "v1beta1"}))
+				Expect(mutatingWebhook.Webhooks[1].Rules[0].Rule.Resources).To(Equal([]string{"pods"}))
+				Expect(*mutatingWebhook.Webhooks[1].Rules[0].Rule.Scope).To(Equal(admissionregistrationv1.AllScopes))
+				Expect(mutatingWebhook.Webhooks[1].ClientConfig.Service.Name).To(Equal(resourceName + "-service"))
+				Expect(mutatingWebhook.Webhooks[1].ClientConfig.Service.Namespace).To(Equal(resourceNamespace))
+				Expect(*mutatingWebhook.Webhooks[1].ClientConfig.Service.Path).To(Equal("/ziti-router"))
+				Expect(*mutatingWebhook.Webhooks[1].ClientConfig.Service.Port).To(Equal(int32(9443)))
+				Expect(mutatingWebhook.Webhooks[1].ClientConfig.CABundle).To(Equal([]byte{}))
 				Expect(mutatingWebhook.ObjectMeta.Labels).To(HaveKeyWithValue("app", zitiwebhook.Spec.Name))
 				Expect(mutatingWebhook.ObjectMeta.Labels).To(HaveKeyWithValue("app.kubernetes.io/name", zitiwebhook.Spec.Name+"-"+zitiwebhook.Namespace))
 				Expect(mutatingWebhook.ObjectMeta.Labels).To(HaveKeyWithValue("app.kubernetes.io/part-of", zitiwebhook.Spec.Name+"-operator"))
@@ -488,7 +518,7 @@ var _ = Describe("ZitiWebhook Controller", func() {
 					ClusterRoleSpec: kubernetesv1alpha1.ClusterRoleSpec{
 						Rules: []rbacv1.PolicyRule{
 							{ // Keep original rule
-								APIGroups: []string{"*"},
+								APIGroups: []string{""},
 								Resources: []string{"services", "namespaces"},
 								Verbs:     []string{"get", "list", "watch"},
 							},
@@ -501,6 +531,7 @@ var _ = Describe("ZitiWebhook Controller", func() {
 					},
 					MutatingWebhookSpec: []admissionregistrationv1.MutatingWebhook{
 						{
+							Name: "tunnel.ziti.webhook",
 							ObjectSelector: &metav1.LabelSelector{ // Change selector
 								MatchLabels: map[string]string{"app": "test"},
 							},
@@ -518,7 +549,7 @@ var _ = Describe("ZitiWebhook Controller", func() {
 								{
 									Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}, // Removed Delete
 									Rule: admissionregistrationv1.Rule{
-										APIGroups:   []string{"*"},
+										APIGroups:   []string{""},
 										APIVersions: []string{"v1"}, // Removed v1beta1
 										Resources:   []string{"pods"},
 										Scope:       &[]admissionregistrationv1.ScopeType{admissionregistrationv1.NamespacedScope}[0], // Changed scope
@@ -530,6 +561,43 @@ var _ = Describe("ZitiWebhook Controller", func() {
 									Name:      resourceName + "-service",
 									Namespace: resourceNamespace,
 									Path:      &[]string{"/ziti-tunnel-v2"}[0],
+									Port:      &[]int32{9443}[0],
+								},
+								CABundle: []byte("notReal"),
+							},
+						},
+						{
+							Name: "router.ziti.webhook",
+							ObjectSelector: &metav1.LabelSelector{ // Change selector
+								MatchLabels: map[string]string{"app": "test"},
+							},
+							NamespaceSelector: &metav1.LabelSelector{ // Change selector
+								MatchExpressions: []metav1.LabelSelectorRequirement{
+									{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"cert-manager"}}, // Add cert-manager
+									{Key: "router.openziti.io/enabled", Operator: metav1.LabelSelectorOpIn, Values: []string{"true", "false"}},    // Add cert-manager
+								}},
+							SideEffects:             &sideEffectClass,
+							FailurePolicy:           &failurePolicy,
+							TimeoutSeconds:          &timeoutSeconds,
+							MatchPolicy:             &matchPolicy,
+							ReinvocationPolicy:      &reinvocationPolicy,
+							AdmissionReviewVersions: []string{"v1", "v1beta1"}, // Add v1beta1
+							Rules: []admissionregistrationv1.RuleWithOperations{ // Change rules
+								{
+									Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}, // Removed Delete
+									Rule: admissionregistrationv1.Rule{
+										APIGroups:   []string{""},
+										APIVersions: []string{"v1"}, // Removed v1beta1
+										Resources:   []string{"pods"},
+										Scope:       &[]admissionregistrationv1.ScopeType{admissionregistrationv1.NamespacedScope}[0], // Changed scope
+									},
+								},
+							},
+							ClientConfig: admissionregistrationv1.WebhookClientConfig{
+								Service: &admissionregistrationv1.ServiceReference{
+									Name:      resourceName + "-service",
+									Namespace: resourceNamespace,
+									Path:      &[]string{"/ziti-router-v2"}[0],
 									Port:      &[]int32{9443}[0],
 								},
 								CABundle: []byte("notReal"),
@@ -608,7 +676,7 @@ var _ = Describe("ZitiWebhook Controller", func() {
 
 				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: resourceName + "-cluster-role"}, clusterRole)).To(Succeed())
 				Expect(clusterRole.Rules).To(HaveLen(2))
-				Expect(clusterRole.Rules[0].APIGroups).To(Equal([]string{"*"}))
+				Expect(clusterRole.Rules[0].APIGroups).To(Equal([]string{""}))
 				Expect(clusterRole.Rules[0].Resources).To(Equal([]string{"services", "namespaces"}))
 				Expect(clusterRole.Rules[0].Verbs).To(Equal([]string{"get", "list", "watch"}))
 				Expect(clusterRole.Rules[0].ResourceNames).To(BeEmpty())
@@ -625,7 +693,8 @@ var _ = Describe("ZitiWebhook Controller", func() {
 				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: resourceName + "-cluster-role-binding"}, clusterRoleBinding)).To(Succeed())
 
 				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: resourceName + "-mutating-webhook-configuration"}, mutatingWebhook)).To(Succeed())
-				Expect(mutatingWebhook.Webhooks).To(HaveLen(1))
+				Expect(mutatingWebhook.Webhooks).To(HaveLen(2))
+				Expect(mutatingWebhook.Webhooks[0].Name).To(Equal("tunnel.ziti.webhook"))
 				Expect(mutatingWebhook.Webhooks[0].ObjectSelector.MatchLabels).To(HaveKeyWithValue("app", "test"))
 				Expect(mutatingWebhook.Webhooks[0].NamespaceSelector.MatchExpressions[0].Values).To(ContainElement("cert-manager"))
 				Expect(mutatingWebhook.Webhooks[0].SideEffects).To(Equal(&sideEffectClass))
@@ -638,6 +707,21 @@ var _ = Describe("ZitiWebhook Controller", func() {
 				Expect(*mutatingWebhook.Webhooks[0].Rules[0].Rule.Scope).To(Equal(admissionregistrationv1.NamespacedScope))
 				Expect(*mutatingWebhook.Webhooks[0].ClientConfig.Service.Path).To(Equal("/ziti-tunnel-v2"))
 				Expect(mutatingWebhook.Webhooks[0].ClientConfig.Service.Port).To(Equal(&[]int32{9443}[0]))
+				Expect(mutatingWebhook.Webhooks[1].Name).To(Equal("router.ziti.webhook"))
+				Expect(mutatingWebhook.Webhooks[1].ObjectSelector.MatchLabels).To(HaveKeyWithValue("app", "test"))
+				Expect(mutatingWebhook.Webhooks[1].NamespaceSelector.MatchExpressions[0].Values).To(ContainElement("cert-manager"))
+				Expect(mutatingWebhook.Webhooks[1].NamespaceSelector.MatchExpressions[1].Values).To(ContainElement("true"))
+				Expect(mutatingWebhook.Webhooks[1].NamespaceSelector.MatchExpressions[1].Values).To(ContainElement("false"))
+				Expect(mutatingWebhook.Webhooks[1].SideEffects).To(Equal(&sideEffectClass))
+				Expect(mutatingWebhook.Webhooks[1].FailurePolicy).To(Equal(&failurePolicy))
+				Expect(mutatingWebhook.Webhooks[1].TimeoutSeconds).To(Equal(&timeoutSeconds))
+				Expect(mutatingWebhook.Webhooks[1].MatchPolicy).To(Equal(&matchPolicy))
+				Expect(mutatingWebhook.Webhooks[1].ReinvocationPolicy).To(Equal(&reinvocationPolicy))
+				Expect(mutatingWebhook.Webhooks[1].AdmissionReviewVersions).To(Equal([]string{"v1", "v1beta1"}))
+				Expect(mutatingWebhook.Webhooks[1].Rules[0].Operations).To(Equal([]admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}))
+				Expect(*mutatingWebhook.Webhooks[1].Rules[0].Rule.Scope).To(Equal(admissionregistrationv1.NamespacedScope))
+				Expect(*mutatingWebhook.Webhooks[1].ClientConfig.Service.Path).To(Equal("/ziti-router-v2"))
+				Expect(mutatingWebhook.Webhooks[1].ClientConfig.Service.Port).To(Equal(&[]int32{9443}[0]))
 				// Expect(mutatingWebhook.Webhooks[0].ClientConfig.CABundle).To(Equal([]byte("notReal")))
 				Eventually(fakeRecorder.Events, timeout).Should(Receive(ContainSubstring("Patched MutatingWebhookConfiguration")))
 

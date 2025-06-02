@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,54 +32,134 @@ import (
 )
 
 var _ = Describe("ZitiRouter Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
 
-		ctx := context.Background()
+	const resourceName = "test-resource"
+	const resourceNamespace = "default"
+	// Define constants for Eventually timings
+	const timeout = time.Second * 10
+	const interval = time.Millisecond * 250
+	ctx := context.Background()
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+	typeNamespacedName := types.NamespacedName{
+		Name:      resourceName,
+		Namespace: resourceNamespace,
+	}
+	zitirouter := &kubernetesv1alpha1.ZitiRouter{}
+	controllerReconciler := &ZitiRouterReconciler{}
+	ownerRef := metav1.OwnerReference{}
+
+	BeforeEach(OncePerOrdered, func() {
+
+		// Initialize the reconciler within the BeforeEach where the client is ready
+		controllerReconciler = &ZitiRouterReconciler{
+			Client:   k8sClient,
+			Scheme:   k8sClient.Scheme(),
+			Recorder: fakeRecorder,
 		}
-		zitirouter := &kubernetesv1alpha1.ZitiRouter{}
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind ZitiRouter")
-			err := k8sClient.Get(ctx, typeNamespacedName, zitirouter)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &kubernetesv1alpha1.ZitiRouter{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
+		ownerRef = metav1.OwnerReference{
+			APIVersion:         kubernetesv1alpha1.GroupVersion.String(),
+			Kind:               "ZitiRouter",
+			Name:               resourceName,
+			UID:                zitirouter.UID, // Ensure zitirouter has UID after creation/get
+			Controller:         &[]bool{true}[0],
+			BlockOwnerDeletion: &[]bool{true}[0],
+		}
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &kubernetesv1alpha1.ZitiRouter{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+		By("ensuring resources from previous tests are cleaned up")
+		err := k8sClient.Get(ctx, typeNamespacedName, zitirouter)
+		if err == nil {
+			By("Deleting the existing ZitiRouter resource")
+			Expect(k8sClient.Delete(ctx, zitirouter)).To(Succeed())
+
+			By("Cleaning up the resources created by the previous test using reconcile loop")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
+		}
 
-			By("Cleanup the specific resource instance ZitiRouter")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &ZitiRouterReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+		By("creating the custom resource for the Kind ZitiRouter")
+		zitirouter = &kubernetesv1alpha1.ZitiRouter{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      typeNamespacedName.Name,
+				Namespace: typeNamespacedName.Namespace,
+			},
+			Spec: kubernetesv1alpha1.ZitiRouterSpec{
+				ZitiControllerName: "ziticontroller-sample",
+				Name:               typeNamespacedName.Name,
+			},
+		}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
+		By("Creating the ZitiRouter resource")
+		Expect(k8sClient.Create(ctx, zitirouter)).To(Succeed())
+
+		// Drain events before each test to prevent interference
+		Eventually(fakeRecorder.Events).ShouldNot(Receive())
+	})
+
+	AfterEach(OncePerOrdered, func() {
+		By("Cleanup ZitiRouter if exists")
+		err := k8sClient.Get(ctx, typeNamespacedName, zitirouter)
+		if err == nil {
+			Expect(k8sClient.Delete(ctx, zitirouter)).To(Succeed())
+			// Wait for deletion to complete, including finalizer processing
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, zitirouter)
+				return errors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue()) // Increase timeout for finalizer
+		} else if !errors.IsNotFound(err) {
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		By("Drainging events after each test")
+		Eventually(fakeRecorder.Events).ShouldNot(Receive())
+	})
+
+	Describe("ZitiRouter Controller Creation with defined parameters", Ordered, func() {
+
+		Context("Creating Resources using only defaults", func() {
+
+			It("should successfully reconcile all resources", func() {
+
+				By("Running the reconcile loop")
+				_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+
+				ownerRef.UID = zitirouter.UID // Ensure ownerRef has the correct UID after creation
+
+				// By("Verifying the ZitiRouter resource has the expected owner reference")
+				// Expect(zitirouter.OwnerReferences).To(ContainElement(ownerRef))
+
+				By("Checking if the ZitiRouter resource has been created with the correct spec")
+				Expect(zitirouter.Spec.ZitiControllerName).To(Equal("ziticontroller-sample"))
+				Expect(zitirouter.Spec.Name).To(Equal(resourceName))
 			})
+		})
+	})
+
+	Describe("ZitiRouter Controller Reconciliation", Ordered, func() {
+		It("should reconcile the ZitiRouter resource", func() {
+			By("Reconcile the ZitiRouter resource")
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			By("Checking if the ZitiRouter resource is still present after reconciliation")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, zitirouter)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Describe("ZitiRouter Controller Deletion", Ordered, func() {
+		It("should delete the ZitiRouter resource", func() {
+			By("Deleting the ZitiRouter resource")
+			Expect(k8sClient.Delete(ctx, zitirouter)).To(Succeed())
+
+			By("Checking if the ZitiRouter resource is deleted")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, zitirouter)
+				return errors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
 		})
 	})
 })
