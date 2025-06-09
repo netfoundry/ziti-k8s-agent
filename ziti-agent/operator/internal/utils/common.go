@@ -99,6 +99,25 @@ func MergeSpecs(ctx context.Context, current, desired any) (error, bool) {
 										ok = true
 									}
 								}
+
+								currentSub3Val := currentSub2Val.Elem().Field(k).Addr()
+								desiredSub3Val := desiredSub2Val.Elem().Field(k).Addr()
+
+								if currentSub3Val.Elem().Kind() == reflect.Struct {
+									for l := range currentSub3Val.Elem().NumField() {
+										log.V(5).Info("Setting sub3Fields", "Sub3Field", currentSub3Val.Elem().Type().Field(l).Name, "Value", currentSub3Val.Elem().Field(l).Interface())
+										log.V(5).Info("Setting sub3Fields", "Sub3Field", desiredSub3Val.Elem().Type().Field(l).Name, "Value", desiredSub3Val.Elem().Field(l).Interface())
+										if IsZeroValue(ctx, currentSub3Val.Elem().Field(l)) && !IsZeroValue(ctx, desiredSub3Val.Elem().Field(l)) {
+											if currentSub3Val.Elem().Field(l).CanSet() {
+												currentSub3Val.Elem().Field(l).Set(desiredSub3Val.Elem().Field(l))
+												log.V(4).Info("Setting sub3Fields", "Sub3Field", currentSub3Val.Elem().Type().Field(l).Name, "Value", currentSub3Val.Elem().Field(l).Interface())
+												log.V(4).Info("Setting sub3Fields", "Sub3Field", desiredSub3Val.Elem().Type().Field(l).Name, "Value", desiredSub3Val.Elem().Field(l).Interface())
+												ok = true
+											}
+										}
+									}
+								}
+
 							}
 						}
 					}

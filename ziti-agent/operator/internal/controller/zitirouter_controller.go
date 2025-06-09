@@ -285,6 +285,8 @@ func (r *ZitiRouterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			needsPatch = true
 		}
 
+		// sync PVC Status otherwise, it may always be differnet
+		desiredStateRouterStatefulSet.Spec.VolumeClaimTemplates[0].Status = actualStateRouterStatefulSet.Spec.VolumeClaimTemplates[0].Status
 		if !reflect.DeepEqual(actualStateRouterStatefulSet.Spec, desiredStateRouterStatefulSet.Spec) {
 			log.V(4).Info("Spec differs, preparing patch", "StatefulSet.Spec", actualStateRouterStatefulSet.Spec)
 			log.V(4).Info("Spec differs, preparing patch", "Desired.Spec", desiredStateRouterStatefulSet.Spec)

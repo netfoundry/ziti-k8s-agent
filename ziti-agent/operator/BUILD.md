@@ -32,7 +32,7 @@ make docker-build
 make docker-push
 ```
 
-## Generate the Manifests for CRDs, Roles , Service and Deployment for Operator in dist/ directory
+## Generate the Manifests for CRDs, Roles , Service and Deployment for Operator in `dist/ziti-operator.yaml` directory
 
 ```bash
 make build-installer
