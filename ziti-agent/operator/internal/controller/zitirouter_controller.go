@@ -287,10 +287,17 @@ func (r *ZitiRouterReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		// sync PVC Status otherwise, it may always be differnet
 		desiredStateRouterStatefulSet.Spec.VolumeClaimTemplates[0].Status = actualStateRouterStatefulSet.Spec.VolumeClaimTemplates[0].Status
-		if !reflect.DeepEqual(actualStateRouterStatefulSet.Spec, desiredStateRouterStatefulSet.Spec) {
-			log.V(4).Info("Spec differs, preparing patch", "StatefulSet.Spec", actualStateRouterStatefulSet.Spec)
-			log.V(4).Info("Spec differs, preparing patch", "Desired.Spec", desiredStateRouterStatefulSet.Spec)
-			actualStateRouterStatefulSet.Spec = desiredStateRouterStatefulSet.Spec
+		if !utils.DeepEqualExcludingFields(actualStateRouterStatefulSet.Spec, desiredStateRouterStatefulSet.Spec, "Template") {
+			log.V(4).Info("Spec w/o Template differs, preparing patch", "Current.Spec w/o Template", actualStateRouterStatefulSet.Spec)
+			log.V(4).Info("Spec w/o Template differs, preparing patch", "Desired.Spec w/o Template", desiredStateRouterStatefulSet.Spec)
+			r.copyStatefulSetSpecExcludingTemplate(&actualStateRouterStatefulSet.Spec, &desiredStateRouterStatefulSet.Spec)
+			needsPatch = true
+		}
+
+		if !utils.DeepEqualExcludingFields(actualStateRouterStatefulSet.Spec.Template.Spec, desiredStateRouterStatefulSet.Spec.Template.Spec) {
+			log.V(4).Info("PodSpec differs, preparing patch", "Current.Template.Spec", actualStateRouterStatefulSet.Spec.Template.Spec)
+			log.V(4).Info("PodSpec differs, preparing patch", "Desired.Template.Spec", desiredStateRouterStatefulSet.Spec.Template.Spec)
+			actualStateRouterStatefulSet.Spec.Template.Spec = desiredStateRouterStatefulSet.Spec.Template.Spec
 			needsPatch = true
 		}
 
@@ -402,8 +409,8 @@ func (r *ZitiRouterReconciler) getDesiredStateStatefulSetConfiguration(ctx conte
 			Labels:    zitirouter.Spec.Deployment.Labels,
 		},
 		Spec: appsv1.StatefulSetSpec{
-			Replicas: &zitirouter.Spec.Deployment.Replicas,
-			Selector: &zitirouter.Spec.Deployment.Selector,
+			Replicas: zitirouter.Spec.Deployment.Replicas,
+			Selector: zitirouter.Spec.Deployment.Selector,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      zitirouter.Spec.Deployment.Labels,
@@ -412,12 +419,12 @@ func (r *ZitiRouterReconciler) getDesiredStateStatefulSetConfiguration(ctx conte
 				Spec: corev1.PodSpec{
 					Containers:                    []corev1.Container{zitirouter.Spec.Deployment.Container},
 					HostNetwork:                   zitirouter.Spec.Deployment.HostNetwork,
-					DNSConfig:                     &zitirouter.Spec.Deployment.DNSConfig,
+					DNSConfig:                     zitirouter.Spec.Deployment.DNSConfig,
 					DNSPolicy:                     zitirouter.Spec.Deployment.DNSPolicy,
 					SchedulerName:                 zitirouter.Spec.Deployment.SchedulerName,
 					RestartPolicy:                 zitirouter.Spec.Deployment.RestartPolicy,
-					SecurityContext:               &zitirouter.Spec.Deployment.SecurityContext,
-					TerminationGracePeriodSeconds: &zitirouter.Spec.Deployment.TerminationGracePeriodSeconds,
+					SecurityContext:               zitirouter.Spec.Deployment.SecurityContext,
+					TerminationGracePeriodSeconds: zitirouter.Spec.Deployment.TerminationGracePeriodSeconds,
 					Volumes:                       zitirouter.Spec.Deployment.Volumes,
 				},
 			},
@@ -432,26 +439,35 @@ func (r *ZitiRouterReconciler) getDesiredStateStatefulSetConfiguration(ctx conte
 						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 						Resources: corev1.VolumeResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: *resource.NewQuantity(50*1024*1024, resource.BinarySI),
+								corev1.ResourceStorage: resource.MustParse("50Mi"),
 							},
 						},
-						StorageClassName: &zitirouter.Spec.Deployment.StorageClassName,
-						VolumeMode:       &zitirouter.Spec.Deployment.VolumeMode,
+						StorageClassName: zitirouter.Spec.Deployment.StorageClassName,
+						VolumeMode:       zitirouter.Spec.Deployment.VolumeMode,
 					},
 				},
 			},
-			ServiceName:          zitirouter.Spec.Name + "-service",
-			PodManagementPolicy:  appsv1.ParallelPodManagement,
-			UpdateStrategy:       zitirouter.Spec.Deployment.UpdateStrategy,
-			RevisionHistoryLimit: &zitirouter.Spec.Deployment.RevisionHistoryLimit,
-			MinReadySeconds:      zitirouter.Spec.Deployment.MinReadySeconds,
-			PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
-				WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
-				WhenScaled:  appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
-			},
-			Ordinals: &appsv1.StatefulSetOrdinals{
-				Start: 0,
-			},
+			ServiceName:                          zitirouter.Spec.Name + "-service",
+			PodManagementPolicy:                  appsv1.ParallelPodManagement,
+			UpdateStrategy:                       zitirouter.Spec.Deployment.UpdateStrategy,
+			RevisionHistoryLimit:                 zitirouter.Spec.Deployment.RevisionHistoryLimit,
+			MinReadySeconds:                      zitirouter.Spec.Deployment.MinReadySeconds,
+			PersistentVolumeClaimRetentionPolicy: zitirouter.Spec.Deployment.PersistentVolumeClaimRetentionPolicy,
+			Ordinals:                             zitirouter.Spec.Deployment.Ordinals,
 		},
 	}
+}
+
+func (r *ZitiRouterReconciler) copyStatefulSetSpecExcludingTemplate(dest, src *appsv1.StatefulSetSpec) {
+	dest.Replicas = src.Replicas
+	dest.Selector = src.Selector
+	dest.ServiceName = src.ServiceName
+	dest.PodManagementPolicy = src.PodManagementPolicy
+	dest.UpdateStrategy = src.UpdateStrategy
+	dest.RevisionHistoryLimit = src.RevisionHistoryLimit
+	dest.MinReadySeconds = src.MinReadySeconds
+	dest.VolumeClaimTemplates = src.VolumeClaimTemplates
+	dest.PersistentVolumeClaimRetentionPolicy = src.PersistentVolumeClaimRetentionPolicy
+	dest.Ordinals = src.Ordinals
+	// Template field is intentionally excluded
 }

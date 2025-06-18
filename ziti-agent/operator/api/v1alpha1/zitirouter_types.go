@@ -56,9 +56,9 @@ type ZitiRouterSpec struct {
 
 type RouterDeploymentSpec struct {
 	// +kubebuilder:default=2
-	Replicas int32 `json:"replicas,omitempty"`
+	Replicas *int32 `json:"replicas,omitempty"`
 	// +kubebuilder:default={}
-	Selector metav1.LabelSelector `json:"selector,omitempty"`
+	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 	// +kubebuilder:default={}
 	Labels map[string]string `json:"labels,omitempty"`
 	// +kubebuilder:default={}
@@ -68,7 +68,7 @@ type RouterDeploymentSpec struct {
 	// +kubebuilder:validation:Enum=true;false
 	HostNetwork bool `json:"hostNetwork,omitempty"`
 	// +kubebuilder:default={}
-	DNSConfig corev1.PodDNSConfig `json:"dnsConfig,omitempty"`
+	DNSConfig *corev1.PodDNSConfig `json:"dnsConfig,omitempty"`
 	// +kubebuilder:default=ClusterFirstWithHostNet
 	// +kubebuilder:validation:Enum=ClusterFirst;ClusterFirstWithHostNet;Default
 	DNSPolicy corev1.DNSPolicy `json:"dnsPolicy,omitempty"`
@@ -78,9 +78,9 @@ type RouterDeploymentSpec struct {
 	// +kubebuilder:validation:Enum=Always;OnFailure;Never
 	RestartPolicy corev1.RestartPolicy `json:"restartPolicy,omitempty"`
 	// +kubebuilder:default={}
-	SecurityContext corev1.PodSecurityContext `json:"securityContext,omitempty"`
+	SecurityContext *corev1.PodSecurityContext `json:"securityContext,omitempty"`
 	// +kubebuilder:default=30
-	TerminationGracePeriodSeconds int64                            `json:"terminationGracePeriodSeconds,omitempty"`
+	TerminationGracePeriodSeconds *int64                           `json:"terminationGracePeriodSeconds,omitempty"`
 	Volumes                       []corev1.Volume                  `json:"volumes,omitempty"`
 	UpdateStrategy                appsv1.StatefulSetUpdateStrategy `json:"strategy,omitempty"`
 	// Minimum number of seconds for which a newly created pod should be ready
@@ -90,9 +90,11 @@ type RouterDeploymentSpec struct {
 	// Revision History Limit
 	// +kubebuilder:default:=10
 	// +kubebuilder:validation:Minimum=0
-	RevisionHistoryLimit int32                       `json:"revisionHistoryLimit,omitempty"`
-	StorageClassName     string                      `json:"storageClassName,omitempty"`
-	VolumeMode           corev1.PersistentVolumeMode `json:"volumeMode,omitempty"`
+	RevisionHistoryLimit                 *int32                                                  `json:"revisionHistoryLimit,omitempty"`
+	StorageClassName                     *string                                                 `json:"storageClassName,omitempty"`
+	VolumeMode                           *corev1.PersistentVolumeMode                            `json:"volumeMode,omitempty"`
+	PersistentVolumeClaimRetentionPolicy *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy `json:"persistentVolumeClaimRetentionPolicy,omitempty"`
+	Ordinals                             *appsv1.StatefulSetOrdinals                             `json:"ordinals,omitempty"`
 	// Log Verbose Level
 	// +kubebuilder:default:=2
 	// +kubebuilder:validation:Minimum=0
@@ -483,22 +485,18 @@ func (r *ZitiRouter) GetDefaults() *ZitiRouterSpec {
 		ZitiControllerName: r.Spec.ZitiControllerName,
 		ZitiCtrlMgmtApi:    r.Spec.ZitiCtrlMgmtApi,
 		Deployment: RouterDeploymentSpec{
-			Replicas: 2,
-			Selector: metav1.LabelSelector{
-				MatchLabels: utils.FilterLabels(r.GetDefaultLabels()),
-			},
-			Labels:        r.GetDefaultLabels(),
-			Annotations:   r.GetDefaultAnnotations(),
-			Container:     r.GetDefaultContainer(),
-			HostNetwork:   false,
-			DNSConfig:     corev1.PodDNSConfig{},
-			DNSPolicy:     corev1.DNSClusterFirstWithHostNet,
-			RestartPolicy: corev1.RestartPolicyAlways,
-			SchedulerName: "default-scheduler",
-			SecurityContext: corev1.PodSecurityContext{
-				FSGroup: &[]int64{2171}[0],
-			},
-			TerminationGracePeriodSeconds: 30,
+			Replicas:                      &[]int32{2}[0],
+			Selector:                      r.GetDefaultSelector(),
+			Labels:                        r.GetDefaultLabels(),
+			Annotations:                   r.GetDefaultAnnotations(),
+			Container:                     r.GetDefaultContainer(),
+			HostNetwork:                   false,
+			DNSConfig:                     nil,
+			DNSPolicy:                     corev1.DNSClusterFirstWithHostNet,
+			RestartPolicy:                 corev1.RestartPolicyAlways,
+			SchedulerName:                 "default-scheduler",
+			SecurityContext:               r.GetDefaultSecurityContext(),
+			TerminationGracePeriodSeconds: &[]int64{30}[0],
 			Volumes: []corev1.Volume{
 				{
 					Name: r.Name,
@@ -520,12 +518,14 @@ func (r *ZitiRouter) GetDefaults() *ZitiRouterSpec {
 					},
 				},
 			},
-			UpdateStrategy:       r.GetDefaultStrategy(),
-			MinReadySeconds:      10,
-			RevisionHistoryLimit: 10,
-			StorageClassName:     "standard",
-			VolumeMode:           corev1.PersistentVolumeFilesystem,
-			LogLevel:             2,
+			UpdateStrategy:                       r.GetDefaultStrategy(),
+			MinReadySeconds:                      10,
+			RevisionHistoryLimit:                 &[]int32{10}[0],
+			StorageClassName:                     &[]string{"standard"}[0],
+			VolumeMode:                           &[]corev1.PersistentVolumeMode{"Filesystem"}[0],
+			PersistentVolumeClaimRetentionPolicy: r.GetDefaultPersistentVolumeClaimRetentionPolicy(),
+			Ordinals:                             r.GetDefaultOrdinals(),
+			LogLevel:                             2,
 		},
 	}
 }
@@ -641,6 +641,18 @@ func (r *ZitiRouter) GetDefaultContainer() corev1.Container {
 	}
 }
 
+func (r *ZitiRouter) GetDefaultSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchLabels: utils.FilterLabels(r.GetDefaultLabels()),
+	}
+}
+
+func (r *ZitiRouter) GetDefaultSecurityContext() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{
+		FSGroup: &[]int64{2171}[0],
+	}
+}
+
 func (r *ZitiRouter) GetDefaultStrategy() appsv1.StatefulSetUpdateStrategy {
 	return appsv1.StatefulSetUpdateStrategy{
 		Type: appsv1.RollingUpdateStatefulSetStrategyType,
@@ -650,6 +662,20 @@ func (r *ZitiRouter) GetDefaultStrategy() appsv1.StatefulSetUpdateStrategy {
 	}
 }
 
+func (r *ZitiRouter) GetDefaultPersistentVolumeClaimRetentionPolicy() *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy {
+	return &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+		WhenScaled:  appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+	}
+}
+
+func (r *ZitiRouter) GetDefaultOrdinals() *appsv1.StatefulSetOrdinals {
+	return &appsv1.StatefulSetOrdinals{
+		Start: 0,
+	}
+}
+
+// GetDefaultLabels returns the default labels for the ZitiRouter resource.
 func (r *ZitiRouter) GetDefaultLabels() map[string]string {
 	return map[string]string{
 		"app":                          r.Name,

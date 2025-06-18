@@ -187,7 +187,7 @@ var _ = Describe("ZitiRouter Controller", func() {
 						},
 					},
 					Deployment: kubernetesv1alpha1.RouterDeploymentSpec{
-						Replicas:    1,
+						Replicas:    &[]int32{1}[0],
 						Annotations: map[string]string{"example.com/annotation": "value"},
 						Container: corev1.Container{
 							Image:           "openziti/ziti-router:1.5.4",

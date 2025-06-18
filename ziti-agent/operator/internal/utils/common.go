@@ -29,6 +29,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// DeepEqualExcludingFields compares two structs for deep equality, excluding specified fields.
+// It returns true if the structs are equal except for the excluded fields.
+func DeepEqualExcludingFields(a, b interface{}, excludeFields ...string) bool {
+	va := reflect.ValueOf(a)
+	vb := reflect.ValueOf(b)
+
+	if va.Type() != vb.Type() {
+		return false
+	}
+
+	// Create copies
+	copyA := reflect.New(va.Type()).Elem()
+	copyB := reflect.New(vb.Type()).Elem()
+	copyA.Set(va)
+	copyB.Set(vb)
+
+	// Clear excluded fields
+	for _, field := range excludeFields {
+		if fieldA := copyA.FieldByName(field); fieldA.IsValid() && fieldA.CanSet() {
+			fieldA.Set(reflect.Zero(fieldA.Type()))
+		}
+		if fieldB := copyB.FieldByName(field); fieldB.IsValid() && fieldB.CanSet() {
+			fieldB.Set(reflect.Zero(fieldB.Type()))
+		}
+	}
+
+	return reflect.DeepEqual(copyA.Interface(), copyB.Interface())
+}
+
 func MergeSpecs(ctx context.Context, current, desired any) (error, bool) {
 	log := log.FromContext(ctx)
 	ok := false

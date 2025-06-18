@@ -547,7 +547,7 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// TODO: Handle this case appropriately, maybe return an error or skip comparison
 		}
 
-		if len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks) != 1 || len(desiredStateMutatingWebhookConfiguration.Webhooks) != 1 ||
+		if len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks) == 1 && len(desiredStateMutatingWebhookConfiguration.Webhooks) == 1 &&
 			!reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]) {
 			log.V(4).Info("Webhooks differ, preparing patch", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
 			actualStateMutatingWebhookConfigurationList.Items[0].Webhooks = desiredStateMutatingWebhookConfiguration.Webhooks
