@@ -40,7 +40,7 @@ spec:
             description: ZitiControllerSpec defines the desired state of ZitiController
             properties:
               adminJwt:
-                description: Ziti Admin Idetity Token
+                description: Ziti Admin Identity Token
                 pattern: ^([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_\-\+\/=]*)
                 type: string
               name:

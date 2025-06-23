@@ -446,9 +446,13 @@ type WebOptions struct {
 
 // ZitiRouterStatus defines the observed state of ZitiRouter
 type ZitiRouterStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	Replicas int32 `json:"replicas,omitempty"`
+	// Conditions is a list of conditions that describe the ZitiWebhook Status
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Ready      bool               `json:"ready,omitempty"`
+	Replicas   int32              `json:"replicas,omitempty"`
+
+	// Conditions is a list of conditions that describe the ZitiWebhook Deployment Status
+	DeploymentConditions []appsv1.StatefulSetCondition `json:"deploymentConditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -33,7 +33,7 @@ type ZitiControllerSpec struct {
 	// +kubebuilder:validation:MinLength=10
 	Name string `json:"name"`
 
-	// Ziti Admin Idetity Token
+	// Ziti Admin Identity Token
 	// +kubebuilder:validation:Required
 	//+kubebuilder:validation:Pattern:=`^([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_=]+)\.([a-zA-Z0-9_\-\+\/=]*)`
 	AdminJwt string `json:"adminJwt"`
