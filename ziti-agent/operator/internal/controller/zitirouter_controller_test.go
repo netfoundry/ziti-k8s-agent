@@ -94,6 +94,14 @@ var _ = Describe("ZitiRouter Controller", func() {
 			Spec: kubernetesv1alpha1.ZitiRouterSpec{
 				ZitiControllerName: "ziticontroller-sample",
 				Name:               typeNamespacedName.Name,
+				Deployment: kubernetesv1alpha1.RouterDeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app":                    typeNamespacedName.Name,
+							"app.kubernetes.io/name": typeNamespacedName.Name + "-" + typeNamespacedName.Namespace,
+						},
+					},
+				},
 			},
 		}
 
@@ -187,7 +195,13 @@ var _ = Describe("ZitiRouter Controller", func() {
 						},
 					},
 					Deployment: kubernetesv1alpha1.RouterDeploymentSpec{
-						Replicas:    &[]int32{1}[0],
+						Replicas: &[]int32{1}[0],
+						Selector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app":                    typeNamespacedName.Name,
+								"app.kubernetes.io/name": typeNamespacedName.Name + "-" + typeNamespacedName.Namespace,
+							},
+						},
 						Annotations: map[string]string{"example.com/annotation": "value"},
 						Container: corev1.Container{
 							Image:           "openziti/ziti-router:1.5.4",
