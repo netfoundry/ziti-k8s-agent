@@ -6137,10 +6137,10 @@ spec:
         - --metrics-bind-address=:8443
         - --leader-elect
         - --health-probe-bind-address=:8081
-        - -zap-log-level=4
+        - -zap-log-level=2
         command:
         - /manager
-        image: elblag91/ziti-operator:0.1.11
+        image: netfoundry/ziti-operator:latest
         livenessProbe:
           httpGet:
             path: /healthz

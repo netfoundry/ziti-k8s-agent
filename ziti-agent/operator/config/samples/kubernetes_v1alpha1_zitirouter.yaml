@@ -7,5 +7,4 @@ metadata:
   name: zitirouter-sample
   namespace: ziti-router
 # spec:
-#   deployment:
-#     replicas: 2
+  # kustomize your specs
