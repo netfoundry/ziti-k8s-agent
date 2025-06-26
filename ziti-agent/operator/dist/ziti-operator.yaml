@@ -6140,7 +6140,7 @@ spec:
         - -zap-log-level=4
         command:
         - /manager
-        image: netfoundry/ziti-operator:latest
+        image: elblag91/ziti-operator:0.1.11
         livenessProbe:
           httpGet:
             path: /healthz

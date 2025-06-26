@@ -537,18 +537,18 @@ func (r *ZitiWebhookReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	} else if err == nil {
 		existingWebhookForPatch := actualStateMutatingWebhookConfigurationList.Items[0].DeepCopy()
 		needsPatch := false
-		if len(desiredStateMutatingWebhookConfiguration.Webhooks) > 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks) > 0 {
-			if len(desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle) == 0 && len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle) > 0 {
-				log.V(4).Info("Preserving existing CABundle for MutatingWebhookConfiguration")
-				desiredStateMutatingWebhookConfiguration.Webhooks[0].ClientConfig.CABundle = actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0].ClientConfig.CABundle
+
+		// Preserve the existing CA bundle if the desired one is empty. This is important because cert-manager injects it.
+		for i := range desiredStateMutatingWebhookConfiguration.Webhooks {
+			if i < len(existingWebhookForPatch.Webhooks) {
+				if len(desiredStateMutatingWebhookConfiguration.Webhooks[i].ClientConfig.CABundle) == 0 && len(existingWebhookForPatch.Webhooks[i].ClientConfig.CABundle) > 0 {
+					log.V(4).Info("Preserving existing CABundle for MutatingWebhookConfiguration", "WebhookName", existingWebhookForPatch.Webhooks[i].Name)
+					desiredStateMutatingWebhookConfiguration.Webhooks[i].ClientConfig.CABundle = existingWebhookForPatch.Webhooks[i].ClientConfig.CABundle
+				}
 			}
-		} else {
-			log.V(4).Info("Warning: Webhooks slice is unexpectedly empty for MutatingWebhookConfiguration", "DesiredLen", len(desiredStateMutatingWebhookConfiguration.Webhooks), "ActualLen", len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks))
-			// TODO: Handle this case appropriately, maybe return an error or skip comparison
 		}
 
-		if len(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks) == 1 && len(desiredStateMutatingWebhookConfiguration.Webhooks) == 1 &&
-			!reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks[0], desiredStateMutatingWebhookConfiguration.Webhooks[0]) {
+		if !reflect.DeepEqual(actualStateMutatingWebhookConfigurationList.Items[0].Webhooks, desiredStateMutatingWebhookConfiguration.Webhooks) {
 			log.V(4).Info("Webhooks differ, preparing patch", "MutatingWebhookConfiguration.Name", actualStateMutatingWebhookConfigurationList.Items[0].Name)
 			actualStateMutatingWebhookConfigurationList.Items[0].Webhooks = desiredStateMutatingWebhookConfiguration.Webhooks
 			needsPatch = true
