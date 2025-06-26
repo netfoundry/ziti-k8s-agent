@@ -25,6 +25,7 @@ var (
 	isNotTrue    bool  = false
 	isPrivileged bool  = false
 	jsonPatch    []JsonPatchEntry
+	pvc          *corev1.PersistentVolumeClaim
 )
 
 const (
@@ -60,6 +61,8 @@ type clusterClient struct {
 type clusterClientIntf interface {
 	getClusterService(ctx context.Context, namespace string, name string, opts metav1.GetOptions) (*corev1.Service, error)
 	findNamespaceByOption(ctx context.Context, name string, opts metav1.ListOptions) (bool, error)
+	getPvcByOption(ctx context.Context, namespace string, name string, opts metav1.GetOptions) (*corev1.PersistentVolumeClaim, error)
+	deletePvc(ctx context.Context, namespace string, name string) error
 }
 
 type zitiClient struct {
@@ -406,6 +409,16 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, 
 			"127.0.0.1",
 			zh.Config.ResolverIp,
 		},
+		Options: []corev1.PodDNSConfigOption{
+			{
+				Name:  "ndots",
+				Value: &[]string{"5"}[0],
+			},
+			{
+				Name:  "edns0",
+				Value: &[]string{"true"}[0],
+			},
+		},
 	}
 
 	if len(searchDomains) > 0 {
@@ -418,19 +431,25 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, 
 
 func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
 
+	routerName, err := buildZitiIdentityName(zh.Config.Prefix, &pod.ObjectMeta, uid)
+	if err != nil {
+		return failureResponse(response, err)
+	}
+
 	options := &rest_model_edge.EdgeRouterCreate{
 		AppData:           nil,
 		Cost:              &zh.Config.RouterConfig.Cost,
 		Disabled:          &zh.Config.RouterConfig.Disabled,
 		IsTunnelerEnabled: zh.Config.RouterConfig.IsTunnelerEnabled,
-		Name:              &pod.Name,
+		Name:              &routerName,
+		NoTraversal:       &isNotTrue,
 		RoleAttributes:    &zh.Config.RouterConfig.RoleAttributes,
 		Tags:              nil,
 	}
 
 	_, err = zh.ZC.updateZitiRouter(
 		ctx,
-		pod.Name,
+		routerName,
 		options,
 	)
 	if err != nil {
@@ -439,7 +458,7 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 
 	identityToken, err := zh.ZC.getZitiRouterToken(
 		ctx,
-		pod.Name,
+		routerName,
 	)
 	if err != nil {
 		return failureResponse(response, err)
@@ -447,12 +466,14 @@ func (zh *zitiHandler) handleRouterCreate(ctx context.Context, pod *corev1.Pod, 
 
 	jsonPatch = []JsonPatchEntry{
 		{
-			OP:   "add",
-			Path: "/spec/containers/0/env/-",
-			Value: corev1.EnvVar{
-				Name:  "ZITI_ENROLL_TOKEN",
-				Value: identityToken,
-			},
+			OP:    "replace",
+			Path:  "/spec/containers/0/env/0/value",
+			Value: identityToken,
+		},
+		{
+			OP:    "replace",
+			Path:  "/spec/containers/0/env/7/value",
+			Value: routerName,
 		},
 	}
 
@@ -471,8 +492,21 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 
 	if zh.Config.ZitiType == zitiTypeRouter {
 
-		if err := zh.ZC.deleteZitiRouter(ctx, pod.Name); err != nil {
+		if err := zh.ZC.deleteZitiRouter(ctx, pod.Spec.Containers[0].Env[7].Value); err != nil {
 			return failureResponse(response, err)
+		}
+
+		if pvc, err = zh.KC.getPvcByOption(ctx, pod.Namespace, pod.Labels[labelApp]+"-"+pod.Name, metav1.GetOptions{}); err != nil {
+			klog.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err)
+			return failureResponse(response, fmt.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err))
+		}
+
+		if pvc != nil && pvc.Name != "" {
+			if err := zh.KC.deletePvc(ctx, pod.Namespace, pvc.Name); err != nil {
+				klog.Errorf("failed to delete PVC %s for router %s: %v", pvc.Name, pod.Spec.Containers[0].Env[7].Value, err)
+				return failureResponse(response, fmt.Errorf("failed to delete PVC %s for router %s: %v", pvc.Name, pod.Spec.Containers[0].Env[7].Value, err))
+			}
+			klog.V(3).Infof("deleted PVC %s for router %s", pvc.Name, pod.Spec.Containers[0].Env[7].Value)
 		}
 
 	} else {
@@ -542,6 +576,14 @@ func (cc *clusterClient) findNamespaceByOption(ctx context.Context, name string,
 
 func (cc *clusterClient) getClusterService(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.Service, error) {
 	return cc.client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+func (cc *clusterClient) getPvcByOption(ctx context.Context, namespace string, name string, opt metav1.GetOptions) (*corev1.PersistentVolumeClaim, error) {
+	return cc.client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+func (cc *clusterClient) deletePvc(ctx context.Context, namespace string, name string) error {
+	return cc.client.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
 // create a ziti identity with a conventional name from the prefix, pod metadta, and admission request uid
@@ -701,7 +743,7 @@ func (zc *zitiClient) updateZitiRouter(ctx context.Context, name string, options
 		return nil, err
 	}
 	if len(routerDetails.GetPayload().Data) == 0 {
-		routerDetails, err := zitiedge.CreateEdgeRouter(name, options, zc.client)
+		routerDetails, err := zitiedge.CreateEdgeRouter(options, zc.client)
 		if err != nil {
 			return nil, err
 		}

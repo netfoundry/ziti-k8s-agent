@@ -9,6 +9,7 @@ import (
 	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/openziti/edge-api/rest_management_api_client/identity"
 	rest_model_edge "github.com/openziti/edge-api/rest_model"
+	"github.com/openziti/sdk-golang/ziti"
 	"github.com/openziti/sdk-golang/ziti/enroll"
 	"k8s.io/klog/v2"
 )
@@ -119,6 +120,22 @@ func DeleteIdentity(zId string, edge *rest_management_api_client.ZitiEdgeManagem
 	if err != nil {
 		return err
 	}
-	klog.Infof("Ziti identity '%v' was deleted", zId)
+	klog.V(5).Infof("Ziti identity '%v' was deleted", zId)
 	return nil
+}
+
+func EnrollIdentityWithJwt(jwtToken string) (*ziti.Config, error) {
+	tkn, _, err := enroll.ParseToken(jwtToken)
+	if err != nil {
+		return nil, err
+	}
+	flags := enroll.EnrollmentFlags{
+		Token:  tkn,
+		KeyAlg: "RSA",
+	}
+	zitiCfg, err := enroll.Enroll(flags)
+	if err != nil {
+		return nil, err
+	}
+	return zitiCfg, nil
 }

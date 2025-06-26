@@ -1,0 +1,10 @@
+apiVersion: kubernetes.openziti.io/v1alpha1
+kind: ZitiRouter
+metadata:
+  labels:
+    app.kubernetes.io/name: ziti-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: zitirouter-sample
+  namespace: ziti-router
+# spec:
+  # kustomize your specs

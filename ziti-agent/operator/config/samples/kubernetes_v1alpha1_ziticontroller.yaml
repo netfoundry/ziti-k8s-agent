@@ -1,0 +1,13 @@
+apiVersion: kubernetes.openziti.io/v1alpha1
+kind: ZitiController
+metadata:
+  labels:
+    app.kubernetes.io/name: ziti-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: ziticontroller-sample
+  namespace: ziti
+spec:
+  name: ziticontroller-sample
+  adminJwt: {your token here}
+  zitiCtrlMgmtApi:  {your ziti controller management api here}
+  
