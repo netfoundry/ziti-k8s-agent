@@ -212,13 +212,12 @@ SEL
     pod)
       cat <<SEL
     objectSelector:
-      namespaceSelector:
       matchExpressions:
-      - key: tunnel.openziti.io/enabled
-        operator: In
-        values:
-        - "true"
-        - "false"
+        - key: tunnel.openziti.io/enabled
+          operator: In
+          values:
+            - "true"
+            - "false"
 SEL
     ;;
     *)
