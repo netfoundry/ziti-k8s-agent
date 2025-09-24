@@ -195,6 +195,8 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 			LabelDelValue:   "false",
 			LabelCrValue:    "true",
 			ResolverIp:      clusterDnsServiceIP,
+			DnsUpstreamEnabled: sidecarDnsUpstreamEnabled,
+			Unanswerable:       sidecarDnsUnanswerable,
 			RouterConfig:    routerConfig{},
 		},
 	)
