@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ziti-webhook.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ziti-webhook.labels" . | nindent 4 }}
+    app: ziti-admission-webhook
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ziti-webhook.selectorLabels" . | nindent 6 }}
+      app: ziti-admission-webhook
+  template:
+    metadata:
+      labels:
+        {{- include "ziti-webhook.selectorLabels" . | nindent 8 }}
+        app: ziti-admission-webhook
+    spec:
+      containers:
+        - name: ziti-admission-webhook
+          image: "{{ .Values.deployment.image.repo }}:{{ .Values.deployment.image.tag }}"
+          imagePullPolicy: {{ .Values.deployment.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.server.port }}
+          args:
+            - webhook
+            - --v={{ .Values.server.logLevel }}
+            - --config=/etc/ziti/webhook/config.yaml
+          env:
+            - name: TLS_CERT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ziti-webhook.fullname" . }}-tls
+                  key: tls.crt
+            - name: TLS_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ziti-webhook.fullname" . }}-tls
+                  key: tls.key
+            - name: ZITI_ADMIN_CERT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ziti-webhook.fullname" . }}-identity
+                  key: {{ .Values.identity.certKey }}
+            - name: ZITI_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ziti-webhook.fullname" . }}-identity
+                  key: {{ .Values.identity.keyKey }}
+            - name: ZITI_CTRL_CA_BUNDLE
+              valueFrom:
+                {{- if and .Values.identity.trustBundle.enabled (not .Values.identity.ca) }}
+                configMapKeyRef:
+                  name: {{ .Values.identity.trustBundle.configMapName }}
+                  key: {{ .Values.identity.trustBundle.configMapKey }}
+                {{- else }}
+                secretKeyRef:
+                  name: {{ include "ziti-webhook.fullname" . }}-identity
+                  key: {{ .Values.identity.caKey }}
+                {{- end }}
+          volumeMounts:
+            - name: webhook-config
+              mountPath: /etc/ziti/webhook
+              readOnly: true
+          resources:
+            {{- toYaml .Values.deployment.resources | nindent 12 }}
+      volumes:
+        - name: webhook-config
+          configMap:
+            name: {{ include "ziti-webhook.fullname" . }}-config

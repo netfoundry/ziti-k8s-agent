@@ -1,0 +1,107 @@
+# Default values for ziti-webhook
+# This is a YAML-formatted file.
+
+# Webhook server configuration
+server:
+  port: 9443
+  # Log verbosity level (0=errors only, 1=basic info, 2=detailed info, 3=debug, 4=trace, 5=verbose trace)
+  logLevel: 2
+
+# Ziti controller configuration
+controller:
+  # Management API endpoint (required)
+  mgmtApi: ""
+  # Role key for identity annotations
+  roleKey: "identity.openziti.io/role-attributes"
+
+# Sidecar container configuration
+sidecar:
+  image:
+    repo: "openziti/ziti-tunnel"
+    tag: "latest"
+    pullPolicy: "IfNotPresent"
+  prefix: "zt"
+  identityDir: "/ziti-tunnel"
+  volumeMountName: "ziti-identity"
+  # Cluster DNS resolver IP (auto-discovered if empty)
+  resolverIp: ""
+  # DNS upstream forwarding configuration
+  dnsUpstreamEnabled: true
+  dnsUnanswerable: "refused"
+  # Custom DNS search domains (empty uses cluster defaults)
+  searchDomains: []
+
+# Security configuration
+security:
+  podSecurityContextOverride: false
+
+# Webhook deployment configuration
+deployment:
+  name: "ziti-admission-wh-deployment"
+  image:
+    repo: "docker.io/netfoundry/ziti-k8s-agent"
+    tag: "latest"
+    pullPolicy: "IfNotPresent"
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Service configuration
+service:
+  name: "ziti-admission-service"
+  port: 443
+  targetPort: 9443
+
+# Certificate management (cert-manager)
+certManager:
+  enabled: true
+  issuer:
+    name: "ziti-k8s-agent-selfsigned-ca-issuer"
+  certificate:
+    name: "ziti-admission-cert"
+    secretName: "ziti-webhook-server-cert"
+    duration: "2160h" # 90d
+    renewBefore: "360h" # 15d
+
+# Webhook configuration
+webhook:
+  name: "ziti-tunnel-sidecar"
+  failurePolicy: "Fail"
+  # Webhook selector configuration
+  selectors:
+    # Options: namespace, pod, or both (comma-separated)
+    enabled: "namespace"
+
+# Identity configuration (required)
+identity:
+  # Existing secret configuration (used when cert/key/ca are empty)
+  secretName: "ziti-agent-identity"
+  # Keys in the secret (tls.crt and tls.key are standard, tls.ca is custom)
+  certKey: "tls.crt"
+  keyKey: "tls.key"
+  caKey: "tls.ca"
+  
+  # Create secret from values (when provided, automatically creates secret)
+  # Base64 encoded certificate data - when any of these are provided,
+  # a secret will be created automatically
+  cert: ""
+  key: ""
+  ca: ""
+  
+  # Trust bundle discovery (for same-cluster Ziti Controller)
+  trustBundle:
+    # Enable automatic discovery of Ziti Controller CA bundle from ConfigMap
+    enabled: true
+    # ConfigMap name containing the trust bundle (default matches ziti-controller chart)
+    configMapName: "ziti-controller-ctrl-plane-cas"
+    # Key in the ConfigMap containing the CA bundle
+    configMapKey: "ctrl-plane-cas.crt"
+
+# Cluster DNS configuration
+clusterDns:
+  zone: "cluster.local"
