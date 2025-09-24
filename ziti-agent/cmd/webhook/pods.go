@@ -94,6 +94,8 @@ type zitiConfig struct {
 	ResolverIp      string
 	DnsUpstreamEnabled bool
 	Unanswerable       string
+	SearchDomains      []string
+	PodSecurityOverride bool
 	ZitiType        zitiType
 	AnnotationKey   string
 	RouterConfig    routerConfig
@@ -351,7 +353,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 		},
 	}
 
-	if podSecurityOverride {
+	if zh.Config.PodSecurityOverride {
 		jsonPatch = append(jsonPatch, []JsonPatchEntry{
 			{
 				OP:   "replace",
@@ -436,9 +438,9 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context, podMeta *metav1.ObjectM
 		},
 	}
 
-	if len(searchDomains) > 0 {
-		dnsConfig.Searches = searchDomains
-		klog.V(4).Infof("Using custom search domains: %v", searchDomains)
+	if len(zh.Config.SearchDomains) > 0 {
+		dnsConfig.Searches = zh.Config.SearchDomains
+		klog.V(4).Infof("Using custom search domains: %v", zh.Config.SearchDomains)
 	} else {
 		// Add namespace-specific search domain
 		namespaceDomain := fmt.Sprintf("%s.svc.cluster.local", podMeta.Namespace)
@@ -516,6 +518,7 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 			return failureResponse(response, err)
 		}
 
+		var err error
 		if pvc, err = zh.KC.getPvcByOption(ctx, pod.Namespace, pod.Labels[labelApp]+"-"+pod.Name, metav1.GetOptions{}); err != nil {
 			klog.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err)
 			return failureResponse(response, fmt.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err))

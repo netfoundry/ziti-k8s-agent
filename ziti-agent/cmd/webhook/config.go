@@ -2,194 +2,133 @@ package webhook
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/yaml"
 )
 
-type MissingEnvVarError struct {
-	variable string
+type WebhookConfig struct {
+	Server struct {
+		Port int `yaml:"port"`
+	} `yaml:"server"`
+
+	Controller struct {
+		MgmtAPI string `yaml:"mgmtApi"`
+		RoleKey string `yaml:"roleKey"`
+	} `yaml:"controller"`
+
+	Sidecar struct {
+		Image              string   `yaml:"image"`
+		ImageVersion       string   `yaml:"imageVersion"`
+		ImagePullPolicy    string   `yaml:"imagePullPolicy"`
+		Prefix             string   `yaml:"prefix"`
+		IdentityDir        string   `yaml:"identityDir"`
+		VolumeMountName    string   `yaml:"volumeMountName"`
+		ResolverIP         string   `yaml:"resolverIp"`
+		DnsUpstreamEnabled bool     `yaml:"dnsUpstreamEnabled"`
+		DnsUnanswerable    string   `yaml:"dnsUnanswerable"`
+		SearchDomains      []string `yaml:"searchDomains"`
+	} `yaml:"sidecar"`
+
+	Security struct {
+		PodSecurityContextOverride bool `yaml:"podSecurityContextOverride"`
+	} `yaml:"security"`
 }
 
-type MissingCmdLineVarError struct {
-	variable string
+func loadConfig(path string) (*WebhookConfig, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	var cfg WebhookConfig
+	if err := yaml.Unmarshal(contents, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	applyConfigDefaults(&cfg)
+	if err := validateConfig(&cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+func applyConfigDefaults(cfg *WebhookConfig) {
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 9443
+	}
+
+	if cfg.Sidecar.ImagePullPolicy == "" {
+		cfg.Sidecar.ImagePullPolicy = defaultImagePullPolicy
+	}
+
+	if cfg.Sidecar.VolumeMountName == "" {
+		cfg.Sidecar.VolumeMountName = "ziti-identity"
+	}
+
+	if cfg.Sidecar.IdentityDir == "" {
+		cfg.Sidecar.IdentityDir = "/ziti-tunnel"
+	}
+
+	if cfg.Sidecar.Prefix == "" {
+		cfg.Sidecar.Prefix = "zt"
+	}
+
+	if cfg.Sidecar.DnsUnanswerable == "" {
+		cfg.Sidecar.DnsUnanswerable = "refused"
+	}
+
+	if cfg.Controller.RoleKey == "" {
+		cfg.Controller.RoleKey = defaultZitiRoleAttributesKey
+	}
+}
+
+func validateConfig(cfg *WebhookConfig) error {
+	if cfg.Controller.MgmtAPI == "" {
+		return errors.New("controller.mgmtApi is required")
+	}
+
+	if cfg.Sidecar.Image == "" {
+		return errors.New("sidecar.image is required")
+	}
+
+	if cfg.Sidecar.ImageVersion == "" {
+		return errors.New("sidecar.imageVersion is required")
+	}
+
+	return nil
 }
 
 func configTLS(cert, key []byte) *tls.Config {
 	sCert, err := tls.X509KeyPair(cert, key)
 	if err != nil {
-		klog.Fatalf("Failed to load the webhook server's x509 cert %v", err)
+		klog.Fatalf("failed to load webhook server TLS key pair: %v", err)
 	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{sCert},
-	}
+	return &tls.Config{Certificates: []tls.Certificate{sCert}}
 }
 
-func (e *MissingEnvVarError) Error() string {
-	return fmt.Sprintf("Missing environment variable: %s", e.variable)
-}
-
-func (e *MissingCmdLineVarError) Error() string {
-	return fmt.Sprintf("Missing commandline variable: %s", e.variable)
-}
-
-func lookupEnvVars() {
-	// Environmental Variables to override the commandline inputs
-
-	value, ok := os.LookupEnv("TLS_CERT")
-	if ok && len(value) > 0 {
+func loadCertificatesFromEnv() {
+	if value, ok := os.LookupEnv("TLS_CERT"); ok && value != "" {
 		cert = []byte(value)
 	}
-	if len(cert) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "TLS_CERT"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "TLS_CERT"})
-	}
 
-	value, ok = os.LookupEnv("TLS_PRIVATE_KEY")
-	if ok && len(value) > 0 {
+	if value, ok := os.LookupEnv("TLS_PRIVATE_KEY"); ok && value != "" {
 		key = []byte(value)
 	}
-	if len(key) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "TLS_PRIVATE_KEY"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "TLS_PRIVATE_KEY"})
-	}
 
-	value, ok = os.LookupEnv("PORT")
-	if ok && len(value) > 0 {
-		var err error
-		port, err = strconv.Atoi(value)
-		if err != nil {
-			klog.Fatal(err)
-		}
-	}
-	if port == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "PORT"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "PORT"})
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_IMAGE")
-	if ok && len(value) > 0 {
-		sidecarImage = value
-	}
-	if len(sidecarImage) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE"})
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_IMAGE_VERSION")
-	if ok && len(value) > 0 {
-		sidecarImageVersion = value
-	}
-	if len(sidecarImageVersion) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE_VERSION"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_VERSION"})
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_PREFIX")
-	if ok && len(value) > 0 {
-		sidecarPrefix = value
-	}
-	if len(sidecarPrefix) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_PREFIX"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_PREFIX"})
-		klog.Fatal("sidecarPrefix cannot be empty")
-	} else {
-		klog.V(4).Infof("sidecarPrefix: %s", sidecarPrefix)
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_IMAGE_PULL_POLICY")
-	if ok && len(value) > 0 {
-		sidecarImagePullPolicy = value
-	}
-	if len(sidecarImagePullPolicy) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE_PULL_POLICY"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_PULL_POLICY"})
-		sidecarImagePullPolicy = defaultImagePullPolicy
-	}
-
-	value, ok = os.LookupEnv("ZITI_MGMT_API")
-	if ok && len(value) > 0 {
-		zitiCtrlMgmtApi = value
-	}
-	if len(zitiCtrlMgmtApi) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_MGMT_API"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_MGMT_API"})
-	}
-
-	value, ok = os.LookupEnv("ZITI_ADMIN_CERT")
-	if ok && len(value) > 0 {
+	if value, ok := os.LookupEnv("ZITI_ADMIN_CERT"); ok && value != "" {
 		zitiAdminCert = []byte(value)
 	}
-	if zitiAdminCert == nil {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ADMIN_CERT"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ADMIN_CERT"})
-	}
 
-	value, ok = os.LookupEnv("ZITI_ADMIN_KEY")
-	if ok && len(value) > 0 {
+	if value, ok := os.LookupEnv("ZITI_ADMIN_KEY"); ok && value != "" {
 		zitiAdminKey = []byte(value)
 	}
-	if zitiAdminKey == nil {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ADMIN_KEY"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ADMIN_KEY"})
-	}
 
-	value, ok = os.LookupEnv("ZITI_CTRL_CA_BUNDLE")
-	if ok && len(value) > 0 {
+	if value, ok := os.LookupEnv("ZITI_CTRL_CA_BUNDLE"); ok && value != "" {
 		zitiCtrlCaBundle = []byte(value)
-		klog.V(5).Infof("CA bundle content from env: %s", string(zitiCtrlCaBundle))
 	}
-	if zitiCtrlCaBundle == nil {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_CTRL_CA_BUNDLE"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_CTRL_CA_BUNDLE"})
-	}
-
-	value, ok = os.LookupEnv("POD_SECURITY_CONTEXT_OVERRIDE")
-	if ok && len(value) > 0 {
-		var err error
-		podSecurityOverride, err = strconv.ParseBool(value)
-		if err != nil {
-			klog.Info(err)
-		}
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_DNS_UPSTREAM_ENABLED")
-	if ok && len(value) > 0 {
-		parsed, err := strconv.ParseBool(value)
-		if err != nil {
-			klog.Warningf("failed to parse SIDECAR_DNS_UPSTREAM_ENABLED: %v", err)
-		} else {
-			sidecarDnsUpstreamEnabled = parsed
-		}
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_DNS_UNANSWERABLE")
-	if ok && len(value) > 0 {
-		sidecarDnsUnanswerable = value
-	}
-	if len(sidecarDnsUnanswerable) == 0 {
-		sidecarDnsUnanswerable = "refused"
-	}
-
-	value, ok = os.LookupEnv("SEARCH_DOMAINS")
-	if ok && len(value) > 0 {
-		searchDomains = strings.Split(value, ",")
-	}
-	if len(searchDomains) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SEARCH_DOMAINS"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SEARCH_DOMAINS"})
-		klog.Info("Custom DNS search domains not set, using Kubernetes defaults")
-	} else {
-		klog.Infof("Custom DNS search domains: %s", searchDomains)
-	}
-
-	value, ok = os.LookupEnv("ZITI_ROLE_KEY")
-	if ok {
-		zitiRoleKey = value
-	}
-	zitiRoleKey = getValueOrDefault(zitiRoleKey, defaultZitiRoleAttributesKey)
-	klog.V(4).Infof("Using Ziti role key: %s", zitiRoleKey)
 }
