@@ -558,17 +558,21 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          # run the shell script to generate the k8s manifests, consuming env vars as configuration
+          # Extract admin identity credentials from the identity file
           # IDENTITY_FILE exported in prior step create-nf-network-services
-          # ZITI_AGENT_IMAGE exported in this step environment
-          # ZITI_AGENT_NAMESPACE exported in this step environment
-          # ZITI_AGENT_LOG_LEVEL exported in this step environment
-          # SIDECAR_IMAGE exported in this step environment
-          # SIDECAR_IMAGE_VERSION exported in this step environment
-          SIDECAR_SELECTORS=namespace \
-          ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-namespace-selector.yaml
-          SIDECAR_SELECTORS=pod \
-          ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-pod-selector.yaml
+          ziti ops unwrap "$IDENTITY_FILE"
+          IDENTITY_DIR=$(dirname "$IDENTITY_FILE")
+          IDENTITY_BASE=$(basename "$IDENTITY_FILE" .json)
+          
+          # Create admin identity secrets for both clusters
+          for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
+            kubectl create secret generic ziti-agent-identity \
+              --from-file=tls.crt="${IDENTITY_DIR}/${IDENTITY_BASE}.cert" \
+              --from-file=tls.key="${IDENTITY_DIR}/${IDENTITY_BASE}.key" \
+              --from-file=tls.ca="${IDENTITY_DIR}/${IDENTITY_BASE}.ca" \
+              --namespace="$ZITI_AGENT_NAMESPACE" \
+              --context="$CLUSTER"
+          done
 
           # Install cert-manager via helm for both clusters
           CERT_MANAGER_VERSION=v1.16.2
@@ -610,32 +614,53 @@ jobs:
             kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations -n cert-manager --context "$CLUSTER"
           done
 
-          # Apply agent manifests with retries
-          for CLUSTER_MANIFEST in \
-            "${AWS_CLUSTER}=ziti-k8s-agent-namespace-selector.yaml" \
-            "${GKE_CLUSTER}=ziti-k8s-agent-pod-selector.yaml"
+          # Install ziti-webhook via Helm with retries
+          for CLUSTER_SELECTOR in \
+            "${AWS_CLUSTER}=namespace" \
+            "${GKE_CLUSTER}=pod"
           do
-            CLUSTER="${CLUSTER_MANIFEST%%=*}"
-            MANIFEST="${CLUSTER_MANIFEST#*=}"
+            CLUSTER="${CLUSTER_SELECTOR%%=*}"
+            SELECTOR="${CLUSTER_SELECTOR#*=}"
 
-            : Applying Ziti configurations to cluster $CLUSTER
+            : Installing Ziti webhook to cluster $CLUSTER with $SELECTOR selector
             ATTEMPTS=3
             DELAY=30
             while (( --ATTEMPTS )); do
-              if kubectl apply -f "$MANIFEST" --context "$CLUSTER"; then
+              if helm upgrade --install ziti-webhook ./charts/ziti-webhook \
+                --namespace="$ZITI_AGENT_NAMESPACE" \
+                --kube-context="$CLUSTER" \
+                --set controller.mgmtApi="$ZITI_CTRL_MGMT_API" \
+                --set deployment.image.repo="netfoundry/ziti-k8s-agent" \
+                --set deployment.image.tag="${{ github.run_id }}" \
+                --set sidecar.image.repo="$SIDECAR_IMAGE" \
+                --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
+                --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
+                --set webhook.selectors.enabled="$SELECTOR" \
+                --timeout 5m; then
                 break
               else
                 sleep $DELAY
               fi
             done
-            kubectl apply -f "$MANIFEST" --context "$CLUSTER"
+            # Final attempt without retry logic to surface any errors
+            helm upgrade --install ziti-webhook ./charts/ziti-webhook \
+              --namespace="$ZITI_AGENT_NAMESPACE" \
+              --kube-context="$CLUSTER" \
+              --set controller.mgmtApi="$ZITI_CTRL_MGMT_API" \
+              --set deployment.image.repo="netfoundry/ziti-k8s-agent" \
+              --set deployment.image.tag="${{ github.run_id }}" \
+              --set sidecar.image.repo="$SIDECAR_IMAGE" \
+              --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
+              --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
+              --set webhook.selectors.enabled="$SELECTOR" \
+              --timeout 5m
           done
 
-          : Waiting for ziti-admission-webhook pods to be ready in AWS cluster...
-          kubectl wait --for=condition=Available deployment -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
+          : Waiting for ziti-webhook pods to be ready in AWS cluster...
+          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
           
-          : Waiting for ziti-admission-webhook pods to be ready in GKE cluster...
-          kubectl wait --for=condition=Available deployment -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
+          : Waiting for ziti-webhook pods to be ready in GKE cluster...
+          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
 
       - name: deploy-bookinfo-app
         shell: bash
