@@ -619,9 +619,9 @@ jobs:
             MANIFEST="${CLUSTER_MANIFEST#*=}"
 
             : Applying Ziti configurations to cluster $CLUSTER
-            ATTEMPTS=2
+            ATTEMPTS=3
             DELAY=30
-            while (( ATTEMPTS-- )); do
+            while (( --ATTEMPTS )); do
               if kubectl apply -f "$MANIFEST" --context "$CLUSTER"; then
                 break
               else
@@ -790,10 +790,10 @@ jobs:
           kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook
 
           # inspect ziti-admission-webhook
-          kubectl --context $AWS_CLUSTER --namespace ziti describe pod --selector app=ziti-admission-webhook
-          kubectl --context $GKE_CLUSTER --namespace ziti describe pod --selector app=ziti-admission-webhook
-          kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
-          kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook
 
           # inspect bookinfo apps
           kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app in (details,ratings)'
