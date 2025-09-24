@@ -92,6 +92,8 @@ type zitiConfig struct {
 	LabelDelValue   string
 	LabelCrValue    string
 	ResolverIp      string
+	DnsUpstreamEnabled bool
+	Unanswerable       string
 	ZitiType        zitiType
 	AnnotationKey   string
 	RouterConfig    routerConfig
@@ -262,10 +264,23 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 		return failureResponse(response, err)
 	}
 
-	dnsConfig, err := zh.getDnsConfig(ctx)
+	dnsConfig, err := zh.getDnsConfig(ctx, podMeta)
 	if err != nil {
 		return failureResponse(response, err)
 	}
+
+	sidecarArgs := []string{"tproxy"}
+
+	if zh.Config.DnsUpstreamEnabled && zh.Config.ResolverIp != "" {
+		sidecarArgs = append(sidecarArgs, "--dnsUpstream", fmt.Sprintf("tcp://%s:53", zh.Config.ResolverIp))
+	}
+
+	unanswerable := zh.Config.Unanswerable
+	if unanswerable == "" {
+		unanswerable = "refused"
+	}
+
+	sidecarArgs = append(sidecarArgs, "--dnsUnanswerable", unanswerable)
 
 	jsonPatch = []JsonPatchEntry{
 
@@ -276,7 +291,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 				Name:            identityName,
 				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
 				ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
-				Args:            []string{"tproxy"},
+				Args:            sidecarArgs,
 				Env: []corev1.EnvVar{
 					{
 						Name:  "ZITI_ENROLL_TOKEN",
@@ -382,7 +397,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 	return successResponse(response)
 }
 
-func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, error) {
+func (zh *zitiHandler) getDnsConfig(ctx context.Context, podMeta *metav1.ObjectMeta) (*corev1.PodDNSConfig, error) {
 	// get cluster dns ip if not already configured
 	defaultClusterDnsServiceIP := "10.96.0.10"
 	if len(zh.Config.ResolverIp) == 0 {
@@ -424,6 +439,11 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, 
 	if len(searchDomains) > 0 {
 		dnsConfig.Searches = searchDomains
 		klog.V(4).Infof("Using custom search domains: %v", searchDomains)
+	} else {
+		// Add namespace-specific search domain
+		namespaceDomain := fmt.Sprintf("%s.svc.cluster.local", podMeta.Namespace)
+		dnsConfig.Searches = []string{namespaceDomain, "svc.cluster.local", "cluster.local"}
+		klog.V(4).Infof("Using default cluster search domains with namespace %s: %v", podMeta.Namespace, dnsConfig.Searches)
 	}
 
 	return dnsConfig, nil

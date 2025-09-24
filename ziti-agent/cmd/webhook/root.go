@@ -34,6 +34,8 @@ var (
 	zitiCtrlCaBundleFile   string
 	podSecurityOverride    bool
 	clusterDnsServiceIP    string
+	sidecarDnsUpstreamEnabled bool
+	sidecarDnsUnanswerable string
 	searchDomainList       string
 	searchDomains          []string
 	zitiRoleKey            string
@@ -92,6 +94,10 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		"Ziti Identity Role Key used in pod annotation")
 	webhookCmd.Flags().StringVar(&sidecarImagePullPolicy, "sidecar-image-pull-policy", defaultImagePullPolicy,
 		"Image pull policy for sidecar container. One of: Always, IfNotPresent, Never")
+	webhookCmd.Flags().BoolVar(&sidecarDnsUpstreamEnabled, "sidecar-dns-upstream-enabled", true,
+		"Enable the sidecar DNS upstream configuration")
+	webhookCmd.Flags().StringVar(&sidecarDnsUnanswerable, "sidecar-dns-unanswerable", "refused",
+		"Disposition for DNS queries the sidecar cannot answer (timeout|servfail|refused)")
 
 	return webhookCmd
 }

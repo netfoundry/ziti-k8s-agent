@@ -156,6 +156,24 @@ func lookupEnvVars() {
 		}
 	}
 
+	value, ok = os.LookupEnv("SIDECAR_DNS_UPSTREAM_ENABLED")
+	if ok && len(value) > 0 {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			klog.Warningf("failed to parse SIDECAR_DNS_UPSTREAM_ENABLED: %v", err)
+		} else {
+			sidecarDnsUpstreamEnabled = parsed
+		}
+	}
+
+	value, ok = os.LookupEnv("SIDECAR_DNS_UNANSWERABLE")
+	if ok && len(value) > 0 {
+		sidecarDnsUnanswerable = value
+	}
+	if len(sidecarDnsUnanswerable) == 0 {
+		sidecarDnsUnanswerable = "refused"
+	}
+
 	value, ok = os.LookupEnv("SEARCH_DOMAINS")
 	if ok && len(value) > 0 {
 		searchDomains = strings.Split(value, ",")
