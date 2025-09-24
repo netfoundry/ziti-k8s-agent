@@ -170,6 +170,18 @@ spec:
                 configMapKeyRef:
                   name: ziti-ctrl-cfg
                   key:  SearchDomainList
+            - name: SIDECAR_DNS_UPSTREAM_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: ziti-ctrl-cfg
+                  key:  SidecarDnsUpstreamEnabled
+                  optional: true
+            - name: SIDECAR_DNS_UNANSWERABLE
+              valueFrom:
+                configMapKeyRef:
+                  name: ziti-ctrl-cfg
+                  key:  SidecarDnsUnanswerable
+                  optional: true
           resources:
             requests:
               cpu: ${ZITI_AGENT_CPU:-100m}
@@ -291,5 +303,6 @@ data:
   zitiMgmtApi: $ZITI_MGMT_API
   zitiRoleKey: identity.openziti.io/role-attributes
   podSecurityContextOverride: "true"
-  SearchDomainList: ${SEARCH_DOMAINS:-\"\"}
-YAML
+  SearchDomainList: ${SEARCH_DOMAINS:-""}
+  SidecarDnsUpstreamEnabled: ${SIDECAR_DNS_UPSTREAM_ENABLED:-"true"}
+  SidecarDnsUnanswerable: ${SIDECAR_DNS_UNANSWERABLE:-"refused"}
