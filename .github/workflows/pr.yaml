@@ -504,16 +504,22 @@ jobs:
           fi
           ZITI_SESSION_TOKEN=$(echo "$ZITI_SESSION_OBJ" | jq -r .value)
           echo "::add-mask::$ZITI_SESSION_TOKEN"
+          ZITI_CTRL_MGMT_API=$(echo "$ZITI_SESSION_OBJ" | jq -r .networkControllerUrl)
+          echo ZITI_CTRL_MGMT_API="$ZITI_CTRL_MGMT_API" | tee -a $GITHUB_ENV
           set -o xtrace
           if [[ -z "$ZITI_SESSION_TOKEN" ]]; then
               echo "ERROR: ZITI_SESSION_TOKEN is empty" >&2
+              exit 1
+          fi
+          if [[ -z "$ZITI_CTRL_MGMT_API" ]]; then
+              echo "ERROR: ZITI_CTRL_MGMT_API is empty" >&2
               exit 1
           fi
 
           # call the Ziti controller with the session token to get the list of identities
           NF_IDENTITY_LIST="$(
             curl --insecure --silent --fail --location --request GET \
-            "$(echo "$ZITI_SESSION_OBJ" | jq -r .networkControllerUrl)"/identities \
+            "$ZITI_CTRL_MGMT_API"/identities \
             --header 'Content-Type: application/json' \
             --header "zt-session: $ZITI_SESSION_TOKEN"
           )"
