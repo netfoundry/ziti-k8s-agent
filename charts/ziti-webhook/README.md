@@ -20,15 +20,20 @@ Create a secret containing your Ziti admin identity:
 
 ```bash
 # Extract certificate components from enrolled identity JSON
-ziti ops unwrap path/to/ziti-admin.json
+ziti ops unwrap ziti-admin.json
 
 # Create secret from the extracted files
 # NOTE: Must be created in the same namespace where the webhook chart will be installed
-kubectl create secret generic ziti-agent-identity \
-  --from-file=tls.crt=path/to/ziti-admin.cert \
-  --from-file=tls.key=path/to/ziti-admin.key \
-  --from-file=tls.ca=path/to/ziti-admin.ca \
+kubectl create secret generic "ziti-webhook-identity" \
+  --from-file=tls.crt=ziti-admin.cert \
+  --from-file=tls.key=ziti-admin.key \
+  --from-file=tls.ca=ziti-admin.ca \
   --namespace=default
+
+# Install with existing secret
+helm upgrade --install --namespace default "ziti-webhook" ./charts/ziti-webhook \
+  --set controller.mgmtApi="https://your-controller:1280/edge/management/v1" \
+  --set identity.secretName="ziti-webhook-identity"
 ```
 
 > **📝 Certificate Requirements:**
@@ -43,13 +48,13 @@ Provide base64-encoded certificate data via Helm values:
 
 ```bash
 # Extract and base64 encode your Ziti certificates
-ziti ops unwrap path/to/ziti-admin.json
-CERT_B64=$(base64 -w 0 < path/to/ziti-admin.cert)
-KEY_B64=$(base64 -w 0 < path/to/ziti-admin.key)
-CA_B64=$(base64 -w 0 < path/to/ziti-admin.ca)
+ziti ops unwrap ziti-admin.json
+CERT_B64=$(base64 -w 0 < ziti-admin.cert)
+KEY_B64=$(base64 -w 0 < ziti-admin.key)
+CA_B64=$(base64 -w 0 < ziti-admin.ca)
 
 # Install with embedded secrets (automatically creates secret when values are provided)
-helm install ziti-webhook ./charts/ziti-webhook \
+helm upgrade --install ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://your-controller:1280/edge/management/v1" \
   --set identity.cert="$CERT_B64" \
   --set identity.key="$KEY_B64" \
@@ -61,13 +66,13 @@ helm install ziti-webhook ./charts/ziti-webhook \
 ### 2. Install the Chart
 
 ```bash
-# Install in the same namespace where you created the ziti-agent-identity secret
-helm install ziti-webhook ./charts/ziti-webhook \
+# Install with existing secret (Option A)
+helm upgrade --install --namespace default ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://your-controller:1280/edge/management/v1" \
-  --set namespace="default"
+  --set identity.secretName="ziti-webhook-identity"
 ```
 
-> **⚠️ Important**: The webhook deployment must be installed in the same namespace as the `ziti-agent-identity` secret, as this is where the webhook server runs and provides pod mutation services to the kube-apiserver.
+> **⚠️ Important**: The webhook deployment must be installed in the same namespace as your identity secret, as this is where the webhook server runs and provides pod mutation services to the kube-apiserver.
 
 ## Configuration
 
@@ -146,7 +151,7 @@ The following table lists the configurable parameters and their default values:
 ### Basic Installation
 
 ```bash
-helm install ziti-webhook ./charts/ziti-webhook \
+helm upgrade --install --namespace default ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1"
 ```
 
@@ -156,23 +161,24 @@ When deploying in the same cluster as a Ziti Controller, the webhook can automat
 
 ```bash
 # Extract only cert and key (CA bundle discovered automatically)
-ziti ops unwrap path/to/ziti-admin.json
+ziti ops unwrap ziti-admin.json
 
 # Create secret without CA bundle
-kubectl create secret tls ziti-agent-identity \
-  --cert=path/to/ziti-admin.cert \
-  --key=path/to/ziti-admin.key \
+kubectl create secret tls ziti-webhook-identity \
+  --cert=ziti-admin.cert \
+  --key=ziti-admin.key \
   --namespace=default
 
 # Install webhook (will use ConfigMap for CA bundle)
-helm install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://ziti-controller-ctrl:1280/edge/management/v1"
+helm upgrade --install ziti-webhook ./charts/ziti-webhook \
+  --set controller.mgmtApi="https://ziti-controller-ctrl:1280/edge/management/v1" \
+  --set identity.secretName="ziti-webhook-identity"
 ```
 
 ### Custom Trust Bundle ConfigMap
 
 ```bash
-helm install ziti-webhook ./charts/ziti-webhook \
+helm upgrade --install ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1" \
   --set identity.trustBundle.configMapName="my-ziti-controller-cas" \
   --set identity.trustBundle.configMapKey="ca-bundle.crt"
@@ -181,16 +187,15 @@ helm install ziti-webhook ./charts/ziti-webhook \
 ### Custom DNS Configuration
 
 ```bash
-helm install ziti-webhook ./charts/ziti-webhook \
+helm upgrade --install ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1" \
-  --set sidecar.dnsUpstreamEnabled=false \
   --set sidecar.searchDomains="{custom.local,example.com}"
 ```
 
 ### Production Configuration
 
 ```bash
-helm install ziti-webhook ./charts/ziti-webhook \
+helm upgrade --install ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1" \
   --set deployment.replicas=3 \
   --set deployment.resources.requests.cpu="200m" \
@@ -226,19 +231,19 @@ spec:
 
 ## Troubleshooting
 
-### Check webhook logs:
+### Check webhook logs
 
 ```bash
 kubectl logs -l app=ziti-admission-webhook -n default
 ```
 
-### Verify webhook configuration:
+### Verify webhook configuration
 
 ```bash
 kubectl get mutatingwebhookconfiguration ziti-tunnel-sidecar -o yaml
 ```
 
-### Check certificate status:
+### Check certificate status
 
 ```bash
 kubectl get certificate -n default

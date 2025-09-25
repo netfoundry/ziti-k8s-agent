@@ -18,7 +18,7 @@ git clone https://github.com/netfoundry/ziti-k8s-agent.git
 cd ziti-k8s-agent
 ```
 
-#### Option 1: Same-Cluster Ziti Controller (Recommended)
+#### Option 1: Same-Cluster Ziti Controller
 
 When the Ziti Controller is deployed in the same cluster, the webhook can automatically discover the CA bundle:
 

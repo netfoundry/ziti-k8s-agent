@@ -556,7 +556,8 @@ jobs:
         shell: bash
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
-          ZITI_AGENT_NAMESPACE: ziti-agent  # this test assumes the namespace does not exist and will be created during the test
+          ZITI_AGENT_NAMESPACE: ziti-webhook # this test assumes the namespace does not exist and will be created during the test
+          ZITI_AGENT_IDENTITY: ziti-webhook-identity
           ZITI_AGENT_LOG_LEVEL: 4
           SIDECAR_IMAGE: ${{ vars.SIDECAR_IMAGE || 'docker.io/openziti/ziti-tunnel' }} 
           SIDECAR_IMAGE_VERSION: ${{ vars.SIDECAR_IMAGE_VERSION || 'latest' }}
@@ -573,7 +574,7 @@ jobs:
           # Create namespace and admin identity secrets for both clusters
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
             kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context="$CLUSTER" || true
-            kubectl create secret generic ziti-agent-identity \
+            kubectl create secret generic "${ZITI_AGENT_IDENTITY}" \
               --from-file=tls.crt="${IDENTITY_DIR}/${IDENTITY_BASE}.cert" \
               --from-file=tls.key="${IDENTITY_DIR}/${IDENTITY_BASE}.key" \
               --from-file=tls.ca="${IDENTITY_DIR}/${IDENTITY_BASE}.ca" \
@@ -640,6 +641,7 @@ jobs:
                 --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
                 --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
                 --set webhook.selectors.enabled="$SELECTOR" \
+                --set identity.secretName="${ZITI_AGENT_IDENTITY}" \
                 --timeout 5m; then
                 break
               else
@@ -657,6 +659,7 @@ jobs:
               --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
               --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
               --set webhook.selectors.enabled="$SELECTOR" \
+              --set identity.secretName="${ZITI_AGENT_IDENTITY}" \
               --timeout 5m
           done
 

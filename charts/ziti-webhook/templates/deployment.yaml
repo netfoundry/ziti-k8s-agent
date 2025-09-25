@@ -42,12 +42,12 @@ spec:
             - name: ZITI_ADMIN_CERT
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ziti-webhook.fullname" . }}-identity
+                  name: {{ .Values.identity.secretName | default (printf "%s-identity" (include "ziti-webhook.fullname" .)) }}
                   key: {{ .Values.identity.certKey }}
             - name: ZITI_ADMIN_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ziti-webhook.fullname" . }}-identity
+                  name: {{ .Values.identity.secretName | default (printf "%s-identity" (include "ziti-webhook.fullname" .)) }}
                   key: {{ .Values.identity.keyKey }}
             - name: ZITI_CTRL_CA_BUNDLE
               valueFrom:
@@ -57,7 +57,7 @@ spec:
                   key: {{ .Values.identity.trustBundle.configMapKey }}
                 {{- else }}
                 secretKeyRef:
-                  name: {{ include "ziti-webhook.fullname" . }}-identity
+                  name: {{ .Values.identity.secretName | default (printf "%s-identity" (include "ziti-webhook.fullname" .)) }}
                   key: {{ .Values.identity.caKey }}
                 {{- end }}
           volumeMounts:
