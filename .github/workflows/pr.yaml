@@ -564,8 +564,9 @@ jobs:
           IDENTITY_DIR=$(dirname "$IDENTITY_FILE")
           IDENTITY_BASE=$(basename "$IDENTITY_FILE" .json)
           
-          # Create admin identity secrets for both clusters
+          # Create namespace and admin identity secrets for both clusters
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
+            kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context="$CLUSTER" || true
             kubectl create secret generic ziti-agent-identity \
               --from-file=tls.crt="${IDENTITY_DIR}/${IDENTITY_BASE}.cert" \
               --from-file=tls.key="${IDENTITY_DIR}/${IDENTITY_BASE}.key" \
@@ -595,9 +596,6 @@ jobs:
             --kube-context "$GKE_CLUSTER" \
             --timeout 5m
 
-          # create new namespace for ziti agent
-          kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context "$AWS_CLUSTER"
-          kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context "$GKE_CLUSTER"
 
           # Wait for cert-manager components and verify webhook is properly configured
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
