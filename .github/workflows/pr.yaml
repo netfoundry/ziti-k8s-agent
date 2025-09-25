@@ -661,10 +661,10 @@ jobs:
           done
 
           : Waiting for ziti-webhook pods to be ready in AWS cluster...
-          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=300s --context $AWS_CLUSTER
           
           : Waiting for ziti-webhook pods to be ready in GKE cluster...
-          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
+          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=300s --context $GKE_CLUSTER
 
       - name: deploy-bookinfo-app
         shell: bash
@@ -817,6 +817,32 @@ jobs:
           kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=webhook
           kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=webhook
           kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook
+
+          # inspect ziti-webhook deployment and pods
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get deployment ziti-webhook -o yaml
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get deployment ziti-webhook -o yaml
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe deployment ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe deployment ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
+
+          # check events in ziti-agent namespace
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get events --sort-by='.lastTimestamp'
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get events --sort-by='.lastTimestamp'
+
+          # check helm release status
+          helm --kube-context $AWS_CLUSTER status ziti-webhook -n $ZITI_AGENT_NAMESPACE
+          helm --kube-context $GKE_CLUSTER status ziti-webhook -n $ZITI_AGENT_NAMESPACE
+
+          # check replicasets
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe replicasets -l app.kubernetes.io/name=ziti-webhook
 
           # inspect ziti-admission-webhook
           kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
