@@ -14,6 +14,7 @@ env:
   GKE_REGION: us-central1
   GKE_NETWORK_NAME: default
   GKE_SUBNETWORK_NAME: default
+  ZITI_AGENT_NAMESPACE: ziti-webhook # this test assumes the namespace does not exist and will be created during the test
 
 jobs:
   build_deploy:
@@ -556,7 +557,6 @@ jobs:
         shell: bash
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
-          ZITI_AGENT_NAMESPACE: ziti-webhook # this test assumes the namespace does not exist and will be created during the test
           ZITI_AGENT_IDENTITY: ziti-webhook-identity
           ZITI_AGENT_LOG_LEVEL: 4
           SIDECAR_IMAGE: ${{ vars.SIDECAR_IMAGE || 'docker.io/openziti/ziti-tunnel' }} 
@@ -822,30 +822,30 @@ jobs:
           kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook
 
           # inspect ziti-webhook deployment and pods
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get deployment ziti-webhook -o yaml
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get deployment ziti-webhook -o yaml
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe deployment ziti-webhook
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe deployment ziti-webhook
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get pods -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get pods -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe pods -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe pods -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get deployment ziti-webhook -o yaml
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get deployment ziti-webhook -o yaml
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe deployment ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe deployment ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
 
           # check events in ziti-agent namespace
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get events --sort-by='.lastTimestamp'
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get events --sort-by='.lastTimestamp'
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get events --sort-by='.lastTimestamp'
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get events --sort-by='.lastTimestamp'
 
           # check helm release status
           helm --kube-context $AWS_CLUSTER status ziti-webhook -n $ZITI_AGENT_NAMESPACE
           helm --kube-context $GKE_CLUSTER status ziti-webhook -n $ZITI_AGENT_NAMESPACE
 
           # check replicasets
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get replicasets -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE get replicasets -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $AWS_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe replicasets -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $GKE_CLUSTER --namespace $ZITI_AGENT_NAMESPACE describe replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe replicasets -l app.kubernetes.io/name=ziti-webhook
 
           # inspect ziti-admission-webhook
           kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
