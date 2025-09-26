@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/openziti/edge-api/rest_management_api_client"
@@ -62,21 +63,72 @@ func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error)
 	}
 
 	klog.V(5).Info("Verifying controller with provided CA pool...")
-	ok, err := rest_util.VerifyController(cfg.ApiEndpoint, &cfg.CAS)
+	
+	// Extract base controller URL for certificate verification
+	// VerifyController appends /edge/client/v1/versions, so we need the base URL
+	baseControllerURL, err := extractControllerBaseURL(cfg.ApiEndpoint)
+	if err != nil {
+		klog.Errorf("Failed to extract base controller URL: %v", err)
+		return nil, errors.Wrap(err, "failed to extract base controller URL")
+	}
+	
+	klog.V(5).Infof("Using base controller URL for verification: %s", baseControllerURL)
+	ok, err := rest_util.VerifyController(baseControllerURL, &cfg.CAS)
 	if !ok {
 		klog.Errorf("Ziti Controller failed CA validation - %s", err)
 		return nil, errors.Wrap(err, "controller verification failed")
 	}
 	klog.V(5).Info("Controller verification successful")
 
+	// Reconstitute the management API URL from the sanitized base URL
+	mgmtAPIURL := reconstituteMgmtAPIURL(baseControllerURL)
+	klog.V(5).Infof("Using reconstituted management API URL: %s", mgmtAPIURL)
+
 	klog.V(5).Info("Creating new Edge Management client with certificate...")
-	client, err := rest_util.NewEdgeManagementClientWithCert(cfg.Cert, cfg.PrivateKey, cfg.ApiEndpoint, &cfg.CAS)
+	client, err := rest_util.NewEdgeManagementClientWithCert(cfg.Cert, cfg.PrivateKey, mgmtAPIURL, &cfg.CAS)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create edge management client")
 	}
 	klog.V(5).Info("Successfully created Edge Management client")
 
 	return client, nil
+}
+
+// extractControllerBaseURL extracts the base controller URL for certificate verification
+// by removing ALL URL path components and conditionally removing -p suffix from NetFoundry hostnames
+// VerifyController expects just the base URL since it appends /edge/client/v1/versions
+func extractControllerBaseURL(mgmtAPIURL string) (string, error) {
+	parsedURL, err := url.Parse(mgmtAPIURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse management API URL: %w", err)
+	}
+
+	hostname := parsedURL.Hostname()
+	port := parsedURL.Port()
+
+	// Check if hostname matches NetFoundry pattern: <uuid>-p.<env>.netfoundry.io
+	// If so, remove the -p suffix for certificate verification
+	if strings.Contains(hostname, ".netfoundry.io") && strings.Contains(hostname, "-p.") {
+		hostname = strings.Replace(hostname, "-p.", ".", 1)
+	}
+
+	// Construct base URL with scheme, cleaned hostname, and port, but NO path
+	// VerifyController will append /edge/client/v1/versions to this base URL
+	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, hostname)
+	if port != "" {
+		baseURL += ":" + port
+	}
+
+	return baseURL, nil
+}
+
+// reconstituteMgmtAPIURL takes a sanitized base controller URL and reconstitutes the management API endpoint
+// Only appends /edge/management/v1 if it's not already present
+func reconstituteMgmtAPIURL(baseControllerURL string) string {
+	if strings.HasSuffix(baseControllerURL, "/edge/management/v1") {
+		return baseControllerURL
+	}
+	return baseControllerURL + "/edge/management/v1"
 }
 
 func keyUsageString(ku x509.KeyUsage) string {
