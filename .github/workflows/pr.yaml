@@ -648,19 +648,6 @@ jobs:
                 sleep $DELAY
               fi
             done
-            # Final attempt without retry logic to surface any errors
-            helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-              --namespace="$ZITI_AGENT_NAMESPACE" \
-              --kube-context="$CLUSTER" \
-              --set controller.mgmtApi="$ZITI_CTRL_MGMT_API" \
-              --set deployment.image.repo="netfoundry/ziti-k8s-agent" \
-              --set deployment.image.tag="${{ github.run_id }}" \
-              --set sidecar.image.repo="$SIDECAR_IMAGE" \
-              --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
-              --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
-              --set webhook.selectors.enabled="$SELECTOR" \
-              --set identity.secretName="${ZITI_AGENT_IDENTITY}" \
-              --timeout 5m
           done
 
           : Waiting for ziti-webhook pods to be ready in AWS cluster...

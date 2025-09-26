@@ -96,7 +96,7 @@ identity:
   # Trust bundle discovery (for same-cluster Ziti Controller)
   trustBundle:
     # Enable automatic discovery of Ziti Controller CA bundle from ConfigMap
-    enabled: true
+    enabled: false
     # ConfigMap name containing the trust bundle (default matches ziti-controller chart)
     configMapName: "ziti-controller-ctrl-plane-cas"
     # Key in the ConfigMap containing the CA bundle
