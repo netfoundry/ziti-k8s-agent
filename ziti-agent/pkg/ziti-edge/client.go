@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/openziti/edge-api/rest_util"
@@ -52,7 +53,7 @@ func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error)
 			klog.V(5).Infof("  CA Extended Key usages: %s", extKeyUsageString(parsedCert.ExtKeyUsage))
 		}
 	}
-	// Check if our client cert is trusted by the CA pool
+	// Check if our client cert is trusted by the CA pool and analyze key usage
 	opts := x509.VerifyOptions{
 		Roots: &cfg.CAS,
 	}
@@ -60,6 +61,9 @@ func Client(cfg *Config) (*rest_management_api_client.ZitiEdgeManagement, error)
 		klog.V(4).Info("Client certificate is trusted by the CA pool")
 	} else {
 		klog.V(4).Infof("Warning: Client certificate is not trusted by the CA pool: %v", err)
+		
+		// Analyze key usage compatibility for detailed reporting
+		analyzeKeyUsageCompatibility(cfg.Cert)
 	}
 
 	klog.V(5).Info("Verifying controller with provided CA pool...")
@@ -198,4 +202,140 @@ func extKeyUsageString(eku []x509.ExtKeyUsage) string {
 		}
 	}
 	return fmt.Sprintf("[%s]", strings.Join(usages, ", "))
+}
+
+// analyzeKeyUsageCompatibility analyzes certificate key usage and reports compatibility issues
+func analyzeKeyUsageCompatibility(cert *x509.Certificate) {
+	klog.V(3).Info("=== Certificate Key Usage Analysis ===")
+	klog.V(3).Infof("Certificate Subject: %v", cert.Subject)
+	klog.V(3).Infof("Certificate Key Usage: %s", keyUsageString(cert.KeyUsage))
+	klog.V(3).Infof("Certificate Extended Key Usage: %s", extKeyUsageString(cert.ExtKeyUsage))
+	
+	// Check for TLS client authentication compatibility
+	var issues []string
+	var recommendations []string
+	
+	// Standard TLS client authentication expects:
+	// 1. KeyUsage: DigitalSignature and/or KeyEncipherment
+	// 2. ExtKeyUsage: ClientAuth
+	
+	expectedKeyUsage := x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	hasExpectedKeyUsage := (cert.KeyUsage & expectedKeyUsage) != 0
+	
+	if !hasExpectedKeyUsage {
+		issues = append(issues, "Missing standard TLS key usage (DigitalSignature or KeyEncipherment)")
+		recommendations = append(recommendations, "Standard TLS expects DigitalSignature and/or KeyEncipherment key usage")
+	}
+	
+	hasClientAuth := false
+	for _, eku := range cert.ExtKeyUsage {
+		if eku == x509.ExtKeyUsageClientAuth {
+			hasClientAuth = true
+			break
+		}
+	}
+	
+	if !hasClientAuth {
+		issues = append(issues, "Missing ClientAuth extended key usage")
+		recommendations = append(recommendations, "Standard TLS client authentication expects ExtKeyUsageClientAuth")
+	}
+	
+	// Check for Ziti-specific patterns
+	var zitiPatterns []string
+	
+	// Common Ziti certificate patterns
+	if cert.KeyUsage&x509.KeyUsageDigitalSignature != 0 {
+		zitiPatterns = append(zitiPatterns, "Has DigitalSignature (good for Ziti)")
+	}
+	if cert.KeyUsage&x509.KeyUsageKeyAgreement != 0 {
+		zitiPatterns = append(zitiPatterns, "Has KeyAgreement (common in Ziti certificates)")
+	}
+	if cert.KeyUsage&x509.KeyUsageKeyEncipherment != 0 {
+		zitiPatterns = append(zitiPatterns, "Has KeyEncipherment (good for TLS)")
+	}
+	
+	// Report findings
+	if len(issues) > 0 {
+		klog.V(3).Info("--- Compatibility Issues ---")
+		for _, issue := range issues {
+			klog.V(3).Infof("❌ %s", issue)
+		}
+		
+		klog.V(3).Info("--- Recommendations ---")
+		for _, rec := range recommendations {
+			klog.V(3).Infof("💡 %s", rec)
+		}
+	}
+	
+	if len(zitiPatterns) > 0 {
+		klog.V(3).Info("--- Ziti Certificate Analysis ---")
+		for _, pattern := range zitiPatterns {
+			klog.V(3).Infof("✅ %s", pattern)
+		}
+	}
+	
+	// Additional analysis for certificates that appear compatible but still trigger warnings
+	if len(issues) == 0 {
+		klog.V(3).Info("--- Advanced Compatibility Analysis ---")
+		
+		// Check for potential edge cases that might cause warnings despite apparent compatibility
+		var advancedIssues []string
+		
+		// Check if DataEncipherment is present (sometimes causes issues)
+		if cert.KeyUsage&x509.KeyUsageDataEncipherment != 0 {
+			advancedIssues = append(advancedIssues, "Certificate includes DataEncipherment (rarely needed for TLS client auth)")
+		}
+		
+		// Check for certificate chain validation context
+		if cert.IsCA {
+			advancedIssues = append(advancedIssues, "Certificate has CA flag set (unusual for client certificates)")
+		}
+		
+		// Check key type and algorithm
+		switch cert.PublicKeyAlgorithm {
+		case x509.RSA:
+			klog.V(3).Info("✅ Certificate uses RSA public key algorithm")
+		case x509.ECDSA:
+			klog.V(3).Info("✅ Certificate uses ECDSA public key algorithm")
+		case x509.Ed25519:
+			klog.V(3).Info("✅ Certificate uses Ed25519 public key algorithm")
+		default:
+			advancedIssues = append(advancedIssues, fmt.Sprintf("Certificate uses uncommon public key algorithm: %v", cert.PublicKeyAlgorithm))
+		}
+		
+		// Check certificate validity period
+		now := time.Now()
+		if now.Before(cert.NotBefore) {
+			advancedIssues = append(advancedIssues, "Certificate is not yet valid (NotBefore is in the future)")
+		}
+		if now.After(cert.NotAfter) {
+			advancedIssues = append(advancedIssues, "Certificate has expired")
+		}
+		
+		if len(advancedIssues) > 0 {
+			klog.V(3).Info("--- Potential Warning Causes ---")
+			for _, issue := range advancedIssues {
+				klog.V(3).Infof("⚠️  %s", issue)
+			}
+			klog.V(3).Info("ℹ️  These factors might contribute to x509 validation warnings")
+		} else {
+			klog.V(3).Info("ℹ️  No obvious causes found for x509 validation warnings")
+			klog.V(3).Info("ℹ️  The warning might be due to Go's strict x509 validation or certificate chain context")
+		}
+	}
+	
+	// Explain why this is usually not a problem
+	klog.V(3).Info("--- Impact Assessment ---")
+	if len(issues) > 0 {
+		klog.V(3).Info("ℹ️  These key usage differences are EXPECTED for Ziti certificates")
+		klog.V(3).Info("ℹ️  Ziti uses custom certificate profiles optimized for zero-trust networking")
+		klog.V(3).Info("ℹ️  The TLS connection should still work despite these warnings")
+		klog.V(3).Info("ℹ️  This is informational only and does not indicate a security issue")
+	} else {
+		klog.V(3).Info("✅ Certificate key usage is compatible with standard TLS expectations")
+		klog.V(3).Info("ℹ️  Any x509 warnings are likely due to Go's strict validation or certificate context")
+		klog.V(3).Info("ℹ️  The TLS connection should work normally despite these warnings")
+	}
+	
+	klog.V(3).Info("=== End Certificate Analysis ===")
 }

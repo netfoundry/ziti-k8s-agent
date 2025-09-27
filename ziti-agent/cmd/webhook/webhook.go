@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common"
@@ -120,13 +121,40 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 	if zitiIdentity == nil {
-		return nil, fmt.Errorf("Ziti identity not loaded")
+		return nil, fmt.Errorf("ziti identity not loaded")
+	}
+
+	// Debug certificate and key data
+	klog.V(4).Infof("Certificate data length: %d bytes", len(zitiIdentity.ID.Cert))
+	klog.V(4).Infof("Private key data length: %d bytes", len(zitiIdentity.ID.Key))
+	if len(zitiIdentity.ID.Cert) > 100 {
+		klog.V(5).Infof("Certificate data preview: %s...", zitiIdentity.ID.Cert[:100])
+	} else {
+		klog.V(5).Infof("Certificate data preview: %s", zitiIdentity.ID.Cert)
+	}
+	if len(zitiIdentity.ID.Key) > 100 {
+		klog.V(5).Infof("Private key data preview: %s...", zitiIdentity.ID.Key[:100])
+	} else {
+		klog.V(5).Infof("Private key data preview: %s", zitiIdentity.ID.Key)
+	}
+
+	// Clean certificate and key data by removing "pem:" prefix if present
+	certData := zitiIdentity.ID.Cert
+	keyData := zitiIdentity.ID.Key
+	
+	if strings.HasPrefix(certData, "pem:") {
+		certData = strings.TrimPrefix(certData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from certificate data")
+	}
+	if strings.HasPrefix(keyData, "pem:") {
+		keyData = strings.TrimPrefix(keyData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from private key data")
 	}
 
 	// parse ziti admin certs to synchronously (blocking) create a ziti identity
-	zitiAdminIdentity, err := tls.X509KeyPair([]byte(zitiIdentity.ID.Cert), []byte(zitiIdentity.ID.Key))
+	zitiAdminIdentity, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse X509 key pair: %w", err)
 	}
 
 	if len(zitiAdminIdentity.Certificate) == 0 {
@@ -138,6 +166,11 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Log certificate details and analyze key usage compatibility
+	klog.V(4).Infof("Client certificate Subject: %v", parsedCert.Subject)
+	klog.V(4).Infof("Client certificate Issuer: %v", parsedCert.Issuer)
+	klog.V(4).Infof("Client certificate Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
 
 	zitiCtrlCaBundle := []byte(zitiIdentity.ID.CA)
 	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
@@ -192,7 +225,7 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 	kc, err := k.Client()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize cluster client: %v", err)
+		err = fmt.Errorf("failed to initialize kube-apiserver client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -201,7 +234,7 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 	zc, err := zitiClientImpl()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize ziti client: %v", err)
+		err = fmt.Errorf("failed to initialize ziti client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -239,7 +272,7 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 	kc, err := k.Client()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize cluster client: %v", err)
+		err = fmt.Errorf("failed to initialize kube-apiserver client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -248,7 +281,7 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 	zc, err := zitiClientImpl()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize ziti client: %v", err)
+		err = fmt.Errorf("failed to initialize ziti client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

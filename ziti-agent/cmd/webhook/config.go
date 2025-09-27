@@ -164,13 +164,13 @@ func loadZitiIdentityFromEnv() (*ZitiIdentityConfig, error) {
 
 	// Validate required fields
 	if identity.ID.CA == "" {
-		return nil, errors.New("Ziti identity missing required field: id.ca")
+		return nil, errors.New("ziti identity missing required field: id.ca")
 	}
 	if identity.ID.Cert == "" {
-		return nil, errors.New("Ziti identity missing required field: id.cert")
+		return nil, errors.New("ziti identity missing required field: id.cert")
 	}
 	if identity.ID.Key == "" {
-		return nil, errors.New("Ziti identity missing required field: id.key")
+		return nil, errors.New("ziti identity missing required field: id.key")
 	}
 
 	klog.V(4).Infof("Successfully loaded Ziti identity from ZITI_IDENTITY_JSON environment variable")
@@ -230,11 +230,14 @@ func convertToMgmtAPI(clientAPIURL string) (string, error) {
 	
 	// Replace /edge/client/v1 with /edge/management/v1
 	path := parsedURL.Path
-	if strings.HasSuffix(path, "/edge/client/v1") {
+	if strings.Contains(path, "/edge/management/v1") {
+		// Already a management API URL, use as-is
+		// No changes needed
+	} else if strings.HasSuffix(path, "/edge/client/v1") {
 		path = strings.TrimSuffix(path, "/edge/client/v1") + "/edge/management/v1"
-	} else if strings.Contains(path, "/edge/client/") {
+	} else if strings.Contains(path, "/edge/client/v1") {
 		// Handle other client API versions
-		path = strings.Replace(path, "/edge/client/", "/edge/management/", 1)
+		path = strings.Replace(path, "/edge/client/v1", "/edge/management/v1", 1)
 	} else {
 		// If it doesn't look like a client API URL, assume it's a base URL and append management path
 		path = strings.TrimSuffix(path, "/") + "/edge/management/v1"
