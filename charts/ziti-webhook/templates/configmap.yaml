@@ -11,7 +11,7 @@ data:
       port: {{ .Values.server.port }}
     
     controller:
-      mgmtApi: {{ required "controller.mgmtApi is required" .Values.controller.mgmtApi | quote }}
+      mgmtApi: {{ .Values.controller.mgmtApi | quote }}
       roleKey: {{ .Values.controller.roleKey | quote }}
     
     sidecar:
@@ -39,3 +39,6 @@ data:
     
     security:
       podSecurityContextOverride: {{ .Values.security.podSecurityContextOverride }}
+    
+    clusterDns:
+      zone: {{ .Values.clusterDns.zone | quote }}

@@ -49,3 +49,10 @@ Selector labels
 app.kubernetes.io/name: {{ include "ziti-webhook.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Ziti identity secret key for chart-managed secrets
+*/}}
+{{- define "ziti-webhook.managedSecretKey" -}}
+ziti_id.json
+{{- end }}

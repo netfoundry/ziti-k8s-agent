@@ -442,10 +442,11 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context, podMeta *metav1.ObjectM
 		dnsConfig.Searches = zh.Config.SearchDomains
 		klog.V(4).Infof("Using custom search domains: %v", zh.Config.SearchDomains)
 	} else {
-		// Add namespace-specific search domain
-		namespaceDomain := fmt.Sprintf("%s.svc.cluster.local", podMeta.Namespace)
-		dnsConfig.Searches = []string{namespaceDomain, "svc.cluster.local", "cluster.local"}
-		klog.V(4).Infof("Using default cluster search domains with namespace %s: %v", podMeta.Namespace, dnsConfig.Searches)
+		// Add namespace-specific search domain using configurable cluster zone
+		namespaceDomain := fmt.Sprintf("%s.svc.%s", podMeta.Namespace, runtimeConfig.ClusterDns.Zone)
+		svcDomain := fmt.Sprintf("svc.%s", runtimeConfig.ClusterDns.Zone)
+		dnsConfig.Searches = []string{namespaceDomain, svcDomain, runtimeConfig.ClusterDns.Zone}
+		klog.V(4).Infof("Using default cluster search domains with namespace %s and zone %s: %v", podMeta.Namespace, runtimeConfig.ClusterDns.Zone, dnsConfig.Searches)
 	}
 
 	return dnsConfig, nil

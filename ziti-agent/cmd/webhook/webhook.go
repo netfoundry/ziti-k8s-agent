@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -118,9 +119,12 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 }
 
 func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
+	if zitiIdentity == nil {
+		return nil, fmt.Errorf("Ziti identity not loaded")
+	}
 
 	// parse ziti admin certs to synchronously (blocking) create a ziti identity
-	zitiAdminIdentity, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
+	zitiAdminIdentity, err := tls.X509KeyPair([]byte(zitiIdentity.ID.Cert), []byte(zitiIdentity.ID.Key))
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +139,7 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 		return nil, err
 	}
 
+	zitiCtrlCaBundle := []byte(zitiIdentity.ID.CA)
 	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
 	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
 	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
@@ -145,18 +150,42 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 		return nil, err
 	}
 
-	cfg := zitiedge.Config{ApiEndpoint: runtimeConfig.Controller.MgmtAPI,
-		Cert:       parsedCert,
-		PrivateKey: zitiAdminIdentity.PrivateKey,
-		CAS:        *certPool,
-	}
-
-	cfg.CABundle = zitiCtrlCaBundle
-	zc, err := zitiedge.Client(&cfg)
+	// Try each management API endpoint until one works
+	zc, err := createZitiClientWithFailover(runtimeConfig.Controller.MgmtAPIEndpoints, parsedCert, zitiAdminIdentity.PrivateKey, *certPool, zitiCtrlCaBundle)
 
 	return zc, err
 
 }
+
+// createZitiClientWithFailover attempts to create a Ziti client by trying each management API endpoint
+func createZitiClientWithFailover(endpoints []string, cert *x509.Certificate, privateKey crypto.PrivateKey, certPool x509.CertPool, caBundle []byte) (*rest_management_api_client.ZitiEdgeManagement, error) {
+	var lastErr error
+	
+	for i, endpoint := range endpoints {
+		klog.V(2).Infof("Attempting to connect to management API endpoint %d/%d: %s", i+1, len(endpoints), endpoint)
+		
+		cfg := zitiedge.Config{
+			ApiEndpoint: endpoint,
+			Cert:        cert,
+			PrivateKey:  privateKey,
+			CAS:         certPool,
+		}
+		cfg.CABundle = caBundle
+		
+		zc, err := zitiedge.Client(&cfg)
+		if err != nil {
+			klog.V(2).Infof("Failed to create client for endpoint %s: %v", endpoint, err)
+			lastErr = err
+			continue
+		}
+		
+		klog.V(1).Infof("Successfully created client for management API endpoint: %s", endpoint)
+		return zc, nil
+	}
+	
+	return nil, fmt.Errorf("failed to connect to any management API endpoint, last error: %w", lastErr)
+}
+
 
 func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 
@@ -257,7 +286,14 @@ func webhook(cmd *cobra.Command, args []string) {
 		klog.Fatalf("failed to load configuration: %v", err)
 	}
 
-	loadCertificatesFromEnv()
+	// Load Ziti identity from environment variable
+	zitiIdentity, err = loadZitiIdentityFromEnv()
+	if err != nil {
+		klog.Fatalf("failed to load Ziti identity: %v", err)
+	}
+
+	// Load webhook server TLS certificates from environment variables
+	loadWebhookTLSFromEnv()
 	
 	klog.Infof("Running version is %s", common.Version)
 
@@ -265,8 +301,8 @@ func webhook(cmd *cobra.Command, args []string) {
 		klog.Fatal("TLS_CERT and TLS_PRIVATE_KEY must be provided via environment variables")
 	}
 
-	if len(zitiAdminCert) == 0 || len(zitiAdminKey) == 0 || len(zitiCtrlCaBundle) == 0 {
-		klog.Fatal("ZITI_ADMIN_CERT, ZITI_ADMIN_KEY, and ZITI_CTRL_CA_BUNDLE must be provided via environment variables")
+	if zitiIdentity == nil {
+		klog.Fatal("Ziti identity must be loaded from JSON file")
 	}
 
 	port := runtimeConfig.Server.Port

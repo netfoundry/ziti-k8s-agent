@@ -9,7 +9,7 @@ server:
 
 # Ziti controller configuration
 controller:
-  # Management API endpoint (required)
+  # Management API endpoint (optional - if not specified, will be inferred from identity configuration)
   mgmtApi: ""
   # Role key for identity annotations
   roleKey: "identity.openziti.io/role-attributes"
@@ -77,30 +77,24 @@ webhook:
     # Options: namespace, pod, or both (comma-separated)
     enabled: "namespace"
 
-# Identity configuration (required)
+# Ziti Identity Configuration (required)
+# This webhook requires a Ziti admin identity with full network privileges
 identity:
-  # Existing secret configuration (used when cert/key/ca are empty)
-  secretName: "ziti-agent-identity"
-  # Keys in the secret (tls.crt and tls.key are standard, tls.ca is custom)
-  certKey: "tls.crt"
-  keyKey: "tls.key"
-  caKey: "tls.ca"
+  # Existing secret configuration (PREFERRED FOR SECURITY)
+  existingSecret:
+    # Name of the existing secret containing the Ziti identity JSON
+    # If specified, this secret will be used instead of creating a chart-managed secret
+    name: ""
+    # Key in the existing secret containing the complete Ziti identity JSON configuration
+    key: "netfoundry-admin.json"
   
-  # Create secret from values (when provided, automatically creates secret)
-  # Base64 encoded certificate data - when any of these are provided,
-  # a secret will be created automatically
-  cert: ""
-  key: ""
-  ca: ""
+  # Method 1: Use existing Kubernetes secret (PREFERRED FOR SECURITY)
+  # Set identity.existingSecret.name to your existing secret name
   
-  # Trust bundle discovery (for same-cluster Ziti Controller)
-  trustBundle:
-    # Enable automatic discovery of Ziti Controller CA bundle from ConfigMap
-    enabled: false
-    # ConfigMap name containing the trust bundle (default matches ziti-controller chart)
-    configMapName: "ziti-controller-ctrl-plane-cas"
-    # Key in the ConfigMap containing the CA bundle
-    configMapKey: "ctrl-plane-cas.crt"
+  # Method 2: Provide identity JSON directly (FOR DEVELOPMENT/TESTING ONLY)
+  # WARNING: This embeds the admin identity in the Helm release
+  # The identity JSON should contain the standard Ziti format with keys: id.ca, id.cert, id.key, ztAPI, ztAPIs
+  json: ""
 
 # Cluster DNS configuration
 clusterDns:

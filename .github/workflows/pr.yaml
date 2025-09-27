@@ -14,7 +14,7 @@ env:
   GKE_REGION: us-central1
   GKE_NETWORK_NAME: default
   GKE_SUBNETWORK_NAME: default
-  ZITI_AGENT_NAMESPACE: ziti-webhook # this test assumes the namespace does not exist and will be created during the test
+  ZITI_AGENT_NAMESPACE: netfoundry-system # this test assumes the namespace does not exist and will be created during the test
 
 jobs:
   build_deploy:
@@ -565,19 +565,12 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          # Extract admin identity credentials from the identity file
-          # IDENTITY_FILE exported in prior step create-nf-network-services
-          ziti ops unwrap "$IDENTITY_FILE"
-          IDENTITY_DIR=$(dirname "$IDENTITY_FILE")
-          IDENTITY_BASE=$(basename "$IDENTITY_FILE" .json)
-          
           # Create namespace and admin identity secrets for both clusters
+          # IDENTITY_FILE exported in prior step create-nf-network-services
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
             kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context="$CLUSTER" || true
             kubectl create secret generic "${ZITI_AGENT_IDENTITY}" \
-              --from-file=tls.crt="${IDENTITY_DIR}/${IDENTITY_BASE}.cert" \
-              --from-file=tls.key="${IDENTITY_DIR}/${IDENTITY_BASE}.key" \
-              --from-file=tls.ca="${IDENTITY_DIR}/${IDENTITY_BASE}.ca" \
+              --from-file=ziti_id.json="$IDENTITY_FILE" \
               --namespace="$ZITI_AGENT_NAMESPACE" \
               --context="$CLUSTER"
           done
@@ -641,7 +634,7 @@ jobs:
                 --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
                 --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
                 --set webhook.selectors.enabled="$SELECTOR" \
-                --set identity.secretName="${ZITI_AGENT_IDENTITY}" \
+                --set identity.secret.name="${ZITI_AGENT_IDENTITY}" \
                 --timeout 5m; then
                 break
               else

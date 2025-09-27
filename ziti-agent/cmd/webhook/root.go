@@ -15,13 +15,11 @@ const (
 )
 
 var (
-	configPath       string
-	cert             []byte
-	key              []byte
-	zitiAdminCert    []byte
-	zitiAdminKey     []byte
-	zitiCtrlCaBundle []byte
-	runtimeConfig    *WebhookConfig
+	configPath    string
+	cert          []byte
+	key           []byte
+	zitiIdentity  *ZitiIdentityConfig
+	runtimeConfig *WebhookConfig
 )
 
 func NewWebhookCmd() *cobra.Command {

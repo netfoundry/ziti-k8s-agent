@@ -1,3 +1,9 @@
+{{- if and (not .Values.identity.existingSecret.name) (not .Values.identity.json) }}
+{{- fail "Either identity.existingSecret.name must be specified (PREFERRED FOR SECURITY) or identity.json must be provided for development/testing" }}
+{{- end }}
+{{- if and .Values.identity.existingSecret.name .Values.identity.json }}
+{{- fail "Cannot specify both identity.existingSecret.name and identity.json - choose one method" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,27 +45,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "ziti-webhook.fullname" . }}-tls
                   key: tls.key
-            - name: ZITI_ADMIN_CERT
+            - name: ZITI_IDENTITY_JSON
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.identity.secretName | default (printf "%s-identity" (include "ziti-webhook.fullname" .)) }}
-                  key: {{ .Values.identity.certKey }}
-            - name: ZITI_ADMIN_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.identity.secretName | default (printf "%s-identity" (include "ziti-webhook.fullname" .)) }}
-                  key: {{ .Values.identity.keyKey }}
-            - name: ZITI_CTRL_CA_BUNDLE
-              valueFrom:
-                {{- if and .Values.identity.trustBundle.enabled (not .Values.identity.ca) }}
-                configMapKeyRef:
-                  name: {{ .Values.identity.trustBundle.configMapName }}
-                  key: {{ .Values.identity.trustBundle.configMapKey }}
-                {{- else }}
-                secretKeyRef:
-                  name: {{ .Values.identity.secretName | default (printf "%s-identity" (include "ziti-webhook.fullname" .)) }}
-                  key: {{ .Values.identity.caKey }}
-                {{- end }}
+                  {{- if .Values.identity.existingSecret.name }}
+                  name: {{ .Values.identity.existingSecret.name }}
+                  key: {{ .Values.identity.existingSecret.key }}
+                  {{- else }}
+                  name: {{ include "ziti-webhook.fullname" . }}-identity
+                  key: {{ include "ziti-webhook.managedSecretKey" . }}
+                  {{- end }}
           volumeMounts:
             - name: webhook-config
               mountPath: /etc/ziti/webhook

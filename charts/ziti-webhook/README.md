@@ -12,64 +12,55 @@ This Helm chart deploys the Ziti Kubernetes Admission Webhook, which automatical
 
 ### 1. Prepare Ziti Admin Identity
 
+> **⚠️ SECURITY WARNING**: This webhook requires a Ziti admin identity with full network privileges. Handle with extreme care!
+
 You have two options for providing the Ziti admin identity:
 
-#### Option A: Existing Secret (Recommended for Production)
+#### Option A: Existing Secret
 
-Create a secret containing your Ziti admin identity:
+Create a secret containing the admin identity JSON configuration:
 
 ```bash
-# Extract certificate components from enrolled identity JSON
-ziti ops unwrap ziti-admin.json
-
-# Create secret from the extracted files
+# Create secret from enrolled identity JSON file
 # NOTE: Must be created in the same namespace where the webhook chart will be installed
-kubectl create secret generic "ziti-webhook-identity" \
-  --from-file=tls.crt=ziti-admin.cert \
-  --from-file=tls.key=ziti-admin.key \
-  --from-file=tls.ca=ziti-admin.ca \
-  --namespace=default
+kubectl create secret generic "netfoundry-admin-identity" \
+  --from-file=netfoundry-admin.json=netfoundry-admin.json \
+  --namespace=netfoundry-system
 
 # Install with existing secret
-helm upgrade --install --namespace default "ziti-webhook" ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://your-controller:1280/edge/management/v1" \
-  --set identity.secretName="ziti-webhook-identity"
+helm upgrade --install --namespace netfoundry-system "ziti-webhook" ./charts/ziti-webhook \
+  --set identity.existingSecret.name="netfoundry-admin-identity"
 ```
 
-> **📝 Certificate Requirements:**
+> **📝 Identity Requirements:**
 >
-> - `ziti-admin.cert/.key`: Admin identity certificate/key for Ziti Controller management API authentication (extracted from enrolled identity JSON)
-> - `ziti-admin.ca`: CA bundle containing root certificates that signed the Ziti Controller's TLS certificate (extracted from enrolled identity JSON)
+> - `netfoundry-admin.json`: Complete enrolled Ziti admin identity JSON file containing `id.ca`, `id.cert`, `id.key`, `ztAPI`, and `ztAPIs` fields
+> - **Admin Privileges**: This identity must have full administrative privileges in the Ziti network
 > - **Webhook TLS Certificate**: Managed separately by cert-manager (self-signed by default) for kube-apiserver ↔ webhook communication
 
-#### Option B: Chart-Managed Secret (Development/Testing Only)
+#### Option B: Chart-Managed Secret
 
-Provide base64-encoded certificate data via Helm values:
+> **⚠️ Security Warning**: Option B embeds the complete admin identity in Helm values, which may be stored in version control or Helm history. This exposes full network administrative credentials. Use only for development/testing environments!
+
+Provide the complete identity JSON directly via Helm values:
 
 ```bash
-# Extract and base64 encode your Ziti certificates
-ziti ops unwrap ziti-admin.json
-CERT_B64=$(base64 -w 0 < ziti-admin.cert)
-KEY_B64=$(base64 -w 0 < ziti-admin.key)
-CA_B64=$(base64 -w 0 < ziti-admin.ca)
-
-# Install with embedded secrets (automatically creates secret when values are provided)
+# Read the identity JSON and provide it directly (automatically creates secret)
+# Using --set-json validates the JSON syntax immediately and prevents deployment with invalid JSON
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://your-controller:1280/edge/management/v1" \
-  --set identity.cert="$CERT_B64" \
-  --set identity.key="$KEY_B64" \
-  --set identity.ca="$CA_B64"
+  --set-json identity.json="$(< netfoundry-admin.json)"
 ```
 
-> **⚠️ Security Warning**: Option B embeds sensitive credentials in Helm values, which may be stored in version control or Helm history. Use only for development/testing.
+> **💡 Tip**: Using `--set-json` instead of `--set` or `--set-file` provides immediate JSON validation, catching syntax errors before deployment rather than during runtime.
 
 ### 2. Install the Chart
 
+Install with existing secret (Option A):
+
 ```bash
-# Install with existing secret (Option A)
-helm upgrade --install --namespace default ziti-webhook ./charts/ziti-webhook \
+helm upgrade --install --namespace netfoundry-system ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://your-controller:1280/edge/management/v1" \
-  --set identity.secretName="ziti-webhook-identity"
+  --set identity.existingSecret.name="netfoundry-admin-identity"
 ```
 
 > **⚠️ Important**: The webhook deployment must be installed in the same namespace as your identity secret, as this is where the webhook server runs and provides pod mutation services to the kube-apiserver.
@@ -89,7 +80,7 @@ The following table lists the configurable parameters and their default values:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `controller.mgmtApi` | Ziti controller management API URL (required) | `""` |
+| `controller.mgmtApi` | Ziti controller management API URL (optional - inferred from identity if not specified) | `""` |
 | `controller.roleKey` | Role key for identity annotations | `"identity.openziti.io/role-attributes"` |
 
 ### Sidecar Configuration
@@ -117,71 +108,104 @@ The following table lists the configurable parameters and their default values:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
+| `deployment.name` | Deployment name | `"ziti-admission-wh-deployment"` |
 | `deployment.image.repo` | Webhook container image repository | `"docker.io/netfoundry/ziti-k8s-agent"` |
 | `deployment.image.tag` | Webhook image tag | `"latest"` |
 | `deployment.image.pullPolicy` | Webhook image pull policy | `"IfNotPresent"` |
 | `deployment.replicas` | Number of webhook replicas | `1` |
-| `deployment.resources` | Resource requests and limits | See values.yaml |
+| `deployment.resources.requests.cpu` | CPU request | `"100m"` |
+| `deployment.resources.requests.memory` | Memory request | `"128Mi"` |
+| `deployment.resources.limits.cpu` | CPU limit | `"500m"` |
+| `deployment.resources.limits.memory` | Memory limit | `"512Mi"` |
 
 ### Certificate Management
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `certManager.enabled` | Enable cert-manager integration | `true` |
+| `certManager.issuer.name` | Certificate issuer name | `"ziti-k8s-agent-selfsigned-ca-issuer"` |
+| `certManager.certificate.name` | Certificate name | `"ziti-admission-cert"` |
+| `certManager.certificate.secretName` | Certificate secret name | `"ziti-webhook-server-cert"` |
 | `certManager.certificate.duration` | Certificate duration | `"2160h"` |
 | `certManager.certificate.renewBefore` | Renew before expiry | `"360h"` |
+
+### Service Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `service.name` | Service name | `"ziti-admission-service"` |
+| `service.port` | Service port | `443` |
+| `service.targetPort` | Target port | `9443` |
+
+### Webhook Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `webhook.name` | Webhook name | `"ziti-tunnel-sidecar"` |
+| `webhook.failurePolicy` | Webhook failure policy | `"Fail"` |
+| `webhook.selectors.enabled` | Webhook selector mode (namespace, pod, or both) | `"namespace"` |
 
 ### Identity Configuration
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `identity.secretName` | Name of secret containing admin identity | `"ziti-agent-identity"` |
-| `identity.certKey` | Certificate key in secret | `"tls.crt"` |
-| `identity.keyKey` | Private key key in secret | `"tls.key"` |
-| `identity.caKey` | CA bundle key in secret | `"tls.ca"` |
-| `identity.cert` | Base64-encoded certificate (creates secret when provided) | `""` |
-| `identity.key` | Base64-encoded private key (creates secret when provided) | `""` |
-| `identity.ca` | Base64-encoded CA bundle (creates secret when provided) | `""` |
-| `identity.trustBundle.enabled` | Enable automatic CA bundle discovery from ConfigMap | `true` |
-| `identity.trustBundle.configMapName` | ConfigMap containing Ziti Controller CA bundle | `"ziti-controller-ctrl-plane-cas"` |
-| `identity.trustBundle.configMapKey` | Key in ConfigMap containing CA bundle | `"ctrl-plane-cas.crt"` |
+| `identity.existingSecret.name` | Name of existing secret containing identity JSON | `""` |
+| `identity.existingSecret.key` | Key in existing secret containing identity JSON | `"netfoundry-admin.json"` |
+| `identity.json` | Complete Ziti identity JSON (FOR DEVELOPMENT/TESTING ONLY) | `""` |
 
-## Usage Examples
+### Cluster DNS Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `clusterDns.zone` | Cluster DNS zone for search domains | `"cluster.local"` |
 
 ### Basic Installation
 
 ```bash
-helm upgrade --install --namespace default ziti-webhook ./charts/ziti-webhook \
+# Option 1: Create secret with custom name
+kubectl create secret generic netfoundry-admin-identity \
+  --from-file=netfoundry-admin.json=netfoundry-admin.json \
+  --namespace=netfoundry-system
+
+helm upgrade --install --namespace netfoundry-system ziti-webhook ./charts/ziti-webhook \
+  --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity"
+```
+
+```bash
+# Option 2: Create secret with default name (release-name + "-identity")
+kubectl create secret generic ziti-webhook-identity \
+  --from-file=netfoundry-admin.json=netfoundry-admin.json \
+  --namespace=netfoundry-system
+
+helm upgrade --install --namespace netfoundry-system ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1"
+  # identity.existingSecret.name defaults to "ziti-webhook-identity" (release name + "-identity")
 ```
 
 ### Same-Cluster Ziti Controller
 
-When deploying in the same cluster as a Ziti Controller, the webhook can automatically discover the CA bundle:
+When deploying in the same cluster as a Ziti Controller:
 
 ```bash
-# Extract only cert and key (CA bundle discovered automatically)
-ziti ops unwrap ziti-admin.json
+# Create secret from enrolled identity JSON
+kubectl create secret generic netfoundry-admin-identity \
+  --from-file=netfoundry-admin.json=netfoundry-admin.json \
+  --namespace=netfoundry-system
 
-# Create secret without CA bundle
-kubectl create secret tls ziti-webhook-identity \
-  --cert=ziti-admin.cert \
-  --key=ziti-admin.key \
-  --namespace=default
-
-# Install webhook (will use ConfigMap for CA bundle)
+# Install webhook
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
   --set controller.mgmtApi="https://ziti-controller-ctrl:1280/edge/management/v1" \
-  --set identity.secretName="ziti-webhook-identity"
+  --set identity.existingSecret.name="netfoundry-admin-identity"
 ```
 
-### Custom Trust Bundle ConfigMap
+### Development/Testing with Embedded Identity
 
 ```bash
+# WARNING: Only for development/testing - embeds admin credentials in Helm values
+# Using --set-json validates the JSON syntax immediately
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1" \
-  --set identity.trustBundle.configMapName="my-ziti-controller-cas" \
-  --set identity.trustBundle.configMapKey="ca-bundle.crt"
+  --set-json identity.json="$(< netfoundry-admin.json)"
 ```
 
 ### Custom DNS Configuration
@@ -195,8 +219,15 @@ helm upgrade --install ziti-webhook ./charts/ziti-webhook \
 ### Production Configuration
 
 ```bash
+# Create production identity secret
+kubectl create secret generic netfoundry-admin-identity \
+  --from-file=netfoundry-admin.json=netfoundry-admin.json \
+  --namespace=netfoundry-system
+
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
+  --namespace=netfoundry-system \
   --set controller.mgmtApi="https://controller.example.com:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity" \
   --set deployment.replicas=3 \
   --set deployment.resources.requests.cpu="200m" \
   --set deployment.resources.requests.memory="256Mi" \

@@ -18,48 +18,36 @@ git clone https://github.com/netfoundry/ziti-k8s-agent.git
 cd ziti-k8s-agent
 ```
 
-#### Option 1: Same-Cluster Ziti Controller
+#### Option 1: Existing Secret (PREFERRED FOR SECURITY)
 
-When the Ziti Controller is deployed in the same cluster, the webhook can automatically discover the CA bundle:
+> **⚠️ SECURITY WARNING**: This webhook requires a Ziti admin identity with full network privileges. Handle with extreme care!
 
-```bash
-# Extract admin identity credentials
-ziti ops unwrap path/to/ziti-admin.json
-
-# Create secret with admin identity (CA bundle discovered automatically)
-kubectl create secret tls ziti-agent-identity \
-  --cert=path/to/ziti-admin.cert \
-  --key=path/to/ziti-admin.key \
-  --namespace=default
-
-# Install webhook in a namespace where the trust bundle's configmap is replicated (the default is all namespaces)
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://ziti-controller-ctrl:1280/edge/management/v1"
-```
-
-#### Option 2: External Ziti Controller
-
-For external controllers, provide the complete CA bundle:
+Create a secret containing your complete Ziti identity JSON configuration:
 
 ```bash
-# Extract admin identity credentials
-ziti ops unwrap path/to/ziti-admin.json
-
-# Create secret with all components
-kubectl create secret generic ziti-agent-identity \
-  --from-file=tls.crt=path/to/ziti-admin.cert \
-  --from-file=tls.key=path/to/ziti-admin.key \
-  --from-file=tls.ca=path/to/ziti-admin.ca \
-  --namespace=default
+# Create secret from enrolled identity JSON file
+kubectl create secret generic netfoundry-admin-identity \
+  --from-file=netfoundry-admin.json=netfoundry-admin.json \
+  --namespace=netfoundry-system
 
 # Install webhook
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://external-controller.example.com:1280/edge/management/v1"
+  --set identity.existingSecret.name="netfoundry-admin-identity"
+
+#### Option 2: Chart-Managed Secret (FOR DEVELOPMENT/TESTING ONLY)
+
+> **⚠️ EXTREME SECURITY WARNING**: Option 2 embeds the complete admin identity in Helm values, which may be stored in version control or Helm history. This exposes full network administrative credentials. Use ONLY for development/testing environments!
+
+Provide the complete identity JSON directly via Helm values:
+
+```bash
+# Read the identity JSON and provide it directly
+# Using --set-json validates the JSON syntax immediately
+helm upgrade --install ziti-webhook ./charts/ziti-webhook \
+  --set-json identity.json="$(< netfoundry-admin.json)"
 ```
 
 ## Select Pods for Sidecar Injection
-
-Configure the webhook to select pods using the `webhook.selectors.enabled` setting. The sidecar is injected only on pod creation.
 
 ### Select by Namespace (Default)
 
@@ -71,7 +59,7 @@ kubectl label namespace {name} tunnel.openziti.io/enabled="true"
 
 # Install webhook with namespace selector (default)
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://controller:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity" \
   --set webhook.selectors.enabled="namespace"
 ```
 
@@ -85,7 +73,7 @@ kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"
 
 # Install webhook with pod selector
 helm install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://controller:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity" \
   --set webhook.selectors.enabled="pod"
 ```
 
@@ -100,7 +88,7 @@ kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"
 
 # Install webhook with both selectors
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://ctrl0.ziti.example.com:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity" \
   --set webhook.selectors.enabled="namespace,pod"
 ```
 
@@ -134,7 +122,7 @@ Pods authorized to bind a Ziti service require that service to have a host addre
 
 ### Prerequisities
 
-1. an OpenZiti network - either NetFoundry Cloud or self-hosted
+1. an OpenZiti network - either NetFoundry Cloud, NetFoundry On-Premises, or self-hosted
 1. A JSON identity configuration file for an OpenZiti identity with the admin privilege
 1. A K8S namespace in which to deploy the agent
 
@@ -147,6 +135,7 @@ For complex deployments, create a custom values file:
 ```yaml
 # values-production.yaml
 controller:
+  # Optional - if not specified, will be inferred from identity configuration
   mgmtApi: "https://ctrl0.ziti.example.com:1280/edge/management/v1"
 
 deployment:
@@ -184,14 +173,15 @@ webhook:
     enabled: "namespace,pod"  # Both namespace and pod selectors
   failurePolicy: "Fail"
 
-# For external controllers, disable trust bundle discovery
-identity:
-  trustBundle:
-    enabled: false
-
 # Custom cluster DNS configuration
 clusterDns:
   zone: "cluster.local"
+
+# Identity configuration (use existing secret for production)
+identity:
+  existingSecret:
+    name: "netfoundry-admin-identity"
+    key: "netfoundry-admin.json"
 ```
 
 ### Install with Custom Values
@@ -205,7 +195,7 @@ helm upgrade --install ziti-webhook ./charts/ziti-webhook \
 
 # Or override specific values inline
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://ctrl0.ziti.example.com:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity" \
   --set deployment.replicas=3 \
   --set server.logLevel=4 \
   --set sidecar.searchDomains="{ziti.internal,ziti.example.com}" \
@@ -218,7 +208,7 @@ You may replace the cluster's default DNS search domains for selected pods by co
 
 ```bash
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://controller:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity" \
   --set sidecar.searchDomains="{ziti.internal,ziti.example.com}"
 ```
 
@@ -228,7 +218,7 @@ Configure resource requests and limits for production deployments:
 
 ```bash
 helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set controller.mgmtApi="https://controller:1280/edge/management/v1" \
+  --set identity.existingSecret.name="netfoundry-admin-identity" \
   --set deployment.resources.requests.cpu="200m" \
   --set deployment.resources.requests.memory="256Mi" \
   --set deployment.resources.limits.cpu="1000m" \
