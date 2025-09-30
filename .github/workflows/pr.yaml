@@ -558,6 +558,7 @@ jobs:
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
           ZITI_AGENT_IDENTITY: ziti-webhook-identity
+          ZITI_AGENT_IDENTITY_INDEX: ziti_id.json
           ZITI_AGENT_LOG_LEVEL: 4
           SIDECAR_IMAGE: ${{ vars.SIDECAR_IMAGE || 'docker.io/openziti/ziti-tunnel' }} 
           SIDECAR_IMAGE_VERSION: ${{ vars.SIDECAR_IMAGE_VERSION || 'latest' }}
@@ -570,7 +571,7 @@ jobs:
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
             kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context="$CLUSTER" || true
             kubectl create secret generic "${ZITI_AGENT_IDENTITY}" \
-              --from-file=ziti_id.json="$IDENTITY_FILE" \
+              --from-file="${ZITI_AGENT_IDENTITY_INDEX}=${IDENTITY_FILE}" \
               --namespace="$ZITI_AGENT_NAMESPACE" \
               --context="$CLUSTER"
           done
@@ -636,6 +637,7 @@ jobs:
                 --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
                 --set webhook.selectors.enabled="$SELECTOR" \
                 --set identity.existingSecret.name="${ZITI_AGENT_IDENTITY}" \
+                --set identity.existingSecret.key="${ZITI_AGENT_IDENTITY_INDEX}" \
                 --timeout 5m; then
                 SUCCESS=true
                 break
