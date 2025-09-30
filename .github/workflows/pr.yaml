@@ -623,6 +623,7 @@ jobs:
             : Installing Ziti webhook to cluster $CLUSTER with $SELECTOR selector
             ATTEMPTS=3
             DELAY=30
+            SUCCESS=false
             while (( --ATTEMPTS )); do
               if helm upgrade --install ziti-webhook ./charts/ziti-webhook \
                 --namespace="$ZITI_AGENT_NAMESPACE" \
@@ -634,13 +635,19 @@ jobs:
                 --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
                 --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
                 --set webhook.selectors.enabled="$SELECTOR" \
-                --set identity.secret.name="${ZITI_AGENT_IDENTITY}" \
+                --set identity.existingSecret.name="${ZITI_AGENT_IDENTITY}" \
                 --timeout 5m; then
+                SUCCESS=true
                 break
               else
                 sleep $DELAY
               fi
             done
+            
+            if [ "$SUCCESS" != "true" ]; then
+              echo "❌ Failed to install ziti-webhook to cluster $CLUSTER after 3 attempts"
+              exit 1
+            fi
           done
 
           : Waiting for ziti-webhook pods to be ready in AWS cluster...
