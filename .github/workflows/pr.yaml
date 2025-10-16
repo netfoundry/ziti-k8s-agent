@@ -890,7 +890,16 @@ jobs:
           kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app=productpage'
           kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (details,ratings,reviews)'
           kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app=productpage' --all-containers --tail=-1
-          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (details,ratings,reviews)' --all-containers --tail=-1
+          
+          # capture backend service logs separately for easier analysis
+          : --- Details Service Logs (leaf service) ---
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=details' --all-containers --tail=-1
+          
+          : --- Ratings Service Logs (leaf service) ---
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=ratings' --all-containers --tail=-1
+          
+          : --- Reviews Service Logs (intermediate service that calls ratings) ---
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=reviews' --all-containers --tail=-1
 
           # inspect ziti controller state for reviews service
           ziti edge login "$ZITI_CTRL_MGMT_API" --file "$IDENTITY_FILE" --yes
