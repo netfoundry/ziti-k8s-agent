@@ -739,13 +739,19 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          # in the GKE test2 cluster, scale the frontend deployments to 0
-          kubectl scale deployment -l app=productpage --replicas=0 -n test2 --context $GKE_CLUSTER
-          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l app=productpage -n test2 --timeout=120s --context $GKE_CLUSTER
+          # scale all bookinfo deployments to 0 in both clusters to ensure fresh pods for testcase-02
+          kubectl scale deployment -l 'app in (details,productpage,ratings,reviews)' --replicas=0 -n test1 --context $AWS_CLUSTER
+          kubectl scale deployment -l 'app in (details,productpage,ratings,reviews)' --replicas=0 -n test2 --context $GKE_CLUSTER
+          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
 
-          # in the EKS test1 cluster, scale the backend deployments to 0
-          kubectl scale deployment -l 'app in (ratings,reviews,details)' --replicas=0 -n test1 --context $AWS_CLUSTER
-          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l 'app in (ratings,reviews,details)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          # scale up frontend (productpage) in test1 cluster
+          kubectl scale deployment -l app=productpage --replicas=1 -n test1 --context $AWS_CLUSTER
+          kubectl wait --for=condition=Available deployment -l app=productpage -n test1 --timeout=120s --context $AWS_CLUSTER
+
+          # scale up backend (details, ratings, reviews) in test2 cluster
+          kubectl scale deployment -l 'app in (ratings,reviews,details)' --replicas=1 -n test2 --context $GKE_CLUSTER
+          kubectl wait --for=condition=Available deployment -l 'app in (ratings,reviews,details)' -n test2 --timeout=120s --context $GKE_CLUSTER
 
       # this verifies the result has not changed since the last test, despite a radical change of stack topology,
       # relying on Ziti to adapt to the loss of frontend and backend pods
@@ -758,15 +764,40 @@ jobs:
           # TODO find a better way to wait for the termintors to be ready
           sleep 60
 
+          # get the productpage pod name and sidecar container name for log streaming
+          PRODUCTPAGE_POD=$(kubectl get pods -n test1 --selector 'app=productpage' --context $AWS_CLUSTER -o jsonpath='{.items[0].metadata.name}')
+          SIDECAR_CONTAINER=$(kubectl get pod "$PRODUCTPAGE_POD" -n test1 --context $AWS_CLUSTER -o jsonpath='{.spec.containers[?(@.name!="productpage")].name}')
+          
+          echo "=== Starting productpage sidecar log streaming for correlation ==="
+          echo "Pod: $PRODUCTPAGE_POD, Sidecar: $SIDECAR_CONTAINER"
+          
+          # stream sidecar logs in background with timestamps
+          kubectl logs -n test1 "$PRODUCTPAGE_POD" -c "$SIDECAR_CONTAINER" --context $AWS_CLUSTER --follow --timestamps > ./testcase-02_sidecar_logs.txt 2>&1 &
+          SIDECAR_LOG_PID=$!
+          
+          # give logs a moment to start streaming
+          sleep 2
+
           LOG_EMPTY=0
           # send enough requests to trigger the terminatorStrategy: random evenly distributing of requests across all
           # pods
+          echo "=== Starting curl requests at $(date -Iseconds) ==="
           for i in $(seq 1 40);
           do
+            echo "[Request $i at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
             curl -s -X GET http://productpage.ziti:9080/productpage?u=test \
             | grep reviews \
-            | tee -a ./testcase-02_curl_output.log || true  # ignore individual curl|grep errors because we're verifying the aggregate result later
+            | tee -a ./testcase-02_curl_output.log || echo "[Request $i FAILED at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
           done
+          echo "=== Finished curl requests at $(date -Iseconds) ==="
+          
+          # stop sidecar log streaming and capture final logs
+          sleep 5
+          kill $SIDECAR_LOG_PID 2>/dev/null || true
+          
+          # display sidecar logs for correlation
+          echo "=== Productpage sidecar logs during testcase-02 ==="
+          cat ./testcase-02_sidecar_logs.txt
 
           for LOG in testcase-02_curl_output.log testcase-02_pods.log; do
             if [[ -s "./$LOG" ]]; then
@@ -847,17 +878,17 @@ jobs:
           kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (details,ratings,reviews)'
           kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app=productpage' --all-containers
           kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (details,ratings,reviews)' --all-containers
-          
+
           # inspect ziti controller state for reviews service
-          ziti edge login "$ZITI_CTRL_MGMT_API" --yes --file "$IDENTITY_FILE"
+          ziti edge login "$ZITI_CTRL_MGMT_API" --file "$IDENTITY_FILE" --yes
           : --- Reviews Service Details ---
-          ziti edge list services --filter 'name contains "reviews"' || true
+          ziti edge list services 'limit none'
           : --- Reviews Service Terminators ---
-          ziti edge list terminators --filter 'service.name contains "reviews"' || true
+          ziti edge list terminators 'limit none'
           : --- Reviews Service Policies ---
-          ziti edge list service-policies --filter 'service.name contains "reviews"' || true
+          ziti edge list service-policies 'limit none'
           : --- All Identities (to verify sidecar identities exist) ---
-          ziti edge list identities --filter 'name contains "reviews" or name contains "productpage"' || true
+          ziti edge list identities 'limit none'
 
           # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service
