@@ -787,7 +787,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          set -o pipefail
+          set +o errexit
           set -o xtrace
 
           # get cluster info
@@ -843,10 +843,21 @@ jobs:
           kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook
 
           # inspect bookinfo apps
-          kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app in (details,ratings)'
-          kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (productpage,reviews)'
-          kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app in (details,ratings)'
-          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (productpage,reviews)'
+          kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app=productpage'
+          kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (details,ratings,reviews)'
+          kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app=productpage' --all-containers
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (details,ratings,reviews)' --all-containers
+          
+          # inspect ziti controller state for reviews service
+          ziti edge login "$ZITI_CTRL_MGMT_API" --yes --file "$IDENTITY_FILE"
+          : --- Reviews Service Details ---
+          ziti edge list services --filter 'name contains "reviews"' || true
+          : --- Reviews Service Terminators ---
+          ziti edge list terminators --filter 'service.name contains "reviews"' || true
+          : --- Reviews Service Policies ---
+          ziti edge list service-policies --filter 'service.name contains "reviews"' || true
+          : --- All Identities (to verify sidecar identities exist) ---
+          ziti edge list identities --filter 'name contains "reviews" or name contains "productpage"' || true
 
           # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service
