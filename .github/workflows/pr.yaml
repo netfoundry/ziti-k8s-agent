@@ -892,13 +892,13 @@ jobs:
           kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app=productpage' --all-containers --tail=-1
           
           # capture backend service logs separately for easier analysis
-          : --- Details Service Logs (leaf service) ---
+          : --- Details Service Logs - leaf service ---
           kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=details' --all-containers --tail=-1
           
-          : --- Ratings Service Logs (leaf service) ---
+          : --- Ratings Service Logs - leaf service ---
           kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=ratings' --all-containers --tail=-1
           
-          : --- Reviews Service Logs (intermediate service that calls ratings) ---
+          : --- Reviews Service Logs - intermediate service that calls ratings ---
           kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=reviews' --all-containers --tail=-1
 
           # inspect ziti controller state for reviews service
@@ -909,7 +909,7 @@ jobs:
           ziti edge list terminators 'limit none'
           : --- Reviews Service Policies ---
           ziti edge list service-policies 'limit none'
-          : --- All Identities (to verify sidecar identities exist) ---
+          : --- All Identities - to verify sidecar identities exist ---
           ziti edge list identities 'limit none'
           
           # analyze service policies using policy advisor
@@ -921,6 +921,17 @@ jobs:
           ziti edge policy-advisor services --quiet ratings-service || true
           : --- Policy Advisor for reviews-service ---
           ziti edge policy-advisor services --quiet reviews-service || true
+          
+          # inspect intercept addresses for nf-mgmt-service
+          : --- Intercept addresses for nf-mgmt-service ---
+          ZITI_SERVICE_NAME="nf-mgmt-service"
+          ziti edge list services --output-json "name=\"${ZITI_SERVICE_NAME}\"" \
+          | jq --raw-output '.data[0].configs[]' \
+          | while read
+          do
+              ziti edge show config $REPLY --output-json \
+              | jq 'select(.data.configType.name == "intercept.v1")|.data.data.addresses[]'
+          done
 
           # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service

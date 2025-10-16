@@ -393,7 +393,7 @@
           ],
           "body": {
             "mode": "raw",
-            "raw": "{\r\n  \"name\": \"adminUser\",\r\n  \"type\": \"Device\",\r\n  \"appData\": {},\r\n  \"isAdmin\": true,\r\n  \"roleAttributes\": [],\r\n  \"authPolicyId\": \"default\",\r\n  \"tags\": {},\r\n  \"enrollment\": {\r\n    \"ott\": true\r\n  }\r\n}"
+            "raw": "{\r\n  \"name\": \"adminUser\",\r\n  \"type\": \"Device\",\r\n  \"appData\": {},\r\n  \"isAdmin\": true,\r\n  \"roleAttributes\": [\"nf-mgmt-access\"],\r\n  \"authPolicyId\": \"default\",\r\n  \"tags\": {},\r\n  \"enrollment\": {\r\n    \"ott\": true\r\n  }\r\n}"
           },
           "url": {
             "raw": "{{controller-api-endpoint}}/identities",
