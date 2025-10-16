@@ -710,7 +710,7 @@ jobs:
           # pods in both clusters
           for i in $(seq 1 40);
           do
-            curl -sS -X GET http://productpage.ziti:9080/productpage?u=test \
+            curl -sS -X GET http://productpage.ziti.internal:9080/productpage?u=test \
             | grep reviews \
             | tee -a ./testcase-01_curl_output.log \
             || true  # ignore individual curl|grep errors because we're verifying the aggregate result later
@@ -731,7 +731,7 @@ jobs:
           fi
 
       # this changes the stack topology for the next test so that EKS test1 cluster hosts only frontend pods, e.g.,
-      # providing the productpage.ziti service, and the GKE test2 cluster hosts only backend pods, e.g., the ratings,
+      # providing the productpage.ziti.internal service, and the GKE test2 cluster hosts only backend pods, e.g., the ratings,
       # reviews, and details pods
       - name: split frontend and backend between the clusters
         shell: bash
@@ -787,7 +787,7 @@ jobs:
             echo "[Request $i at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
             
             # capture curl output and exit code separately
-            CURL_OUTPUT=$(curl -sSf -X GET http://productpage.ziti:9080/productpage?u=test 2>&1)
+            CURL_OUTPUT=$(curl -sSf -X GET http://productpage.ziti.internal:9080/productpage?u=test 2>&1)
             CURL_EXIT=$?
             
             if [ $CURL_EXIT -ne 0 ]; then

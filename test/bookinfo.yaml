@@ -179,6 +179,8 @@ spec:
         env:
         - name: LOG_DIR
           value: "/tmp/logs"
+        - name: SERVICES_DOMAIN
+          value: "ziti.internal"
         ports:
         - containerPort: 9080
         volumeMounts:
@@ -219,6 +221,8 @@ spec:
         env:
         - name: LOG_DIR
           value: "/tmp/logs"
+        - name: SERVICES_DOMAIN
+          value: "ziti.internal"
         ports:
         - containerPort: 9080
         volumeMounts:
@@ -259,6 +263,8 @@ spec:
         env:
         - name: LOG_DIR
           value: "/tmp/logs"
+        - name: SERVICES_DOMAIN
+          value: "ziti.internal"
         ports:
         - containerPort: 9080
         volumeMounts:
@@ -324,6 +330,9 @@ spec:
       - name: productpage
         image: docker.io/istio/examples-bookinfo-productpage-v1:1.19.1
         imagePullPolicy: IfNotPresent
+        env:
+        - name: SERVICES_DOMAIN
+          value: "ziti.internal"
         ports:
         - containerPort: 9080
         volumeMounts:
