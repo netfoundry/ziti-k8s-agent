@@ -785,9 +785,22 @@ jobs:
           for i in $(seq 1 40);
           do
             echo "[Request $i at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
-            curl -s -X GET http://productpage.ziti:9080/productpage?u=test \
-            | grep reviews \
-            | tee -a ./testcase-02_curl_output.log || echo "[Request $i FAILED at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
+            
+            # capture curl output and exit code separately
+            CURL_OUTPUT=$(curl -sSf -X GET http://productpage.ziti:9080/productpage?u=test 2>&1)
+            CURL_EXIT=$?
+            
+            if [ $CURL_EXIT -ne 0 ]; then
+              echo "[Request $i CURL FAILED (exit $CURL_EXIT) at $(date -Iseconds)]: $CURL_OUTPUT" | tee -a ./testcase-02_curl_output.log
+            else
+              # curl succeeded, now check if response contains reviews (using same pattern as verify_test_results.py)
+              if echo "$CURL_OUTPUT" | grep -qE 'reviews-v[123]'; then
+                echo "$CURL_OUTPUT" | grep -E 'reviews-v[123]' | tee -a ./testcase-02_curl_output.log
+              else
+                echo "[Request $i GREP FAILED (no 'reviews-v[123]' in response) at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
+                echo "$CURL_OUTPUT" | head -5 | tee -a ./testcase-02_curl_output.log
+              fi
+            fi
           done
           echo "=== Finished curl requests at $(date -Iseconds) ==="
           
@@ -889,6 +902,16 @@ jobs:
           ziti edge list service-policies 'limit none'
           : --- All Identities (to verify sidecar identities exist) ---
           ziti edge list identities 'limit none'
+          
+          # analyze service policies using policy advisor
+          : --- Policy Advisor for productpage-service ---
+          ziti edge policy-advisor services --quiet productpage-service || true
+          : --- Policy Advisor for details-service ---
+          ziti edge policy-advisor services --quiet details-service || true
+          : --- Policy Advisor for ratings-service ---
+          ziti edge policy-advisor services --quiet ratings-service || true
+          : --- Policy Advisor for reviews-service ---
+          ziti edge policy-advisor services --quiet reviews-service || true
 
           # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service
