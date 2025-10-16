@@ -845,14 +845,14 @@ jobs:
           # inspect cert-manager app
           kubectl --context $AWS_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
           kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
-          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=cert-manager
-          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=cert-manager
+          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=cert-manager --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=cert-manager --tail=-1
 
           # inspect cert-manager webhook
           kubectl --context $AWS_CLUSTER --namespace cert-manager describe pod --selector app=webhook
           kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=webhook
-          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=webhook
-          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook
+          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=webhook --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook --tail=-1
 
           # inspect ziti-webhook deployment and pods
           kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get deployment ziti-webhook -o yaml
@@ -863,8 +863,8 @@ jobs:
           kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get pods -l app.kubernetes.io/name=ziti-webhook
           kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pods -l app.kubernetes.io/name=ziti-webhook
           kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pods -l app.kubernetes.io/name=ziti-webhook
-          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
-          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true --tail=-1
 
           # check events in ziti-agent namespace
           kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get events --sort-by='.lastTimestamp'
@@ -883,14 +883,14 @@ jobs:
           # inspect ziti-admission-webhook
           kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
           kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
-          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook
-          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook --tail=-1
 
           # inspect bookinfo apps
           kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app=productpage'
           kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (details,ratings,reviews)'
-          kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app=productpage' --all-containers
-          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (details,ratings,reviews)' --all-containers
+          kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app=productpage' --all-containers --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (details,ratings,reviews)' --all-containers --tail=-1
 
           # inspect ziti controller state for reviews service
           ziti edge login "$ZITI_CTRL_MGMT_API" --file "$IDENTITY_FILE" --yes
