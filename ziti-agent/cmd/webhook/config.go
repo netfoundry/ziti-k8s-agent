@@ -47,6 +47,7 @@ type WebhookConfig struct {
 		DnsUpstreamEnabled bool     `yaml:"dnsUpstreamEnabled"`
 		DnsUnanswerable    string   `yaml:"dnsUnanswerable"`
 		SearchDomains      []string `yaml:"searchDomains"`
+		AdditionalArgs     []string `yaml:"additionalArgs"` // Optional additional arguments for ziti-tunnel sidecar (e.g., ["--verbose"])
 	} `yaml:"sidecar"`
 
 	Security struct {

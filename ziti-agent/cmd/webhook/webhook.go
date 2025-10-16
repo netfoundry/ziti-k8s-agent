@@ -259,6 +259,7 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 			DnsUpstreamEnabled:   runtimeConfig.Sidecar.DnsUpstreamEnabled,
 			Unanswerable:         runtimeConfig.Sidecar.DnsUnanswerable,
 			SearchDomains:        runtimeConfig.Sidecar.SearchDomains,
+			AdditionalArgs:       runtimeConfig.Sidecar.AdditionalArgs,
 			PodSecurityOverride:  runtimeConfig.Security.PodSecurityContextOverride,
 			RouterConfig:         routerConfig{},
 		},

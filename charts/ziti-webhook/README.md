@@ -97,6 +97,7 @@ The following table lists the configurable parameters and their default values:
 | `sidecar.dnsUpstreamEnabled` | Enable DNS upstream forwarding | `true` |
 | `sidecar.dnsUnanswerable` | DNS unanswerable query disposition | `"refused"` |
 | `sidecar.searchDomains` | Custom DNS search domains | `[]` |
+| `sidecar.additionalArgs` | Additional arguments for ziti-tunnel sidecar (e.g., `["--verbose"]`). If not specified, `--verbose` is automatically added when webhook log level is 4 or higher. | `[]` |
 
 ### Security Configuration
 

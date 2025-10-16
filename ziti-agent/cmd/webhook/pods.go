@@ -95,6 +95,7 @@ type zitiConfig struct {
 	DnsUpstreamEnabled bool
 	Unanswerable       string
 	SearchDomains      []string
+	AdditionalArgs     []string
 	PodSecurityOverride bool
 	ZitiType        zitiType
 	AnnotationKey   string
@@ -283,6 +284,14 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 	}
 
 	sidecarArgs = append(sidecarArgs, "--dnsUnanswerable", unanswerable)
+
+	// Add custom additional args if specified in config, otherwise auto-enable verbose logging at high log levels
+	if len(zh.Config.AdditionalArgs) > 0 {
+		sidecarArgs = append(sidecarArgs, zh.Config.AdditionalArgs...)
+	} else if klog.V(4).Enabled() {
+		// Enable verbose logging in sidecar when klog verbosity is 4 or higher (only if no custom args specified)
+		sidecarArgs = append(sidecarArgs, "--verbose")
+	}
 
 	jsonPatch = []JsonPatchEntry{
 
