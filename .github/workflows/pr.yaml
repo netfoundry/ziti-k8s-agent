@@ -116,6 +116,23 @@ jobs:
           # create the cluster
           eksctl create cluster -f ./eks-cluster.yaml
 
+      - name: capture-eks-stack-debug
+        if: failure()
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+
+          eksctl utils describe-stacks --region "$AWS_REGION" --cluster "$CLUSTER_NAME" || true
+
+          aws cloudformation describe-stack-events \
+            --region "$AWS_REGION" \
+            --stack-name "eksctl-${CLUSTER_NAME}-cluster" || true
+
+          aws cloudformation describe-stack-events \
+            --region "$AWS_REGION" \
+            --stack-name "eksctl-${CLUSTER_NAME}-nodegroup-ng-1" || true
+
       - name: set-context-name
         id: set-context
         shell: bash
