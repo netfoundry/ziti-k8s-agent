@@ -61,7 +61,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_FOR_GITHUB }}
+          role-to-assume: ${{ vars.AWS_ROLE_FOR_GITHUB || secrets.AWS_ROLE_FOR_GITHUB }}
           role-session-name: GitHubActions
           audience: sts.amazonaws.com
 
@@ -238,7 +238,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role-to-assume: ${{ vars.AWS_ROLE_FOR_GITHUB || secrets.AWS_ROLE_FOR_GITHUB }}
           role-session-name: GitHubActions
           audience: sts.amazonaws.com
 
@@ -974,7 +974,7 @@ jobs:
         with:
           cluster_name: ${{ env.CLUSTER_NAME }}
           region: ${{ env.AWS_REGION }}
-          role_to_assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role_to_assume: ${{ vars.AWS_ROLE_FOR_GITHUB || secrets.AWS_ROLE_FOR_GITHUB }}
 
   cleanup-gke:
     needs: [cleanup-debug-delay]
