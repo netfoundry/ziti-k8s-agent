@@ -1,0 +1,101 @@
+# Default values for ziti-webhook
+# This is a YAML-formatted file.
+
+# Webhook server configuration
+server:
+  port: 9443
+  # Log verbosity level (0=errors only, 1=basic info, 2=detailed info, 3=debug, 4=trace, 5=verbose trace)
+  logLevel: 2
+
+# Ziti controller configuration
+controller:
+  # Management API endpoint (optional - if not specified, will be inferred from identity configuration)
+  mgmtApi: ""
+  # Role key for identity annotations
+  roleKey: "identity.openziti.io/role-attributes"
+
+# Sidecar container configuration
+sidecar:
+  image:
+    repo: "openziti/ziti-tunnel"
+    tag: "latest"
+    pullPolicy: "IfNotPresent"
+  prefix: "zt"
+  identityDir: "/ziti-tunnel"
+  volumeMountName: "ziti-identity"
+  # Cluster DNS resolver IP (auto-discovered if empty)
+  resolverIp: ""
+  # DNS upstream forwarding configuration
+  dnsUpstreamEnabled: true
+  dnsUnanswerable: "refused"
+  # Custom DNS search domains (empty uses cluster defaults)
+  searchDomains: []
+
+# Security configuration
+security:
+  podSecurityContextOverride: false
+
+# Webhook deployment configuration
+deployment:
+  name: "ziti-admission-wh-deployment"
+  image:
+    repo: "docker.io/netfoundry/ziti-k8s-agent"
+    tag: "latest"
+    pullPolicy: "IfNotPresent"
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Service configuration
+service:
+  name: "ziti-admission-service"
+  port: 443
+  targetPort: 9443
+
+# Certificate management (cert-manager)
+certManager:
+  enabled: true
+  issuer:
+    name: "ziti-k8s-agent-selfsigned-ca-issuer"
+  certificate:
+    name: "ziti-admission-cert"
+    secretName: "ziti-webhook-server-cert"
+    duration: "2160h" # 90d
+    renewBefore: "360h" # 15d
+
+# Webhook configuration
+webhook:
+  name: "ziti-tunnel-sidecar"
+  failurePolicy: "Fail"
+  # Webhook selector configuration
+  selectors:
+    # Options: namespace, pod, or both (comma-separated)
+    enabled: "namespace"
+
+# Ziti Identity Configuration (required)
+# This webhook requires a Ziti admin identity with full network privileges
+identity:
+  # Existing secret configuration (PREFERRED FOR SECURITY)
+  existingSecret:
+    # Name of the existing secret containing the Ziti identity JSON
+    # If specified, this secret will be used instead of creating a chart-managed secret
+    name: ""
+    # Key in the existing secret containing the complete Ziti identity JSON configuration
+    key: "netfoundry-admin.json"
+  
+  # Method 1: Use existing Kubernetes secret (PREFERRED FOR SECURITY)
+  # Set identity.existingSecret.name to your existing secret name
+  
+  # Method 2: Provide identity JSON directly (FOR DEVELOPMENT/TESTING ONLY)
+  # WARNING: This embeds the admin identity in the Helm release
+  # The identity JSON should contain the standard Ziti format with keys: id.ca, id.cert, id.key, ztAPI, ztAPIs
+  json: ""
+
+# Cluster DNS configuration
+clusterDns:
+  zone: "cluster.local"

@@ -2,176 +2,259 @@ package webhook
 
 import (
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
-	"strconv"
 	"strings"
 
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/yaml"
 )
 
-type MissingEnvVarError struct {
-	variable string
+// ZitiIdentityConfig represents the standard Ziti identity configuration JSON structure
+type ZitiIdentityConfig struct {
+	ID struct {
+		CA   string `json:"ca"`
+		Cert string `json:"cert"`
+		Key  string `json:"key"`
+	} `json:"id"`
+	ZtAPI  string   `json:"ztAPI"`
+	ZtAPIs []string `json:"ztAPIs"`
 }
 
-type MissingCmdLineVarError struct {
-	variable string
+type WebhookConfig struct {
+	Server struct {
+		Port int `yaml:"port"`
+	} `yaml:"server"`
+
+	Controller struct {
+		MgmtAPI string `yaml:"mgmtApi"` // Optional - if empty, will be inferred from identity
+		RoleKey string `yaml:"roleKey"`
+		// Runtime fields populated during config loading
+		MgmtAPIEndpoints []string `yaml:"-"` // List of management API endpoints to try
+	} `yaml:"controller"`
+
+	Sidecar struct {
+		Image              string   `yaml:"image"`
+		ImageVersion       string   `yaml:"imageVersion"`
+		ImagePullPolicy    string   `yaml:"imagePullPolicy"`
+		Prefix             string   `yaml:"prefix"`
+		IdentityDir        string   `yaml:"identityDir"`
+		VolumeMountName    string   `yaml:"volumeMountName"`
+		ResolverIP         string   `yaml:"resolverIp"`
+		DnsUpstreamEnabled bool     `yaml:"dnsUpstreamEnabled"`
+		DnsUnanswerable    string   `yaml:"dnsUnanswerable"`
+		SearchDomains      []string `yaml:"searchDomains"`
+		AdditionalArgs     []string `yaml:"additionalArgs"` // Optional additional arguments for ziti-tunnel sidecar (e.g., ["--verbose"])
+	} `yaml:"sidecar"`
+
+	Security struct {
+		PodSecurityContextOverride bool `yaml:"podSecurityContextOverride"`
+	} `yaml:"security"`
+
+	ClusterDns struct {
+		Zone string `yaml:"zone"`
+	} `yaml:"clusterDns"`
+
+}
+
+func loadConfig(path string) (*WebhookConfig, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	var cfg WebhookConfig
+	if err := yaml.Unmarshal(contents, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	applyConfigDefaults(&cfg)
+	
+	// If mgmtApi is not specified, infer from identity configuration
+	if cfg.Controller.MgmtAPI == "" {
+		if err := inferMgmtAPIEndpoints(&cfg); err != nil {
+			return nil, fmt.Errorf("failed to infer management API endpoints: %w", err)
+		}
+	} else {
+		// Use the explicitly configured endpoint
+		cfg.Controller.MgmtAPIEndpoints = []string{cfg.Controller.MgmtAPI}
+	}
+	
+	if err := validateConfig(&cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+func applyConfigDefaults(cfg *WebhookConfig) {
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 9443
+	}
+
+	if cfg.Sidecar.ImagePullPolicy == "" {
+		cfg.Sidecar.ImagePullPolicy = defaultImagePullPolicy
+	}
+
+	if cfg.Sidecar.VolumeMountName == "" {
+		cfg.Sidecar.VolumeMountName = "ziti-identity"
+	}
+
+	if cfg.Sidecar.IdentityDir == "" {
+		cfg.Sidecar.IdentityDir = "/ziti-tunnel"
+	}
+
+	if cfg.Sidecar.Prefix == "" {
+		cfg.Sidecar.Prefix = "zt"
+	}
+
+	if cfg.Sidecar.DnsUnanswerable == "" {
+		cfg.Sidecar.DnsUnanswerable = "refused"
+	}
+
+	if cfg.Controller.RoleKey == "" {
+		cfg.Controller.RoleKey = defaultZitiRoleAttributesKey
+	}
+
+	if cfg.ClusterDns.Zone == "" {
+		cfg.ClusterDns.Zone = "cluster.local"
+	}
+
+}
+
+func validateConfig(cfg *WebhookConfig) error {
+	// Check that we have at least one source of management API endpoints
+	// Priority: 1) explicit mgmtApi config, 2) inferred from identity (ztAPI or ztAPIs)
+	if len(cfg.Controller.MgmtAPIEndpoints) == 0 {
+		return errors.New("no management API endpoints available - must specify one of: 1) controller.mgmtApi in webhook config, 2) ztAPI in identity JSON, or 3) ztAPIs (non-empty) in identity JSON")
+	}
+
+	if cfg.Sidecar.Image == "" {
+		return errors.New("sidecar.image is required")
+	}
+
+	if cfg.Sidecar.ImageVersion == "" {
+		return errors.New("sidecar.imageVersion is required")
+	}
+
+	return nil
 }
 
 func configTLS(cert, key []byte) *tls.Config {
 	sCert, err := tls.X509KeyPair(cert, key)
 	if err != nil {
-		klog.Fatalf("Failed to load the webhook server's x509 cert %v", err)
+		klog.Fatalf("failed to load webhook server TLS key pair: %v", err)
 	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{sCert},
+	return &tls.Config{Certificates: []tls.Certificate{sCert}}
+}
+
+// loadZitiIdentityFromEnv loads the Ziti identity configuration from ZITI_IDENTITY_JSON environment variable
+func loadZitiIdentityFromEnv() (*ZitiIdentityConfig, error) {
+	identityJSON, ok := os.LookupEnv("ZITI_IDENTITY_JSON")
+	if !ok || identityJSON == "" {
+		return nil, errors.New("ZITI_IDENTITY_JSON environment variable is required and must contain valid JSON")
 	}
+
+	var identity ZitiIdentityConfig
+	if err := json.Unmarshal([]byte(identityJSON), &identity); err != nil {
+		return nil, fmt.Errorf("failed to parse Ziti identity JSON from environment variable: %w", err)
+	}
+
+	// Validate required fields
+	if identity.ID.CA == "" {
+		return nil, errors.New("ziti identity missing required field: id.ca")
+	}
+	if identity.ID.Cert == "" {
+		return nil, errors.New("ziti identity missing required field: id.cert")
+	}
+	if identity.ID.Key == "" {
+		return nil, errors.New("ziti identity missing required field: id.key")
+	}
+
+	klog.V(4).Infof("Successfully loaded Ziti identity from ZITI_IDENTITY_JSON environment variable")
+	return &identity, nil
 }
 
-func (e *MissingEnvVarError) Error() string {
-	return fmt.Sprintf("Missing environment variable: %s", e.variable)
+// inferMgmtAPIEndpoints infers management API endpoints from the Ziti identity configuration
+func inferMgmtAPIEndpoints(cfg *WebhookConfig) error {
+	identity, err := loadZitiIdentityFromEnv()
+	if err != nil {
+		return fmt.Errorf("failed to load Ziti identity for endpoint inference: %w", err)
+	}
+
+	var endpoints []string
+	
+	// Add primary ztAPI endpoint if available (ztAPI is optional)
+	if identity.ZtAPI != "" {
+		mgmtURL, err := convertToMgmtAPI(identity.ZtAPI)
+		if err != nil {
+			klog.V(2).Infof("Failed to convert ztAPI to management API URL: %v", err)
+		} else {
+			endpoints = append(endpoints, mgmtURL)
+		}
+	}
+	
+	// Add additional ztAPIs endpoints if available (ztAPIs is optional)
+	if identity.ZtAPIs != nil {
+		for _, apiURL := range identity.ZtAPIs {
+			if apiURL != "" && apiURL != identity.ZtAPI { // Avoid duplicates
+				mgmtURL, err := convertToMgmtAPI(apiURL)
+				if err != nil {
+					klog.V(2).Infof("Failed to convert ztAPI to management API URL: %v", err)
+					continue
+				}
+				endpoints = append(endpoints, mgmtURL)
+			}
+		}
+	}
+	
+	if len(endpoints) == 0 {
+		return errors.New("no valid management API endpoints could be inferred from identity configuration - must specify one of: 1) controller.mgmtApi in webhook config, 2) ztAPI in identity JSON, or 3) ztAPIs (non-empty) in identity JSON")
+	}
+	
+	cfg.Controller.MgmtAPIEndpoints = endpoints
+	klog.V(2).Infof("Inferred %d management API endpoints from identity configuration: %v", len(endpoints), endpoints)
+	
+	return nil
 }
 
-func (e *MissingCmdLineVarError) Error() string {
-	return fmt.Sprintf("Missing commandline variable: %s", e.variable)
+// convertToMgmtAPI converts a Ziti client API URL to a management API URL
+// Example: https://controller:1280/edge/client/v1 -> https://controller:1280/edge/management/v1
+func convertToMgmtAPI(clientAPIURL string) (string, error) {
+	parsedURL, err := url.Parse(clientAPIURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+	
+	// Replace /edge/client/v1 with /edge/management/v1
+	path := parsedURL.Path
+	if strings.Contains(path, "/edge/management/v1") {
+		// Already a management API URL, use as-is
+		// No changes needed
+	} else if strings.HasSuffix(path, "/edge/client/v1") {
+		path = strings.TrimSuffix(path, "/edge/client/v1") + "/edge/management/v1"
+	} else if strings.Contains(path, "/edge/client/v1") {
+		// Handle other client API versions
+		path = strings.Replace(path, "/edge/client/v1", "/edge/management/v1", 1)
+	} else {
+		// If it doesn't look like a client API URL, assume it's a base URL and append management path
+		path = strings.TrimSuffix(path, "/") + "/edge/management/v1"
+	}
+	
+	parsedURL.Path = path
+	return parsedURL.String(), nil
 }
 
-func lookupEnvVars() {
-	// Environmental Variables to override the commandline inputs
-
-	value, ok := os.LookupEnv("TLS_CERT")
-	if ok && len(value) > 0 {
+// loadWebhookTLSFromEnv loads webhook server TLS certificates from environment variables
+func loadWebhookTLSFromEnv() {
+	if value, ok := os.LookupEnv("TLS_CERT"); ok && value != "" {
 		cert = []byte(value)
 	}
-	if len(cert) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "TLS_CERT"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "TLS_CERT"})
-	}
 
-	value, ok = os.LookupEnv("TLS_PRIVATE_KEY")
-	if ok && len(value) > 0 {
+	if value, ok := os.LookupEnv("TLS_PRIVATE_KEY"); ok && value != "" {
 		key = []byte(value)
 	}
-	if len(key) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "TLS_PRIVATE_KEY"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "TLS_PRIVATE_KEY"})
-	}
-
-	value, ok = os.LookupEnv("PORT")
-	if ok && len(value) > 0 {
-		var err error
-		port, err = strconv.Atoi(value)
-		if err != nil {
-			klog.Fatal(err)
-		}
-	}
-	if port == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "PORT"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "PORT"})
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_IMAGE")
-	if ok && len(value) > 0 {
-		sidecarImage = value
-	}
-	if len(sidecarImage) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE"})
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_IMAGE_VERSION")
-	if ok && len(value) > 0 {
-		sidecarImageVersion = value
-	}
-	if len(sidecarImageVersion) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE_VERSION"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_VERSION"})
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_PREFIX")
-	if ok && len(value) > 0 {
-		sidecarPrefix = value
-	}
-	if len(sidecarPrefix) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_PREFIX"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_PREFIX"})
-		klog.Fatal("sidecarPrefix cannot be empty")
-	} else {
-		klog.V(4).Infof("sidecarPrefix: %s", sidecarPrefix)
-	}
-
-	value, ok = os.LookupEnv("SIDECAR_IMAGE_PULL_POLICY")
-	if ok && len(value) > 0 {
-		sidecarImagePullPolicy = value
-	}
-	if len(sidecarImagePullPolicy) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SIDECAR_IMAGE_PULL_POLICY"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SIDECAR_IMAGE_PULL_POLICY"})
-		sidecarImagePullPolicy = defaultImagePullPolicy
-	}
-
-	value, ok = os.LookupEnv("ZITI_MGMT_API")
-	if ok && len(value) > 0 {
-		zitiCtrlMgmtApi = value
-	}
-	if len(zitiCtrlMgmtApi) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_MGMT_API"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_MGMT_API"})
-	}
-
-	value, ok = os.LookupEnv("ZITI_ADMIN_CERT")
-	if ok && len(value) > 0 {
-		zitiAdminCert = []byte(value)
-	}
-	if zitiAdminCert == nil {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ADMIN_CERT"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ADMIN_CERT"})
-	}
-
-	value, ok = os.LookupEnv("ZITI_ADMIN_KEY")
-	if ok && len(value) > 0 {
-		zitiAdminKey = []byte(value)
-	}
-	if zitiAdminKey == nil {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_ADMIN_KEY"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_ADMIN_KEY"})
-	}
-
-	value, ok = os.LookupEnv("ZITI_CTRL_CA_BUNDLE")
-	if ok && len(value) > 0 {
-		zitiCtrlCaBundle = []byte(value)
-		klog.V(5).Infof("CA bundle content from env: %s", string(zitiCtrlCaBundle))
-	}
-	if zitiCtrlCaBundle == nil {
-		klog.V(4).Info(&MissingEnvVarError{variable: "ZITI_CTRL_CA_BUNDLE"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "ZITI_CTRL_CA_BUNDLE"})
-	}
-
-	value, ok = os.LookupEnv("POD_SECURITY_CONTEXT_OVERRIDE")
-	if ok && len(value) > 0 {
-		var err error
-		podSecurityOverride, err = strconv.ParseBool(value)
-		if err != nil {
-			klog.Info(err)
-		}
-	}
-
-	value, ok = os.LookupEnv("SEARCH_DOMAINS")
-	if ok && len(value) > 0 {
-		searchDomains = strings.Split(value, ",")
-	}
-	if len(searchDomains) == 0 {
-		klog.V(4).Info(&MissingEnvVarError{variable: "SEARCH_DOMAINS"})
-		klog.V(4).Info(&MissingCmdLineVarError{variable: "SEARCH_DOMAINS"})
-		klog.Info("Custom DNS search domains not set, using Kubernetes defaults")
-	} else {
-		klog.Infof("Custom DNS search domains: %s", searchDomains)
-	}
-
-	value, ok = os.LookupEnv("ZITI_ROLE_KEY")
-	if ok {
-		zitiRoleKey = value
-	}
-	zitiRoleKey = getValueOrDefault(zitiRoleKey, defaultZitiRoleAttributesKey)
-	klog.V(4).Infof("Using Ziti role key: %s", zitiRoleKey)
 }

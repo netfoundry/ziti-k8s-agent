@@ -10,44 +10,17 @@ const (
 	// Default annotation and label keys
 	defaultZitiRoleAttributesKey = "identity.openziti.io/role-attributes"
 	defaultZitiTunnelLabelKey    = "tunnel.openziti.io/enabled"
-	
 	// Default values
 	defaultImagePullPolicy = "IfNotPresent"
 )
 
 var (
-	certFile               string
-	keyFile                string
-	cert                   []byte
-	key                    []byte
-	zitiAdminCert          []byte
-	zitiAdminKey           []byte
-	zitiCtrlCaBundle       []byte
-	port                   int
-	sidecarImage           string
-	sidecarImageVersion    string
-	sidecarPrefix          string
-	sidecarIdentityDir     string
-	zitiCtrlMgmtApi        string
-	zitiCtrlClientCertFile string
-	zitiCtrlClientKeyFile  string
-	zitiCtrlCaBundleFile   string
-	podSecurityOverride    bool
-	clusterDnsServiceIP    string
-	searchDomainList       string
-	searchDomains          []string
-	zitiRoleKey            string
-	sidecarImagePullPolicy string
-	err                    error
+	configPath    string
+	cert          []byte
+	key           []byte
+	zitiIdentity  *ZitiIdentityConfig
+	runtimeConfig *WebhookConfig
 )
-
-// getValueOrDefault returns the provided value if non-empty, otherwise returns the default
-func getValueOrDefault(value, defaultValue string) string {
-	if value != "" {
-		return value
-	}
-	return defaultValue
-}
 
 func NewWebhookCmd() *cobra.Command {
 	var webhookCmd = &cobra.Command{
@@ -60,38 +33,9 @@ and takes appropriate actions, i.e. create/delete ziti identity, secret, etc.`,
 		Run: webhook,
 	}
 
-	webhookCmd.Flags().StringVar(&certFile, "tls-cert-file", "",
-		"File containing the default x509 Certificate for HTTPS.")
-	webhookCmd.Flags().StringVar(&keyFile, "tls-private-key-file", "",
-		"File containing the default x509 private key matching --tls-cert-file.")
-	webhookCmd.Flags().IntVar(&port, "port", 9443,
-		"Secure port that the webhook listens on")
-	webhookCmd.Flags().StringVar(&sidecarImage, "sidecar-image", "openziti/ziti-tunnel",
-		"Image of sidecar")
-	webhookCmd.Flags().StringVar(&sidecarImageVersion, "sidecar-image-version", "latest",
-		"Image Varsion of sidecar")
-	webhookCmd.Flags().StringVar(&sidecarPrefix, "sidecar-prefix", "zt",
-		"Used in creation of ContainerName to be used as injected sidecar")
-	webhookCmd.Flags().StringVar(&sidecarIdentityDir, "sidecar-identity-dir", "/ziti-tunnel",
-		"Directory where sidecar container will store identity files")
-	webhookCmd.Flags().StringVar(&zitiCtrlMgmtApi, "ziti-ctrl-addr", "",
-		"Ziti Controller Management URL, i.e. https://{FQDN}:{PORT}/edge/management/v1 ")
-	webhookCmd.Flags().StringVar(&zitiCtrlClientCertFile, "ziti-ctrl-client-cert-file", "",
-		"Ziti Controller Client Certificate")
-	webhookCmd.Flags().StringVar(&zitiCtrlClientKeyFile, "ziti-ctrl-client-key-file", "",
-		"Ziti Controller Client Private Key")
-	webhookCmd.Flags().StringVar(&zitiCtrlCaBundleFile, "ziti-ctrl-ca-bundle-file", "",
-		"Ziti Controller CA Bundle")
-	webhookCmd.Flags().BoolVar(&podSecurityOverride, "pod-sc-override", false,
-		"Override the security context at pod level, i.e. runAsNonRoot: false")
-	webhookCmd.Flags().StringVar(&clusterDnsServiceIP, "cluster-dns-svc-ip", "",
-		"Cluster DNS Service IP")
-	webhookCmd.Flags().StringVar(&searchDomainList, "search-domain-list", "",
-		"A list of DNS search domains as space seperated string i.e. 'value1 value2'")
-	webhookCmd.Flags().StringVar(&zitiRoleKey, "ziti-role-key", "",
-		"Ziti Identity Role Key used in pod annotation")
-	webhookCmd.Flags().StringVar(&sidecarImagePullPolicy, "sidecar-image-pull-policy", defaultImagePullPolicy,
-		"Image pull policy for sidecar container. One of: Always, IfNotPresent, Never")
+	webhookCmd.Flags().StringVar(&configPath, "config", "",
+		"Path to the webhook configuration file")
+	_ = webhookCmd.MarkFlagRequired("config")
 
 	return webhookCmd
 }

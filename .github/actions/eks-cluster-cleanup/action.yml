@@ -57,7 +57,28 @@ runs:
           STATUS=$(get_cluster_status)
           
           if [[ "$STATUS" == "NOT_FOUND" ]]; then
-            echo "Cluster does not exist, nothing to delete"
+            echo "Cluster does not exist, checking for orphaned CloudFormation stacks..."
+            
+            # Clean up any orphaned CloudFormation stacks
+            STACK_PREFIX="eksctl-${{ inputs.cluster_name }}"
+            STACKS=$(aws cloudformation list-stacks \
+              --region "${{ inputs.region }}" \
+              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE DELETE_FAILED \
+              --query "StackSummaries[?starts_with(StackName, '${STACK_PREFIX}')].StackName" \
+              --output text)
+            
+            if [[ -n "$STACKS" ]]; then
+              echo "Found orphaned stacks: $STACKS"
+              for STACK in $STACKS; do
+                echo "Deleting orphaned stack: $STACK"
+                aws cloudformation delete-stack --stack-name "$STACK" --region "${{ inputs.region }}" || true
+              done
+              echo "Initiated deletion of orphaned stacks, waiting 30s..."
+              sleep 30
+            else
+              echo "No orphaned stacks found"
+            fi
+            
             exit 0
           fi
           
@@ -75,8 +96,34 @@ runs:
           fi
           
           # Check for specific error conditions
-          if grep -q "try again later\|ResourceInUseException\|cluster is currently being\|InvalidParameterException" /tmp/eksctl_delete.log; then
+          if grep -q "try again later\|ResourceInUseException\|cluster is currently being\|InvalidParameterException\|DELETE_FAILED\|found the following undeleted stacks" /tmp/eksctl_delete.log; then
             echo "Received retryable error, waiting before next attempt..."
+            if grep -q "DELETE_FAILED" /tmp/eksctl_delete.log || grep -q "found the following undeleted stacks" /tmp/eksctl_delete.log; then
+              echo "Attempting to clean up nodegroup stacks that failed deletion"
+              STACK_PREFIX="eksctl-${{ inputs.cluster_name }}"
+              STACKS=$(aws cloudformation list-stacks \
+                --region "${{ inputs.region }}" \
+                --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE DELETE_FAILED \
+                --query "StackSummaries[?starts_with(StackName, '${STACK_PREFIX}')].StackName" \
+                --output text)
+              if [[ -n "$STACKS" ]]; then
+                echo "Retry cleanup: found stacks $STACKS"
+                for STACK in $STACKS; do
+                  echo "Retry cleanup: deleting $STACK"
+                  aws cloudformation update-termination-protection \
+                    --stack-name "$STACK" \
+                    --no-enable-termination-protection \
+                    --region "${{ inputs.region }}" || true
+                  aws cloudformation delete-stack --stack-name "$STACK" --region "${{ inputs.region }}" || true
+                  echo "Waiting for stack $STACK to reach DELETE_COMPLETE"
+                  aws cloudformation wait stack-delete-complete \
+                    --stack-name "$STACK" \
+                    --region "${{ inputs.region }}" && echo "Stack $STACK deleted" || echo "Stack $STACK still deleting or already removed"
+                done
+              else
+                echo "Retry cleanup: no matching stacks found"
+              fi
+            fi
             sleep $DELAY
             ATTEMPT=$((ATTEMPT + 1))
             DELAY=$((DELAY * 2))  # Exponential backoff

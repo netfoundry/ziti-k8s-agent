@@ -92,6 +92,11 @@ type zitiConfig struct {
 	LabelDelValue   string
 	LabelCrValue    string
 	ResolverIp      string
+	DnsUpstreamEnabled bool
+	Unanswerable       string
+	SearchDomains      []string
+	AdditionalArgs     []string
+	PodSecurityOverride bool
 	ZitiType        zitiType
 	AnnotationKey   string
 	RouterConfig    routerConfig
@@ -262,9 +267,30 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 		return failureResponse(response, err)
 	}
 
-	dnsConfig, err := zh.getDnsConfig(ctx)
+	dnsConfig, err := zh.getDnsConfig(ctx, podMeta)
 	if err != nil {
 		return failureResponse(response, err)
+	}
+
+	sidecarArgs := []string{"tproxy"}
+
+	if zh.Config.DnsUpstreamEnabled && zh.Config.ResolverIp != "" {
+		sidecarArgs = append(sidecarArgs, "--dnsUpstream", fmt.Sprintf("tcp://%s:53", zh.Config.ResolverIp))
+	}
+
+	unanswerable := zh.Config.Unanswerable
+	if unanswerable == "" {
+		unanswerable = "refused"
+	}
+
+	sidecarArgs = append(sidecarArgs, "--dnsUnanswerable", unanswerable)
+
+	// Add custom additional args if specified in config, otherwise auto-enable verbose logging at high log levels
+	if len(zh.Config.AdditionalArgs) > 0 {
+		sidecarArgs = append(sidecarArgs, zh.Config.AdditionalArgs...)
+	} else if klog.V(4).Enabled() {
+		// Enable verbose logging in sidecar when klog verbosity is 4 or higher (only if no custom args specified)
+		sidecarArgs = append(sidecarArgs, "--verbose")
 	}
 
 	jsonPatch = []JsonPatchEntry{
@@ -276,7 +302,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 				Name:            identityName,
 				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
 				ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
-				Args:            []string{"tproxy"},
+				Args:            sidecarArgs,
 				Env: []corev1.EnvVar{
 					{
 						Name:  "ZITI_ENROLL_TOKEN",
@@ -336,7 +362,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 		},
 	}
 
-	if podSecurityOverride {
+	if zh.Config.PodSecurityOverride {
 		jsonPatch = append(jsonPatch, []JsonPatchEntry{
 			{
 				OP:   "replace",
@@ -382,7 +408,7 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 	return successResponse(response)
 }
 
-func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, error) {
+func (zh *zitiHandler) getDnsConfig(ctx context.Context, podMeta *metav1.ObjectMeta) (*corev1.PodDNSConfig, error) {
 	// get cluster dns ip if not already configured
 	defaultClusterDnsServiceIP := "10.96.0.10"
 	if len(zh.Config.ResolverIp) == 0 {
@@ -421,9 +447,15 @@ func (zh *zitiHandler) getDnsConfig(ctx context.Context) (*corev1.PodDNSConfig, 
 		},
 	}
 
-	if len(searchDomains) > 0 {
-		dnsConfig.Searches = searchDomains
-		klog.V(4).Infof("Using custom search domains: %v", searchDomains)
+	if len(zh.Config.SearchDomains) > 0 {
+		dnsConfig.Searches = zh.Config.SearchDomains
+		klog.V(4).Infof("Using custom search domains: %v", zh.Config.SearchDomains)
+	} else {
+		// Add namespace-specific search domain using configurable cluster zone
+		namespaceDomain := fmt.Sprintf("%s.svc.%s", podMeta.Namespace, runtimeConfig.ClusterDns.Zone)
+		svcDomain := fmt.Sprintf("svc.%s", runtimeConfig.ClusterDns.Zone)
+		dnsConfig.Searches = []string{namespaceDomain, svcDomain, runtimeConfig.ClusterDns.Zone}
+		klog.V(4).Infof("Using default cluster search domains with namespace %s and zone %s: %v", podMeta.Namespace, runtimeConfig.ClusterDns.Zone, dnsConfig.Searches)
 	}
 
 	return dnsConfig, nil
@@ -496,6 +528,7 @@ func (zh *zitiHandler) handleDelete(ctx context.Context, pod *corev1.Pod, respon
 			return failureResponse(response, err)
 		}
 
+		var err error
 		if pvc, err = zh.KC.getPvcByOption(ctx, pod.Namespace, pod.Labels[labelApp]+"-"+pod.Name, metav1.GetOptions{}); err != nil {
 			klog.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err)
 			return failureResponse(response, fmt.Errorf("failed to delete PVC for router %s: %v", pod.Spec.Containers[0].Env[7].Value, err))

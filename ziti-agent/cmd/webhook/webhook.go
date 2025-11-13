@@ -2,13 +2,14 @@ package webhook
 
 import (
 	"context"
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"strings"
 	"time"
 
 	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common"
@@ -119,11 +120,41 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 }
 
 func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
+	if zitiIdentity == nil {
+		return nil, fmt.Errorf("ziti identity not loaded")
+	}
+
+	// Debug certificate and key data
+	klog.V(4).Infof("Certificate data length: %d bytes", len(zitiIdentity.ID.Cert))
+	klog.V(4).Infof("Private key data length: %d bytes", len(zitiIdentity.ID.Key))
+	if len(zitiIdentity.ID.Cert) > 100 {
+		klog.V(5).Infof("Certificate data preview: %s...", zitiIdentity.ID.Cert[:100])
+	} else {
+		klog.V(5).Infof("Certificate data preview: %s", zitiIdentity.ID.Cert)
+	}
+	if len(zitiIdentity.ID.Key) > 100 {
+		klog.V(5).Infof("Private key data preview: %s...", zitiIdentity.ID.Key[:100])
+	} else {
+		klog.V(5).Infof("Private key data preview: %s", zitiIdentity.ID.Key)
+	}
+
+	// Clean certificate and key data by removing "pem:" prefix if present
+	certData := zitiIdentity.ID.Cert
+	keyData := zitiIdentity.ID.Key
+	
+	if strings.HasPrefix(certData, "pem:") {
+		certData = strings.TrimPrefix(certData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from certificate data")
+	}
+	if strings.HasPrefix(keyData, "pem:") {
+		keyData = strings.TrimPrefix(keyData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from private key data")
+	}
 
 	// parse ziti admin certs to synchronously (blocking) create a ziti identity
-	zitiAdminIdentity, err := tls.X509KeyPair(zitiAdminCert, zitiAdminKey)
+	zitiAdminIdentity, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse X509 key pair: %w", err)
 	}
 
 	if len(zitiAdminIdentity.Certificate) == 0 {
@@ -136,6 +167,12 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 		return nil, err
 	}
 
+	// Log certificate details and analyze key usage compatibility
+	klog.V(4).Infof("Client certificate Subject: %v", parsedCert.Subject)
+	klog.V(4).Infof("Client certificate Issuer: %v", parsedCert.Issuer)
+	klog.V(4).Infof("Client certificate Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
+
+	zitiCtrlCaBundle := []byte(zitiIdentity.ID.CA)
 	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
 	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
 	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
@@ -146,25 +183,49 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 		return nil, err
 	}
 
-	cfg := zitiedge.Config{ApiEndpoint: zitiCtrlMgmtApi,
-		Cert:       parsedCert,
-		PrivateKey: zitiAdminIdentity.PrivateKey,
-		CAS:        *certPool,
-	}
-
-	cfg.CABundle = zitiCtrlCaBundle
-	zc, err := zitiedge.Client(&cfg)
+	// Try each management API endpoint until one works
+	zc, err := createZitiClientWithFailover(runtimeConfig.Controller.MgmtAPIEndpoints, parsedCert, zitiAdminIdentity.PrivateKey, *certPool, zitiCtrlCaBundle)
 
 	return zc, err
 
 }
+
+// createZitiClientWithFailover attempts to create a Ziti client by trying each management API endpoint
+func createZitiClientWithFailover(endpoints []string, cert *x509.Certificate, privateKey crypto.PrivateKey, certPool x509.CertPool, caBundle []byte) (*rest_management_api_client.ZitiEdgeManagement, error) {
+	var lastErr error
+	
+	for i, endpoint := range endpoints {
+		klog.V(2).Infof("Attempting to connect to management API endpoint %d/%d: %s", i+1, len(endpoints), endpoint)
+		
+		cfg := zitiedge.Config{
+			ApiEndpoint: endpoint,
+			Cert:        cert,
+			PrivateKey:  privateKey,
+			CAS:         certPool,
+		}
+		cfg.CABundle = caBundle
+		
+		zc, err := zitiedge.Client(&cfg)
+		if err != nil {
+			klog.V(2).Infof("Failed to create client for endpoint %s: %v", endpoint, err)
+			lastErr = err
+			continue
+		}
+		
+		klog.V(1).Infof("Successfully created client for management API endpoint: %s", endpoint)
+		return zc, nil
+	}
+	
+	return nil, fmt.Errorf("failed to connect to any management API endpoint, last error: %w", lastErr)
+}
+
 
 func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 
 	kc, err := k.Client()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize cluster client: %v", err)
+		err = fmt.Errorf("failed to initialize kube-apiserver client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -173,7 +234,7 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 	zc, err := zitiClientImpl()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize ziti client: %v", err)
+		err = fmt.Errorf("failed to initialize ziti client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -183,19 +244,24 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 		&clusterClient{client: kc},
 		&zitiClient{client: zc},
 		&zitiConfig{
-			ZitiType:        zitiTypeTunnel,
-			VolumeMountName: "ziti-identity",
-			LabelKey:        "tunnel.openziti.io/enabled",
-			RoleKey:         zitiRoleKey,
-			Image:           sidecarImage,
-			ImageVersion:    sidecarImageVersion,
-			ImagePullPolicy: sidecarImagePullPolicy,
-			IdentityDir:     sidecarIdentityDir,
-			Prefix:          sidecarPrefix,
-			LabelDelValue:   "false",
-			LabelCrValue:    "true",
-			ResolverIp:      clusterDnsServiceIP,
-			RouterConfig:    routerConfig{},
+			ZitiType:             zitiTypeTunnel,
+			VolumeMountName:      runtimeConfig.Sidecar.VolumeMountName,
+			LabelKey:             "tunnel.openziti.io/enabled",
+			RoleKey:              runtimeConfig.Controller.RoleKey,
+			Image:                runtimeConfig.Sidecar.Image,
+			ImageVersion:         runtimeConfig.Sidecar.ImageVersion,
+			ImagePullPolicy:      runtimeConfig.Sidecar.ImagePullPolicy,
+			IdentityDir:          runtimeConfig.Sidecar.IdentityDir,
+			Prefix:               runtimeConfig.Sidecar.Prefix,
+			LabelDelValue:        "false",
+			LabelCrValue:         "true",
+			ResolverIp:           runtimeConfig.Sidecar.ResolverIP,
+			DnsUpstreamEnabled:   runtimeConfig.Sidecar.DnsUpstreamEnabled,
+			Unanswerable:         runtimeConfig.Sidecar.DnsUnanswerable,
+			SearchDomains:        runtimeConfig.Sidecar.SearchDomains,
+			AdditionalArgs:       runtimeConfig.Sidecar.AdditionalArgs,
+			PodSecurityOverride:  runtimeConfig.Security.PodSecurityContextOverride,
+			RouterConfig:         routerConfig{},
 		},
 	)
 	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))
@@ -207,7 +273,7 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 	kc, err := k.Client()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize cluster client: %v", err)
+		err = fmt.Errorf("failed to initialize kube-apiserver client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -216,7 +282,7 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 	zc, err := zitiClientImpl()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		err = fmt.Errorf("failed to initilize ziti client: %v", err)
+		err = fmt.Errorf("failed to initialize ziti client: %v", err)
 		klog.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -226,13 +292,14 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 		&clusterClient{client: kc},
 		&zitiClient{client: zc},
 		&zitiConfig{
-			ZitiType:      zitiTypeRouter,
-			LabelKey:      "router.openziti.io/enabled",
-			AnnotationKey: "openziti/router-name",
-			LabelDelValue: "false",
-			LabelCrValue:  "true",
-			Prefix:        sidecarPrefix,
-			ResolverIp:    clusterDnsServiceIP,
+			ZitiType:            zitiTypeRouter,
+			LabelKey:            "router.openziti.io/enabled",
+			AnnotationKey:       "openziti/router-name",
+			LabelDelValue:       "false",
+			LabelCrValue:        "true",
+			Prefix:              runtimeConfig.Sidecar.Prefix,
+			ResolverIp:          runtimeConfig.Sidecar.ResolverIP,
+			PodSecurityOverride: runtimeConfig.Security.PodSecurityContextOverride,
 			RouterConfig: routerConfig{
 				Cost:              0,
 				Disabled:          false,
@@ -247,58 +314,39 @@ func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
 
 func webhook(cmd *cobra.Command, args []string) {
 
-	// load env vars to override the command line vars if any
-	lookupEnvVars()
+	var err error
+	runtimeConfig, err = loadConfig(configPath)
+	if err != nil {
+		klog.Fatalf("failed to load configuration: %v", err)
+	}
 
+	// Load Ziti identity from environment variable
+	zitiIdentity, err = loadZitiIdentityFromEnv()
+	if err != nil {
+		klog.Fatalf("failed to load Ziti identity: %v", err)
+	}
+
+	// Load webhook server TLS certificates from environment variables
+	loadWebhookTLSFromEnv()
+	
 	klog.Infof("Running version is %s", common.Version)
 
-	// process certs passed from the file through the command line
-	if certFile != "" && keyFile != "" {
-		cert, err = os.ReadFile(certFile)
-		if err != nil {
-			klog.Info(err)
-		}
-
-		key, err = os.ReadFile(keyFile)
-		if err != nil {
-			klog.Info(err)
-		}
-	}
-	if cert == nil || key == nil {
-		klog.Fatal("Cert and key required, but one or both are missing")
+	if len(cert) == 0 || len(key) == 0 {
+		klog.Fatal("TLS_CERT and TLS_PRIVATE_KEY must be provided via environment variables")
 	}
 
-	// process ziti admin user identity passed as separate file paths instead of env vars
-	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" && zitiCtrlCaBundleFile != "" {
-		zitiAdminCert, err = os.ReadFile(zitiCtrlClientCertFile)
-		if err != nil {
-			klog.Info(err)
-		}
-
-		zitiAdminKey, err = os.ReadFile(zitiCtrlClientKeyFile)
-		if err != nil {
-			klog.Info(err)
-		}
-
-		zitiCtrlCaBundle, err = os.ReadFile(zitiCtrlCaBundleFile)
-		if err != nil {
-			klog.Info(err)
-		}
+	if zitiIdentity == nil {
+		klog.Fatal("Ziti identity must be loaded from JSON file")
 	}
 
-	if zitiAdminCert == nil || zitiAdminKey == nil || zitiCtrlCaBundle == nil {
-		klog.Fatal("ziti admin cert, key, and root ca bundle are required as env var or run parameter, but at least one is missing")
-	}
-
-	// klog.Infof("AC WH Server is listening on port %d", port)
+	port := runtimeConfig.Server.Port
 	http.HandleFunc("/ziti-tunnel", serveZitiTunnel)
 	http.HandleFunc("/ziti-router", serveZitiRouter)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),
 		TLSConfig: configTLS(cert, key),
 	}
-	err := server.ListenAndServeTLS("", "")
-	if err != nil {
+	if err = server.ListenAndServeTLS("", ""); err != nil {
 		klog.Fatal(err)
 	}
 	klog.Infof("ziti agent webhook server is listening on port %d", port)

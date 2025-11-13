@@ -14,6 +14,7 @@ env:
   GKE_REGION: us-central1
   GKE_NETWORK_NAME: default
   GKE_SUBNETWORK_NAME: default
+  ZITI_AGENT_NAMESPACE: netfoundry-system # this test assumes the namespace does not exist and will be created during the test
 
 jobs:
   build_deploy:
@@ -60,7 +61,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role-to-assume: ${{ vars.AWS_ROLE_FOR_GITHUB || secrets.AWS_ROLE_FOR_GITHUB }}
           role-session-name: GitHubActions
           audience: sts.amazonaws.com
 
@@ -114,6 +115,23 @@ jobs:
 
           # create the cluster
           eksctl create cluster -f ./eks-cluster.yaml
+
+      - name: capture-eks-stack-debug
+        if: failure()
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+
+          eksctl utils describe-stacks --region "$AWS_REGION" --cluster "$CLUSTER_NAME" || true
+
+          aws cloudformation describe-stack-events \
+            --region "$AWS_REGION" \
+            --stack-name "eksctl-${CLUSTER_NAME}-cluster" || true
+
+          aws cloudformation describe-stack-events \
+            --region "$AWS_REGION" \
+            --stack-name "eksctl-${CLUSTER_NAME}-nodegroup-ng-1" || true
 
       - name: set-context-name
         id: set-context
@@ -237,7 +255,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role-to-assume: ${{ vars.AWS_ROLE_FOR_GITHUB || secrets.AWS_ROLE_FOR_GITHUB }}
           role-session-name: GitHubActions
           audience: sts.amazonaws.com
 
@@ -504,16 +522,22 @@ jobs:
           fi
           ZITI_SESSION_TOKEN=$(echo "$ZITI_SESSION_OBJ" | jq -r .value)
           echo "::add-mask::$ZITI_SESSION_TOKEN"
+          ZITI_CTRL_MGMT_API=$(echo "$ZITI_SESSION_OBJ" | jq -r .networkControllerUrl)
+          echo ZITI_CTRL_MGMT_API="$ZITI_CTRL_MGMT_API" | tee -a $GITHUB_ENV
           set -o xtrace
           if [[ -z "$ZITI_SESSION_TOKEN" ]]; then
               echo "ERROR: ZITI_SESSION_TOKEN is empty" >&2
+              exit 1
+          fi
+          if [[ -z "$ZITI_CTRL_MGMT_API" ]]; then
+              echo "ERROR: ZITI_CTRL_MGMT_API is empty" >&2
               exit 1
           fi
 
           # call the Ziti controller with the session token to get the list of identities
           NF_IDENTITY_LIST="$(
             curl --insecure --silent --fail --location --request GET \
-            "$(echo "$ZITI_SESSION_OBJ" | jq -r .networkControllerUrl)"/identities \
+            "$ZITI_CTRL_MGMT_API"/identities \
             --header 'Content-Type: application/json' \
             --header "zt-session: $ZITI_SESSION_TOKEN"
           )"
@@ -550,7 +574,8 @@ jobs:
         shell: bash
         env:
           ZITI_AGENT_IMAGE: netfoundry/ziti-k8s-agent:${{ github.run_id }}
-          ZITI_AGENT_NAMESPACE: ziti-agent  # this test assumes the namespace does not exist and will be created during the test
+          ZITI_AGENT_IDENTITY: ziti-webhook-identity
+          ZITI_AGENT_IDENTITY_INDEX: ziti_id.json
           ZITI_AGENT_LOG_LEVEL: 4
           SIDECAR_IMAGE: ${{ vars.SIDECAR_IMAGE || 'docker.io/openziti/ziti-tunnel' }} 
           SIDECAR_IMAGE_VERSION: ${{ vars.SIDECAR_IMAGE_VERSION || 'latest' }}
@@ -558,17 +583,15 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          # run the shell script to generate the k8s manifests, consuming env vars as configuration
+          # Create namespace and admin identity secrets for both clusters
           # IDENTITY_FILE exported in prior step create-nf-network-services
-          # ZITI_AGENT_IMAGE exported in this step environment
-          # ZITI_AGENT_NAMESPACE exported in this step environment
-          # ZITI_AGENT_LOG_LEVEL exported in this step environment
-          # SIDECAR_IMAGE exported in this step environment
-          # SIDECAR_IMAGE_VERSION exported in this step environment
-          SIDECAR_SELECTORS=namespace \
-          ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-namespace-selector.yaml
-          SIDECAR_SELECTORS=pod \
-          ./generate-ziti-agent-manifest.bash > ziti-k8s-agent-pod-selector.yaml
+          for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
+            kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context="$CLUSTER" || true
+            kubectl create secret generic "${ZITI_AGENT_IDENTITY}" \
+              --from-file="${ZITI_AGENT_IDENTITY_INDEX}=${IDENTITY_FILE}" \
+              --namespace="$ZITI_AGENT_NAMESPACE" \
+              --context="$CLUSTER"
+          done
 
           # Install cert-manager via helm for both clusters
           CERT_MANAGER_VERSION=v1.16.2
@@ -591,9 +614,6 @@ jobs:
             --kube-context "$GKE_CLUSTER" \
             --timeout 5m
 
-          # create new namespace for ziti agent
-          kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context "$AWS_CLUSTER"
-          kubectl create namespace "$ZITI_AGENT_NAMESPACE" --context "$GKE_CLUSTER"
 
           # Wait for cert-manager components and verify webhook is properly configured
           for CLUSTER in "$AWS_CLUSTER" "$GKE_CLUSTER"; do
@@ -610,32 +630,50 @@ jobs:
             kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations -n cert-manager --context "$CLUSTER"
           done
 
-          # Apply agent manifests with retries
-          for CLUSTER_MANIFEST in \
-            "${AWS_CLUSTER}=ziti-k8s-agent-namespace-selector.yaml" \
-            "${GKE_CLUSTER}=ziti-k8s-agent-pod-selector.yaml"
+          # Install ziti-webhook via Helm with retries
+          for CLUSTER_SELECTOR in \
+            "${AWS_CLUSTER}=namespace" \
+            "${GKE_CLUSTER}=pod"
           do
-            CLUSTER="${CLUSTER_MANIFEST%%=*}"
-            MANIFEST="${CLUSTER_MANIFEST#*=}"
+            CLUSTER="${CLUSTER_SELECTOR%%=*}"
+            SELECTOR="${CLUSTER_SELECTOR#*=}"
 
-            : Applying Ziti configurations to cluster $CLUSTER
-            ATTEMPTS=2
+            : Installing Ziti webhook to cluster $CLUSTER with $SELECTOR selector
+            ATTEMPTS=3
             DELAY=30
-            while (( ATTEMPTS-- )); do
-              if kubectl apply -f "$MANIFEST" --context "$CLUSTER"; then
+            SUCCESS=false
+            while (( --ATTEMPTS )); do
+              if helm upgrade --install ziti-webhook ./charts/ziti-webhook \
+                --namespace="$ZITI_AGENT_NAMESPACE" \
+                --kube-context="$CLUSTER" \
+                --set controller.mgmtApi="$ZITI_CTRL_MGMT_API" \
+                --set deployment.image.repo="netfoundry/ziti-k8s-agent" \
+                --set deployment.image.tag="${{ github.run_id }}" \
+                --set sidecar.image.repo="$SIDECAR_IMAGE" \
+                --set sidecar.image.tag="$SIDECAR_IMAGE_VERSION" \
+                --set server.logLevel="$ZITI_AGENT_LOG_LEVEL" \
+                --set webhook.selectors.enabled="$SELECTOR" \
+                --set identity.existingSecret.name="${ZITI_AGENT_IDENTITY}" \
+                --set identity.existingSecret.key="${ZITI_AGENT_IDENTITY_INDEX}" \
+                --timeout 5m; then
+                SUCCESS=true
                 break
               else
                 sleep $DELAY
               fi
             done
-            kubectl apply -f "$MANIFEST" --context "$CLUSTER"
+            
+            if [ "$SUCCESS" != "true" ]; then
+              echo "❌ Failed to install ziti-webhook to cluster $CLUSTER after 3 attempts"
+              exit 1
+            fi
           done
 
-          : Waiting for ziti-admission-webhook pods to be ready in AWS cluster...
-          kubectl wait --for=condition=Available deployment -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $AWS_CLUSTER
+          : Waiting for ziti-webhook pods to be ready in AWS cluster...
+          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=300s --context $AWS_CLUSTER
           
-          : Waiting for ziti-admission-webhook pods to be ready in GKE cluster...
-          kubectl wait --for=condition=Available deployment -l app=ziti-admission-webhook -n $ZITI_AGENT_NAMESPACE --timeout=120s --context $GKE_CLUSTER
+          : Waiting for ziti-webhook pods to be ready in GKE cluster...
+          kubectl wait --for=condition=Available deployment ziti-webhook -n $ZITI_AGENT_NAMESPACE --timeout=300s --context $GKE_CLUSTER
 
       - name: deploy-bookinfo-app
         shell: bash
@@ -689,7 +727,7 @@ jobs:
           # pods in both clusters
           for i in $(seq 1 40);
           do
-            curl -sS -X GET http://productpage.ziti:9080/productpage?u=test \
+            curl -sS -X GET http://productpage.ziti.internal:9080/productpage?u=test \
             | grep reviews \
             | tee -a ./testcase-01_curl_output.log \
             || true  # ignore individual curl|grep errors because we're verifying the aggregate result later
@@ -710,7 +748,7 @@ jobs:
           fi
 
       # this changes the stack topology for the next test so that EKS test1 cluster hosts only frontend pods, e.g.,
-      # providing the productpage.ziti service, and the GKE test2 cluster hosts only backend pods, e.g., the ratings,
+      # providing the productpage.ziti.internal service, and the GKE test2 cluster hosts only backend pods, e.g., the ratings,
       # reviews, and details pods
       - name: split frontend and backend between the clusters
         shell: bash
@@ -718,13 +756,19 @@ jobs:
           set -o pipefail
           set -o xtrace
 
-          # in the GKE test2 cluster, scale the frontend deployments to 0
-          kubectl scale deployment -l app=productpage --replicas=0 -n test2 --context $GKE_CLUSTER
-          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l app=productpage -n test2 --timeout=120s --context $GKE_CLUSTER
+          # scale all bookinfo deployments to 0 in both clusters to ensure fresh pods for testcase-02
+          kubectl scale deployment -l 'app in (details,productpage,ratings,reviews)' --replicas=0 -n test1 --context $AWS_CLUSTER
+          kubectl scale deployment -l 'app in (details,productpage,ratings,reviews)' --replicas=0 -n test2 --context $GKE_CLUSTER
+          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l 'app in (details,productpage,ratings,reviews)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l 'app in (details,productpage,ratings,reviews)' -n test2 --timeout=120s --context $GKE_CLUSTER
 
-          # in the EKS test1 cluster, scale the backend deployments to 0
-          kubectl scale deployment -l 'app in (ratings,reviews,details)' --replicas=0 -n test1 --context $AWS_CLUSTER
-          kubectl wait --for=jsonpath='{.spec.replicas}'=0 deployment -l 'app in (ratings,reviews,details)' -n test1 --timeout=120s --context $AWS_CLUSTER
+          # scale up frontend (productpage) in test1 cluster
+          kubectl scale deployment -l app=productpage --replicas=1 -n test1 --context $AWS_CLUSTER
+          kubectl wait --for=condition=Available deployment -l app=productpage -n test1 --timeout=120s --context $AWS_CLUSTER
+
+          # scale up backend (details, ratings, reviews) in test2 cluster
+          kubectl scale deployment -l 'app in (ratings,reviews,details)' --replicas=1 -n test2 --context $GKE_CLUSTER
+          kubectl wait --for=condition=Available deployment -l 'app in (ratings,reviews,details)' -n test2 --timeout=120s --context $GKE_CLUSTER
 
       # this verifies the result has not changed since the last test, despite a radical change of stack topology,
       # relying on Ziti to adapt to the loss of frontend and backend pods
@@ -737,15 +781,53 @@ jobs:
           # TODO find a better way to wait for the termintors to be ready
           sleep 60
 
+          # get the productpage pod name and sidecar container name for log streaming
+          PRODUCTPAGE_POD=$(kubectl get pods -n test1 --selector 'app=productpage' --context $AWS_CLUSTER -o jsonpath='{.items[0].metadata.name}')
+          SIDECAR_CONTAINER=$(kubectl get pod "$PRODUCTPAGE_POD" -n test1 --context $AWS_CLUSTER -o jsonpath='{.spec.containers[?(@.name!="productpage")].name}')
+          
+          echo "=== Starting productpage sidecar log streaming for correlation ==="
+          echo "Pod: $PRODUCTPAGE_POD, Sidecar: $SIDECAR_CONTAINER"
+          
+          # stream sidecar logs in background with timestamps
+          kubectl logs -n test1 "$PRODUCTPAGE_POD" -c "$SIDECAR_CONTAINER" --context $AWS_CLUSTER --follow --timestamps > ./testcase-02_sidecar_logs.txt 2>&1 &
+          SIDECAR_LOG_PID=$!
+          
+          # give logs a moment to start streaming
+          sleep 2
+
           LOG_EMPTY=0
           # send enough requests to trigger the terminatorStrategy: random evenly distributing of requests across all
           # pods
+          echo "=== Starting curl requests at $(date -Iseconds) ==="
           for i in $(seq 1 40);
           do
-            curl -s -X GET http://productpage.ziti:9080/productpage?u=test \
-            | grep reviews \
-            | tee -a ./testcase-02_curl_output.log || true  # ignore individual curl|grep errors because we're verifying the aggregate result later
+            echo "[Request $i at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
+            
+            # capture curl output and exit code separately
+            CURL_OUTPUT=$(curl -sSf -X GET http://productpage.ziti.internal:9080/productpage?u=test 2>&1)
+            CURL_EXIT=$?
+            
+            if [ $CURL_EXIT -ne 0 ]; then
+              echo "[Request $i CURL FAILED (exit $CURL_EXIT) at $(date -Iseconds)]: $CURL_OUTPUT" | tee -a ./testcase-02_curl_output.log
+            else
+              # curl succeeded, now check if response contains reviews (using same pattern as verify_test_results.py)
+              if echo "$CURL_OUTPUT" | grep -qE 'reviews-v[123]'; then
+                echo "$CURL_OUTPUT" | grep -E 'reviews-v[123]' | tee -a ./testcase-02_curl_output.log
+              else
+                echo "[Request $i GREP FAILED (no 'reviews-v[123]' in response) at $(date -Iseconds)]" | tee -a ./testcase-02_curl_output.log
+                echo "$CURL_OUTPUT" | head -5 | tee -a ./testcase-02_curl_output.log
+              fi
+            fi
           done
+          echo "=== Finished curl requests at $(date -Iseconds) ==="
+          
+          # stop sidecar log streaming and capture final logs
+          sleep 5
+          kill $SIDECAR_LOG_PID 2>/dev/null || true
+          
+          # display sidecar logs for correlation
+          echo "=== Productpage sidecar logs during testcase-02 ==="
+          cat ./testcase-02_sidecar_logs.txt
 
           for LOG in testcase-02_curl_output.log testcase-02_pods.log; do
             if [[ -s "./$LOG" ]]; then
@@ -766,7 +848,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          set -o pipefail
+          set +o errexit
           set -o xtrace
 
           # get cluster info
@@ -780,26 +862,93 @@ jobs:
           # inspect cert-manager app
           kubectl --context $AWS_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
           kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=cert-manager
-          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=cert-manager
-          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=cert-manager
+          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=cert-manager --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=cert-manager --tail=-1
 
           # inspect cert-manager webhook
           kubectl --context $AWS_CLUSTER --namespace cert-manager describe pod --selector app=webhook
           kubectl --context $GKE_CLUSTER --namespace cert-manager describe pod --selector app=webhook
-          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=webhook
-          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook
+          kubectl --context $AWS_CLUSTER --namespace cert-manager logs --selector app=webhook --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace cert-manager logs --selector app=webhook --tail=-1
+
+          # inspect ziti-webhook deployment and pods
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get deployment ziti-webhook -o yaml
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get deployment ziti-webhook -o yaml
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe deployment ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe deployment ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pods -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs -l app.kubernetes.io/name=ziti-webhook --all-containers=true --tail=-1
+
+          # check events in ziti-agent namespace
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get events --sort-by='.lastTimestamp'
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get events --sort-by='.lastTimestamp'
+
+          # check helm release status
+          helm --kube-context $AWS_CLUSTER status ziti-webhook -n $ZITI_AGENT_NAMESPACE
+          helm --kube-context $GKE_CLUSTER status ziti-webhook -n $ZITI_AGENT_NAMESPACE
+
+          # check replicasets
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" get replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe replicasets -l app.kubernetes.io/name=ziti-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe replicasets -l app.kubernetes.io/name=ziti-webhook
 
           # inspect ziti-admission-webhook
-          kubectl --context $AWS_CLUSTER --namespace ziti describe pod --selector app=ziti-admission-webhook
-          kubectl --context $GKE_CLUSTER --namespace ziti describe pod --selector app=ziti-admission-webhook
-          kubectl --context $AWS_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
-          kubectl --context $GKE_CLUSTER --namespace ziti logs --selector app=ziti-admission-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" describe pod --selector app=ziti-admission-webhook
+          kubectl --context $AWS_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook --tail=-1
+          kubectl --context $GKE_CLUSTER --namespace "$ZITI_AGENT_NAMESPACE" logs --selector app=ziti-admission-webhook --tail=-1
 
           # inspect bookinfo apps
-          kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app in (details,ratings)'
-          kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (productpage,reviews)'
-          kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app in (details,ratings)'
-          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app in (productpage,reviews)'
+          kubectl --context $AWS_CLUSTER --namespace test1 describe pod --selector 'app=productpage'
+          kubectl --context $GKE_CLUSTER --namespace test2 describe pod --selector 'app in (details,ratings,reviews)'
+          kubectl --context $AWS_CLUSTER --namespace test1 logs --selector 'app=productpage' --all-containers --tail=-1
+          
+          # capture backend service logs separately for easier analysis
+          : --- Details Service Logs - leaf service ---
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=details' --all-containers --tail=-1
+          
+          : --- Ratings Service Logs - leaf service ---
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=ratings' --all-containers --tail=-1
+          
+          : --- Reviews Service Logs - intermediate service that calls ratings ---
+          kubectl --context $GKE_CLUSTER --namespace test2 logs --selector 'app=reviews' --all-containers --tail=-1
+
+          # inspect ziti controller state for reviews service
+          ziti edge login "$ZITI_CTRL_MGMT_API" --file "$IDENTITY_FILE" --yes
+          : --- Reviews Service Details ---
+          ziti edge list services 'limit none'
+          : --- Reviews Service Terminators ---
+          ziti edge list terminators 'limit none'
+          : --- Reviews Service Policies ---
+          ziti edge list service-policies 'limit none'
+          : --- All Identities - to verify sidecar identities exist ---
+          ziti edge list identities 'limit none'
+          
+          # analyze service policies using policy advisor
+          : --- Policy Advisor for productpage-service ---
+          ziti edge policy-advisor services --quiet productpage-service || true
+          : --- Policy Advisor for details-service ---
+          ziti edge policy-advisor services --quiet details-service || true
+          : --- Policy Advisor for ratings-service ---
+          ziti edge policy-advisor services --quiet ratings-service || true
+          : --- Policy Advisor for reviews-service ---
+          ziti edge policy-advisor services --quiet reviews-service || true
+          
+          # inspect intercept addresses for nf-mgmt-service
+          : --- Intercept addresses for nf-mgmt-service ---
+          ZITI_SERVICE_NAME="nf-mgmt-service"
+          ziti edge list services --output-json "name=\"${ZITI_SERVICE_NAME}\"" \
+          | jq --raw-output '.data[0].configs[]' \
+          | while read
+          do
+              ziti edge show config $REPLY --output-json \
+              | jq 'select(.data.configType.name == "intercept.v1")|.data.data.addresses[]'
+          done
 
           # inspect ziti-edge-tunnel
           journalctl -lu ziti-edge-tunnel.service
@@ -842,7 +991,7 @@ jobs:
         with:
           cluster_name: ${{ env.CLUSTER_NAME }}
           region: ${{ env.AWS_REGION }}
-          role_to_assume: ${{ secrets.AWS_ROLE_FOR_GITHUB }}
+          role_to_assume: ${{ vars.AWS_ROLE_FOR_GITHUB || secrets.AWS_ROLE_FOR_GITHUB }}
 
   cleanup-gke:
     needs: [cleanup-debug-delay]
