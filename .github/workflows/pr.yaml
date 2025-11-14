@@ -17,7 +17,7 @@ env:
   ZITI_AGENT_NAMESPACE: netfoundry-system # this test assumes the namespace does not exist and will be created during the test
 
 jobs:
-  build_deploy:
+  build-deploy:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -201,8 +201,8 @@ jobs:
           CONTEXT_NAME="gke_${GCP_PROJECT}_${GKE_REGION}_${CLUSTER_NAME}"
           echo "context=$CONTEXT_NAME" | tee -a $GITHUB_OUTPUT
 
-  regression_test:
-    needs: [build_deploy, create-eks, create-gke]
+  regression-test:
+    needs: [build-deploy, create-eks, create-gke]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -955,7 +955,7 @@ jobs:
 
   cleanup-debug-delay:
     if: failure()
-    needs: [regression_test]
+    needs: [regression-test]
     runs-on: ubuntu-24.04
     steps:
       - name: wait 30 minutes
@@ -968,7 +968,7 @@ jobs:
 
   cleanup-nf:
     needs: [cleanup-debug-delay]
-    if: always() && needs.regression_test.result != 'skipped'
+    if: always() && needs.regression-test.result != 'skipped'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
