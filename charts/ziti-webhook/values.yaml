@@ -40,7 +40,7 @@ deployment:
   name: "ziti-admission-wh-deployment"
   image:
     repo: "docker.io/netfoundry/ziti-k8s-agent"
-    tag: "latest"
+    tag: ""  # Empty defaults to chart's appVersion
     pullPolicy: "IfNotPresent"
   replicas: 1
   resources:
