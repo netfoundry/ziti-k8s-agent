@@ -12,13 +12,7 @@ The Ziti Kubernetes Agent injects a sidecar that runs a Ziti tunneler as a bi-di
 
 ### Install with Helm
 
-```bash
-# install chart directly from source
-git clone https://github.com/netfoundry/ziti-k8s-agent.git
-cd ziti-k8s-agent
-```
-
-#### Option 1: Existing Secret (PREFERRED FOR SECURITY)
+#### Option 1: Existing Secret (PREFERRED FOR PRODUCTION)
 
 > **⚠️ SECURITY WARNING**: This webhook requires a Ziti admin identity with full network privileges. Handle with extreme care!
 
@@ -30,21 +24,27 @@ kubectl create secret generic netfoundry-admin-identity \
   --from-file=netfoundry-admin.json=netfoundry-admin.json \
   --namespace=netfoundry-system
 
-# Install webhook
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
+# Install webhook from latest release
+helm upgrade --install --namespace="netfoundry-system" --create-namespace ziti-webhook \
+  https://github.com/netfoundry/ziti-k8s-agent/releases/latest/download/ziti-webhook-chart.tgz \
   --set identity.existingSecret.name="netfoundry-admin-identity"
+```
 
-#### Option 2: Chart-Managed Secret (FOR DEVELOPMENT/TESTING ONLY)
+#### Option 2: Chart-Managed Secret (FOR DEVELOPMENT/TESTING)
 
-> **⚠️ EXTREME SECURITY WARNING**: Option 2 embeds the complete admin identity in Helm values, which may be stored in version control or Helm history. This exposes full network administrative credentials. Use ONLY for development/testing environments!
+> **⚠️ SECURITY WARNING**: This option embeds the admin identity in Helm values, which may be stored in Helm history. Use ONLY for development/testing environments!
 
 Provide the complete identity JSON directly via Helm values:
 
 ```bash
-# Read the identity JSON and provide it directly
+# Clone repository for local development
+git clone https://github.com/netfoundry/ziti-k8s-agent.git
+cd ziti-k8s-agent
+
+# Install from local chart with identity JSON
 # Using --set-json validates the JSON syntax immediately
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set-json identity.json="$(< netfoundry-admin.json)"
+helm upgrade --install --namespace="netfoundry-system" --create-namespace ziti-webhook ./charts/ziti-webhook \
+  --set-json identity.json="$(<./test-admin.json)"
 ```
 
 ## Select Pods for Sidecar Injection
@@ -56,11 +56,13 @@ Select all pods in namespaces labeled `tunnel.openziti.io/enabled="true"`:
 ```bash
 # Label namespace for sidecar injection
 kubectl label namespace {name} tunnel.openziti.io/enabled="true"
+```
 
-# Install webhook with namespace selector (default)
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set identity.existingSecret.name="netfoundry-admin-identity" \
-  --set webhook.selectors.enabled="namespace"
+```yaml
+# values.yaml
+webhook:
+  selectors:
+    enabled: "namespace"
 ```
 
 ### Select by Pod
@@ -70,11 +72,13 @@ Select pods labeled `tunnel.openziti.io/enabled="true"` in any namespace:
 ```bash
 # Label deployment for sidecar injection
 kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"tunnel.openziti.io/enabled":"true"}}}}}'
+```
 
-# Install webhook with pod selector
-helm install ziti-webhook ./charts/ziti-webhook \
-  --set identity.existingSecret.name="netfoundry-admin-identity" \
-  --set webhook.selectors.enabled="pod"
+```yaml
+# values.yaml
+webhook:
+  selectors:
+    enabled: "pod"
 ```
 
 ### Select by Namespace and Pod
@@ -85,11 +89,13 @@ Select pods labeled `tunnel.openziti.io/enabled="true"` only in namespaces label
 # Label both namespace and deployment
 kubectl label namespace "default" tunnel.openziti.io/enabled="true"
 kubectl patch deployment/{name} -p '{"spec":{"template":{"metadata":{"labels":{"tunnel.openziti.io/enabled":"true"}}}}}'
+```
 
-# Install webhook with both selectors
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set identity.existingSecret.name="netfoundry-admin-identity" \
-  --set webhook.selectors.enabled="namespace,pod"
+```yaml
+# values.yaml
+webhook:
+  selectors:
+    enabled: "namespace,pod"
 ```
 
 **Note**: The `kube-system` namespace is excluded based on [Kubernetes best practices](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#avoiding-operating-on-the-kube-system-namespace).
@@ -184,43 +190,30 @@ identity:
     key: "netfoundry-admin.json"
 ```
 
-### Install with Custom Values
-
-```bash
-# Install with custom values file
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --namespace=ziti-system \
-  --create-namespace \
-  --values=values-production.yaml
-
-# Or override specific values inline
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set identity.existingSecret.name="netfoundry-admin-identity" \
-  --set deployment.replicas=3 \
-  --set server.logLevel=4 \
-  --set sidecar.searchDomains="{ziti.internal,ziti.example.com}" \
-  --set webhook.selectors.enabled="namespace,pod"
-```
-
 ### DNS Search Domains
 
 You may replace the cluster's default DNS search domains for selected pods by configuring `sidecar.searchDomains`. This is useful when selected pods need to resolve short names in DNS zones outside the cluster:
 
-```bash
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set identity.existingSecret.name="netfoundry-admin-identity" \
-  --set sidecar.searchDomains="{ziti.internal,ziti.example.com}"
+```yaml
+# values.yaml
+sidecar:
+  searchDomains:
+    - "ziti.internal"
+    - "ziti.example.com"
 ```
 
 ### Resource Management
 
 Configure resource requests and limits for production deployments:
 
-```bash
-helm upgrade --install ziti-webhook ./charts/ziti-webhook \
-  --set identity.existingSecret.name="netfoundry-admin-identity" \
-  --set deployment.resources.requests.cpu="200m" \
-  --set deployment.resources.requests.memory="256Mi" \
-  --set deployment.resources.limits.cpu="1000m" \
-  --set deployment.resources.limits.memory="1Gi"
+```yaml
+# values.yaml
+deployment:
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
 ```
