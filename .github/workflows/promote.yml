@@ -5,7 +5,7 @@ on:
     types: [released]  # this release event activity type excludes prereleases
 
 permissions:
-  contents: write  # allow updating the major version and "latest" Git tags
+  contents: write  # allow updating the major version Git tag on the GitHub repository
 
 env:
   REGISTRY: docker.io
@@ -13,7 +13,7 @@ env:
   IMAGE_REPO: ${{ vars.ZITI_AGENT_IMAGE_REPO || 'netfoundry/ziti-k8s-agent' }}
 
 jobs:
-  promote:
+  parse_version:
     runs-on: ubuntu-latest
     steps:
       - name: Parse Release Version
@@ -27,6 +27,34 @@ jobs:
             echo "GITHUB_REF_NAME=${GITHUB_REF_NAME} is not a stable release semver ref" >&2
             exit 1
           fi
+
+      - name: Compare with Highest Version
+        id: compare
+        shell: bash
+        run: |
+          set -o pipefail
+          set -o xtrace
+          
+          HIGHEST_VERSION=$(
+            gh release list --repo "${GITHUB_REPOSITORY}" \
+                            --limit 999 \
+                            --exclude-drafts \
+                            --exclude-pre-releases \
+                            --json tagName \
+                            --jq '.[].tagName' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -1
+          )
+          CURRENT_VERSION="${GITHUB_REF_NAME}"
+          
+          if [[ "$CURRENT_VERSION" == "$HIGHEST_VERSION" ]]; then
+            echo "highest=true" | tee -a $GITHUB_OUTPUT
+          else
+            echo "highest=false" | tee -a $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,8 +71,13 @@ jobs:
       - uses: Actions-R-Us/actions-tagger@v2
         with:
           publish_latest_tag: false
-          prefer_branch_releases: false 
+          prefer_branch_releases: false
 
+  promote_docker:
+    if: needs.parse_version.outputs.highest == 'true'
+    needs: parse_version
+    runs-on: ubuntu-latest
+    steps:
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
       - name: Define Docker Tags
