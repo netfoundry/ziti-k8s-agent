@@ -69,6 +69,53 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Update Helm Chart Version
+        shell: python
+        run: |
+          import yaml
+          import os
+          
+          # Extract version without 'v' prefix
+          ref_name = "${{ github.ref_name }}"
+          version = ref_name.lstrip('v')
+          
+          chart_path = "charts/ziti-webhook/Chart.yaml"
+          
+          # Load Chart.yaml
+          with open(chart_path, 'r') as f:
+              chart = yaml.safe_load(f)
+          
+          # Update version fields
+          chart['version'] = version
+          chart['appVersion'] = version
+          
+          # Write back to file
+          with open(chart_path, 'w') as f:
+              yaml.dump(chart, f, default_flow_style=False, sort_keys=False)
+          
+          print("Updated Chart.yaml:")
+          with open(chart_path, 'r') as f:
+              print(f.read())
+
+      - name: Package Helm Chart
+        run: |
+          # Extract version without 'v' prefix for chart filename
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          
+          # Package the chart
+          helm package charts/ziti-webhook --destination .
+          
+          # Rename to predictable filename: ziti-webhook-chart.tgz
+          mv "ziti-webhook-${VERSION}.tgz" ziti-webhook-chart.tgz
+          
+          echo "CHART_PACKAGE=ziti-webhook-chart.tgz" >> $GITHUB_ENV
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,4 +123,5 @@ jobs:
           gh release create ${{ github.ref_name }} \
             --prerelease \
             --generate-notes \
-            --title "${{ github.ref_name }}"
+            --title "${{ github.ref_name }}" \
+            "${{ env.CHART_PACKAGE }}"

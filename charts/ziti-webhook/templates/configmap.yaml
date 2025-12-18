@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ziti-webhook.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ziti-webhook.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      port: {{ .Values.server.port }}
+    
+    controller:
+      mgmtApi: {{ .Values.controller.mgmtApi | quote }}
+      roleKey: {{ .Values.controller.roleKey | quote }}
+    
+    sidecar:
+      image: {{ .Values.sidecar.image.repo | quote }}
+      imageVersion: {{ .Values.sidecar.image.tag | quote }}
+      imagePullPolicy: {{ .Values.sidecar.image.pullPolicy | quote }}
+      prefix: {{ .Values.sidecar.prefix | quote }}
+      identityDir: {{ .Values.sidecar.identityDir | quote }}
+      volumeMountName: {{ .Values.sidecar.volumeMountName | quote }}
+      {{- if .Values.sidecar.resolverIp }}
+      resolverIp: {{ .Values.sidecar.resolverIp | quote }}
+      {{- else }}
+      resolverIp: ""
+      {{- end }}
+      dnsUpstreamEnabled: {{ .Values.sidecar.dnsUpstreamEnabled }}
+      dnsUnanswerable: {{ .Values.sidecar.dnsUnanswerable | quote }}
+      {{- if .Values.sidecar.searchDomains }}
+      searchDomains:
+        {{- range .Values.sidecar.searchDomains }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- else }}
+      searchDomains: []
+      {{- end }}
+    
+    security:
+      podSecurityContextOverride: {{ .Values.security.podSecurityContextOverride }}
+    
+    clusterDns:
+      zone: {{ .Values.clusterDns.zone | quote }}

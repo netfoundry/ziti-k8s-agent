@@ -1,0 +1,52 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ .Values.webhook.name }}
+  {{- if .Values.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "ziti-webhook.fullname" . }}-cert
+  {{- end }}
+  labels:
+    {{- include "ziti-webhook.labels" . | nindent 4 }}
+webhooks:
+  - name: tunnel.ziti.webhook
+    admissionReviewVersions: ["v1"]
+    matchPolicy: Equivalent
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+        {{- if contains "namespace" .Values.webhook.selectors.enabled }}
+        - key: tunnel.openziti.io/enabled
+          operator: In
+          values:
+            - "true"
+            - "false"
+        {{- end }}
+    {{- if contains "pod" .Values.webhook.selectors.enabled }}
+    objectSelector:
+      matchExpressions:
+        - key: tunnel.openziti.io/enabled
+          operator: In
+          values:
+            - "true"
+            - "false"
+    {{- end }}
+    rules:
+      - operations: ["CREATE","UPDATE","DELETE"]
+        apiGroups: [""]
+        apiVersions: ["v1","v1beta1"]
+        resources: ["pods"]
+        scope: "*"
+    clientConfig:
+      service:
+        name: {{ include "ziti-webhook.fullname" . }}-service
+        namespace: {{ .Release.Namespace }}
+        port: {{ .Values.service.port }}
+        path: "/ziti-tunnel"
+      caBundle: ""
+    sideEffects: None
+    timeoutSeconds: 30

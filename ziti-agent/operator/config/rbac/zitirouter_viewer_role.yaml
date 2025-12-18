@@ -1,0 +1,23 @@
+# permissions for end users to view zitirouters.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: ziti-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: zitirouter-viewer-role
+rules:
+- apiGroups:
+  - kubernetes.openziti.io
+  resources:
+  - zitirouters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kubernetes.openziti.io
+  resources:
+  - zitirouters/status
+  verbs:
+  - get

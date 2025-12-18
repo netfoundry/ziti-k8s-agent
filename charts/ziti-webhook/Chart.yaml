@@ -1,0 +1,19 @@
+apiVersion: v2
+name: ziti-webhook
+description: A Helm chart for Ziti Kubernetes Admission Webhook
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - ziti
+  - openziti
+  - zero-trust
+  - networking
+  - kubernetes
+  - admission-webhook
+home: https://netfoundry.io/docs/openziti/
+sources:
+  - https://github.com/netfoundry/ziti-k8s-agent
+maintainers:
+  - name: OpenZiti Team
+    email: developers@openziti.org

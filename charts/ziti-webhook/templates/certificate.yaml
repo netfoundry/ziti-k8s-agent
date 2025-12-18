@@ -1,0 +1,47 @@
+{{- if .Values.certManager.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "ziti-webhook.fullname" . }}-issuer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ziti-webhook.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "ziti-webhook.fullname" . }}-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ziti-webhook.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "ziti-webhook.fullname" . }}-tls
+  duration: {{ .Values.certManager.certificate.duration }}
+  renewBefore: {{ .Values.certManager.certificate.renewBefore }}
+  subject:
+    organizations:
+      - openziti
+  commonName: {{ include "ziti-webhook.fullname" . }}-service.{{ .Release.Namespace }}.svc.{{ .Values.clusterDns.zone }}
+  isCA: false
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  dnsNames:
+    - {{ include "ziti-webhook.fullname" . }}-service
+    - {{ include "ziti-webhook.fullname" . }}-service.{{ .Release.Namespace }}
+    - {{ include "ziti-webhook.fullname" . }}-service.{{ .Release.Namespace }}.svc
+    - {{ include "ziti-webhook.fullname" . }}-service.{{ .Release.Namespace }}.svc.{{ .Values.clusterDns.zone }}
+  issuerRef:
+    kind: Issuer
+    name: {{ include "ziti-webhook.fullname" . }}-issuer
+{{- end }}

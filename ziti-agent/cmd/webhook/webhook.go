@@ -1,16 +1,23 @@
 package webhook
 
 import (
+	"context"
+	"crypto"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"strings"
+	"time"
 
 	"github.com/netfoundry/ziti-k8s-agent/ziti-agent/cmd/common"
+	k "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/kubernetes"
+	zitiedge "github.com/netfoundry/ziti-k8s-agent/ziti-agent/pkg/ziti-edge"
+	"github.com/openziti/edge-api/rest_management_api_client"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admission/v1"
-	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 )
@@ -23,35 +30,20 @@ func init() {
 	addToScheme(scheme)
 }
 
-// admitv1beta1Func handles a v1beta1 admission
-type admitv1beta1Func func(admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse
+type admitv1Func func(context.Context, admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
 
-// admitv1Func handles a v1 admission
-type admitv1Func func(admissionv1.AdmissionReview) *admissionv1.AdmissionResponse
-
-// admitHandler is a handler, for both validators and mutators, that supports multiple admission review versions
 type admitHandler struct {
-	admissionv1beta1 admitv1beta1Func
-	admissionv1      admitv1Func
+	admissionv1 admitv1Func
 }
 
-func newDelegateToV1AdmitHandler(f admitv1Func) admitHandler {
+func newAdmitHandler(f admitv1Func) admitHandler {
 	return admitHandler{
-		admissionv1beta1: delegateV1beta1AdmitToV1(f),
-		admissionv1:      f,
+		admissionv1: f,
 	}
 }
 
-func delegateV1beta1AdmitToV1(f admitv1Func) admitv1beta1Func {
-	return func(review admissionv1beta1.AdmissionReview) *admissionv1beta1.AdmissionResponse {
-		in := admissionv1.AdmissionReview{Request: convertAdmissionRequestToV1(review.Request)}
-		out := f(in)
-		return convertAdmissionResponseToV1beta1(out)
-	}
-}
-
-// serve handles the http portion of a request prior to handing to an admit function
 func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
+
 	var body []byte
 	if r.Body != nil {
 		if data, err := io.ReadAll(r.Body); err == nil {
@@ -76,23 +68,6 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 
 	var responseObj runtime.Object
 	switch *gvk {
-	case admissionv1beta1.SchemeGroupVersion.WithKind("AdmissionReview"):
-		requestedAdmissionReview, ok := obj.(*admissionv1beta1.AdmissionReview)
-		if !ok {
-			klog.Errorf("Expected v1beta1.AdmissionReview but got: %T", obj)
-			return
-		}
-		responseAdmissionReview := &admissionv1beta1.AdmissionReview{}
-		responseAdmissionReview.SetGroupVersionKind(*gvk)
-		responseAdmissionReview.Response = admit.admissionv1beta1(*requestedAdmissionReview)
-		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
-		responseObj = responseAdmissionReview
-		responseJSON, err := json.Marshal(responseAdmissionReview)
-		if err != nil {
-			klog.Warningf("failed to marshal review response to JSON: %v", err)
-		} else {
-			klog.V(5).Infof("Review response:\n%s", string(responseJSON))
-		}
 
 	case admissionv1.SchemeGroupVersion.WithKind("AdmissionReview"):
 		requestedAdmissionReview, ok := obj.(*admissionv1.AdmissionReview)
@@ -100,9 +75,16 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 			klog.Errorf("Expected v1.AdmissionReview but got: %T", obj)
 			return
 		}
+		// Report the time taken to process the request
+		startTime := time.Now()
+		defer func() {
+			duration := time.Since(startTime)
+			klog.V(3).Infof("Request ID %s processed in %s", requestedAdmissionReview.Request.UID, duration.Round(time.Millisecond))
+		}()
+
 		responseAdmissionReview := &admissionv1.AdmissionReview{}
 		responseAdmissionReview.SetGroupVersionKind(*gvk)
-		responseAdmissionReview.Response = admit.admissionv1(*requestedAdmissionReview)
+		responseAdmissionReview.Response = admit.admissionv1(context.Background(), *requestedAdmissionReview)
 		responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 		responseObj = responseAdmissionReview
 		responseJSON, err := json.Marshal(responseAdmissionReview)
@@ -137,62 +119,234 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitHandler) {
 	}
 }
 
-func serveZitiTunnelSC(w http.ResponseWriter, r *http.Request) {
-	serve(w, r, newDelegateToV1AdmitHandler(handleZitiTunnelAdmission))
+func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
+	if zitiIdentity == nil {
+		return nil, fmt.Errorf("ziti identity not loaded")
+	}
+
+	// Debug certificate and key data
+	klog.V(4).Infof("Certificate data length: %d bytes", len(zitiIdentity.ID.Cert))
+	klog.V(4).Infof("Private key data length: %d bytes", len(zitiIdentity.ID.Key))
+	if len(zitiIdentity.ID.Cert) > 100 {
+		klog.V(5).Infof("Certificate data preview: %s...", zitiIdentity.ID.Cert[:100])
+	} else {
+		klog.V(5).Infof("Certificate data preview: %s", zitiIdentity.ID.Cert)
+	}
+	if len(zitiIdentity.ID.Key) > 100 {
+		klog.V(5).Infof("Private key data preview: %s...", zitiIdentity.ID.Key[:100])
+	} else {
+		klog.V(5).Infof("Private key data preview: %s", zitiIdentity.ID.Key)
+	}
+
+	// Clean certificate and key data by removing "pem:" prefix if present
+	certData := zitiIdentity.ID.Cert
+	keyData := zitiIdentity.ID.Key
+	
+	if strings.HasPrefix(certData, "pem:") {
+		certData = strings.TrimPrefix(certData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from certificate data")
+	}
+	if strings.HasPrefix(keyData, "pem:") {
+		keyData = strings.TrimPrefix(keyData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from private key data")
+	}
+
+	// parse ziti admin certs to synchronously (blocking) create a ziti identity
+	zitiAdminIdentity, err := tls.X509KeyPair([]byte(certData), []byte(keyData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse X509 key pair: %w", err)
+	}
+
+	if len(zitiAdminIdentity.Certificate) == 0 {
+		err := fmt.Errorf("no certificates found in TLS key pair")
+		return nil, err
+	}
+
+	parsedCert, err := x509.ParseCertificate(zitiAdminIdentity.Certificate[0])
+	if err != nil {
+		return nil, err
+	}
+
+	// Log certificate details and analyze key usage compatibility
+	klog.V(4).Infof("Client certificate Subject: %v", parsedCert.Subject)
+	klog.V(4).Infof("Client certificate Issuer: %v", parsedCert.Issuer)
+	klog.V(4).Infof("Client certificate Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
+
+	zitiCtrlCaBundle := []byte(zitiIdentity.ID.CA)
+	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
+	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
+	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(zitiCtrlCaBundle) {
+		err := fmt.Errorf("failed to append CA certificates from PEM")
+		return nil, err
+	}
+
+	// Try each management API endpoint until one works
+	zc, err := createZitiClientWithFailover(runtimeConfig.Controller.MgmtAPIEndpoints, parsedCert, zitiAdminIdentity.PrivateKey, *certPool, zitiCtrlCaBundle)
+
+	return zc, err
+
+}
+
+// createZitiClientWithFailover attempts to create a Ziti client by trying each management API endpoint
+func createZitiClientWithFailover(endpoints []string, cert *x509.Certificate, privateKey crypto.PrivateKey, certPool x509.CertPool, caBundle []byte) (*rest_management_api_client.ZitiEdgeManagement, error) {
+	var lastErr error
+	
+	for i, endpoint := range endpoints {
+		klog.V(2).Infof("Attempting to connect to management API endpoint %d/%d: %s", i+1, len(endpoints), endpoint)
+		
+		cfg := zitiedge.Config{
+			ApiEndpoint: endpoint,
+			Cert:        cert,
+			PrivateKey:  privateKey,
+			CAS:         certPool,
+		}
+		cfg.CABundle = caBundle
+		
+		zc, err := zitiedge.Client(&cfg)
+		if err != nil {
+			klog.V(2).Infof("Failed to create client for endpoint %s: %v", endpoint, err)
+			lastErr = err
+			continue
+		}
+		
+		klog.V(1).Infof("Successfully created client for management API endpoint: %s", endpoint)
+		return zc, nil
+	}
+	
+	return nil, fmt.Errorf("failed to connect to any management API endpoint, last error: %w", lastErr)
+}
+
+
+func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
+
+	kc, err := k.Client()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initialize kube-apiserver client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	zc, err := zitiClientImpl()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initialize ziti client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	zh := newZitiHandler(
+		&clusterClient{client: kc},
+		&zitiClient{client: zc},
+		&zitiConfig{
+			ZitiType:             zitiTypeTunnel,
+			VolumeMountName:      runtimeConfig.Sidecar.VolumeMountName,
+			LabelKey:             "tunnel.openziti.io/enabled",
+			RoleKey:              runtimeConfig.Controller.RoleKey,
+			Image:                runtimeConfig.Sidecar.Image,
+			ImageVersion:         runtimeConfig.Sidecar.ImageVersion,
+			ImagePullPolicy:      runtimeConfig.Sidecar.ImagePullPolicy,
+			IdentityDir:          runtimeConfig.Sidecar.IdentityDir,
+			Prefix:               runtimeConfig.Sidecar.Prefix,
+			LabelDelValue:        "false",
+			LabelCrValue:         "true",
+			ResolverIp:           runtimeConfig.Sidecar.ResolverIP,
+			DnsUpstreamEnabled:   runtimeConfig.Sidecar.DnsUpstreamEnabled,
+			Unanswerable:         runtimeConfig.Sidecar.DnsUnanswerable,
+			SearchDomains:        runtimeConfig.Sidecar.SearchDomains,
+			AdditionalArgs:       runtimeConfig.Sidecar.AdditionalArgs,
+			PodSecurityOverride:  runtimeConfig.Security.PodSecurityContextOverride,
+			RouterConfig:         routerConfig{},
+		},
+	)
+	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))
+
+}
+
+func serveZitiRouter(w http.ResponseWriter, r *http.Request) {
+
+	kc, err := k.Client()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initialize kube-apiserver client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	zc, err := zitiClientImpl()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		err = fmt.Errorf("failed to initialize ziti client: %v", err)
+		klog.Error(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	zh := newZitiHandler(
+		&clusterClient{client: kc},
+		&zitiClient{client: zc},
+		&zitiConfig{
+			ZitiType:            zitiTypeRouter,
+			LabelKey:            "router.openziti.io/enabled",
+			AnnotationKey:       "openziti/router-name",
+			LabelDelValue:       "false",
+			LabelCrValue:        "true",
+			Prefix:              runtimeConfig.Sidecar.Prefix,
+			ResolverIp:          runtimeConfig.Sidecar.ResolverIP,
+			PodSecurityOverride: runtimeConfig.Security.PodSecurityContextOverride,
+			RouterConfig: routerConfig{
+				Cost:              0,
+				Disabled:          false,
+				IsTunnelerEnabled: false,
+				RoleAttributes:    []string{"router"},
+			},
+		},
+	)
+	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))
+
 }
 
 func webhook(cmd *cobra.Command, args []string) {
 
-	// load env vars to override the command line vars if any
-	lookupEnvVars()
+	var err error
+	runtimeConfig, err = loadConfig(configPath)
+	if err != nil {
+		klog.Fatalf("failed to load configuration: %v", err)
+	}
 
+	// Load Ziti identity from environment variable
+	zitiIdentity, err = loadZitiIdentityFromEnv()
+	if err != nil {
+		klog.Fatalf("failed to load Ziti identity: %v", err)
+	}
+
+	// Load webhook server TLS certificates from environment variables
+	loadWebhookTLSFromEnv()
+	
 	klog.Infof("Running version is %s", common.Version)
 
-	// process certs passed from the file through the command line
-	if certFile != "" && keyFile != "" {
-		cert, err = os.ReadFile(certFile)
-		if err != nil {
-			klog.Info(err)
-		}
-
-		key, err = os.ReadFile(keyFile)
-		if err != nil {
-			klog.Info(err)
-		}
-	}
-	if cert == nil || key == nil {
-		klog.Fatal("Cert and key required, but one or both are missing")
+	if len(cert) == 0 || len(key) == 0 {
+		klog.Fatal("TLS_CERT and TLS_PRIVATE_KEY must be provided via environment variables")
 	}
 
-	// process ziti admin user identity passed as separate file paths instead of env vars
-	if zitiCtrlClientCertFile != "" && zitiCtrlClientKeyFile != "" && zitiCtrlCaBundleFile != "" {
-		zitiAdminCert, err = os.ReadFile(zitiCtrlClientCertFile)
-		if err != nil {
-			klog.Info(err)
-		}
-
-		zitiAdminKey, err = os.ReadFile(zitiCtrlClientKeyFile)
-		if err != nil {
-			klog.Info(err)
-		}
-
-		zitiCtrlCaBundle, err = os.ReadFile(zitiCtrlCaBundleFile)
-		if err != nil {
-			klog.Info(err)
-		}
+	if zitiIdentity == nil {
+		klog.Fatal("Ziti identity must be loaded from JSON file")
 	}
 
-	if zitiAdminCert == nil || zitiAdminKey == nil || zitiCtrlCaBundle == nil {
-		klog.Fatal("ziti admin cert, key, and root ca bundle are required as env var or run parameter, but at least one is missing")
-	}
-
-	http.HandleFunc("/ziti-tunnel", serveZitiTunnelSC)
+	port := runtimeConfig.Server.Port
+	http.HandleFunc("/ziti-tunnel", serveZitiTunnel)
+	http.HandleFunc("/ziti-router", serveZitiRouter)
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", port),
 		TLSConfig: configTLS(cert, key),
 	}
-	err := server.ListenAndServeTLS("", "")
-	if err != nil {
+	if err = server.ListenAndServeTLS("", ""); err != nil {
 		klog.Fatal(err)
 	}
 	klog.Infof("ziti agent webhook server is listening on port %d", port)

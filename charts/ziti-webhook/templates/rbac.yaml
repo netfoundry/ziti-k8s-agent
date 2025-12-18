@@ -1,0 +1,32 @@
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "ziti-webhook.fullname" . }}-roles
+  labels:
+    {{- include "ziti-webhook.labels" . | nindent 4 }}
+rules:
+  # Core API group for services and namespaces
+  - apiGroups: [""]
+    resources: ["services", "namespaces"]
+    verbs: ["get", "list"]
+  # ConfigMaps for trust bundle discovery
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ziti-webhook.fullname" . }}
+  labels:
+    {{- include "ziti-webhook.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ziti-webhook.fullname" . }}-roles
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: {{ .Release.Namespace }}
