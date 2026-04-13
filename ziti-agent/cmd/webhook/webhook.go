@@ -172,7 +172,12 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 	klog.V(4).Infof("Client certificate Issuer: %v", parsedCert.Issuer)
 	klog.V(4).Infof("Client certificate Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
 
-	zitiCtrlCaBundle := []byte(zitiIdentity.ID.CA)
+	caData := zitiIdentity.ID.CA
+	if strings.HasPrefix(caData, "pem:") {
+		caData = strings.TrimPrefix(caData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from CA bundle data")
+	}
+	zitiCtrlCaBundle := []byte(caData)
 	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
 	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
 	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
