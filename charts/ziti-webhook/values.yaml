@@ -51,6 +51,8 @@ deployment:
     tag: ""  # Empty defaults to chart's appVersion
     pullPolicy: "IfNotPresent"
   replicas: 1
+  affinity: {}
+  tolerations: []
   resources:
     requests:
       cpu: "100m"

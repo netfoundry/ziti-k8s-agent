@@ -118,6 +118,8 @@ The following table lists the configurable parameters and their default values:
 | `deployment.image.tag` | Webhook image tag | `"latest"` |
 | `deployment.image.pullPolicy` | Webhook image pull policy | `"IfNotPresent"` |
 | `deployment.replicas` | Number of webhook replicas | `1` |
+| `deployment.affinity` | Node affinity configuration | `{}` |
+| `deployment.tolerations` | Node tolerations configuration | `[]` |
 | `deployment.resources.requests.cpu` | CPU request | `"100m"` |
 | `deployment.resources.requests.memory` | Memory request | `"128Mi"` |
 | `deployment.resources.limits.cpu` | CPU limit | `"500m"` |

@@ -24,6 +24,14 @@ spec:
         {{- include "ziti-webhook.selectorLabels" . | nindent 8 }}
         app: ziti-admission-webhook
     spec:
+      {{- with .Values.deployment.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: ziti-admission-webhook
           image: "{{ .Values.deployment.image.repo }}:{{ .Values.deployment.image.tag | default .Chart.AppVersion }}"
