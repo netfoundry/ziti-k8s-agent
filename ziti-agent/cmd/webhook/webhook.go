@@ -172,7 +172,12 @@ func zitiClientImpl() (*rest_management_api_client.ZitiEdgeManagement, error) {
 	klog.V(4).Infof("Client certificate Issuer: %v", parsedCert.Issuer)
 	klog.V(4).Infof("Client certificate Valid from: %v to %v", parsedCert.NotBefore, parsedCert.NotAfter)
 
-	zitiCtrlCaBundle := []byte(zitiIdentity.ID.CA)
+	caData := zitiIdentity.ID.CA
+	if strings.HasPrefix(caData, "pem:") {
+		caData = strings.TrimPrefix(caData, "pem:")
+		klog.V(4).Infof("Removed 'pem:' prefix from CA bundle data")
+	}
+	zitiCtrlCaBundle := []byte(caData)
 	klog.V(4).Infof("Parsed client certificate - Subject: %v, Issuer: %v", parsedCert.Subject, parsedCert.Issuer)
 	klog.V(4).Infof("Loading CA bundle, size: %d bytes", len(zitiCtrlCaBundle))
 	klog.V(5).Infof("CA bundle content: %s", string(zitiCtrlCaBundle))
@@ -244,24 +249,28 @@ func serveZitiTunnel(w http.ResponseWriter, r *http.Request) {
 		&clusterClient{client: kc},
 		&zitiClient{client: zc},
 		&zitiConfig{
-			ZitiType:             zitiTypeTunnel,
-			VolumeMountName:      runtimeConfig.Sidecar.VolumeMountName,
-			LabelKey:             "tunnel.openziti.io/enabled",
-			RoleKey:              runtimeConfig.Controller.RoleKey,
-			Image:                runtimeConfig.Sidecar.Image,
-			ImageVersion:         runtimeConfig.Sidecar.ImageVersion,
-			ImagePullPolicy:      runtimeConfig.Sidecar.ImagePullPolicy,
-			IdentityDir:          runtimeConfig.Sidecar.IdentityDir,
-			Prefix:               runtimeConfig.Sidecar.Prefix,
-			LabelDelValue:        "false",
-			LabelCrValue:         "true",
-			ResolverIp:           runtimeConfig.Sidecar.ResolverIP,
-			DnsUpstreamEnabled:   runtimeConfig.Sidecar.DnsUpstreamEnabled,
-			Unanswerable:         runtimeConfig.Sidecar.DnsUnanswerable,
-			SearchDomains:        runtimeConfig.Sidecar.SearchDomains,
-			AdditionalArgs:       runtimeConfig.Sidecar.AdditionalArgs,
-			PodSecurityOverride:  runtimeConfig.Security.PodSecurityContextOverride,
-			RouterConfig:         routerConfig{},
+			ZitiType:               zitiTypeTunnel,
+			VolumeMountName:        runtimeConfig.Sidecar.VolumeMountName,
+			LabelKey:               "tunnel.openziti.io/enabled",
+			RoleKey:                runtimeConfig.Controller.RoleKey,
+			Image:                  runtimeConfig.Sidecar.Image,
+			ImageVersion:           runtimeConfig.Sidecar.ImageVersion,
+			ImagePullPolicy:        runtimeConfig.Sidecar.ImagePullPolicy,
+			IdentityDir:            runtimeConfig.Sidecar.IdentityDir,
+			Prefix:                 runtimeConfig.Sidecar.Prefix,
+			LabelDelValue:          "false",
+			LabelCrValue:           "true",
+			ResolverIp:             runtimeConfig.Sidecar.ResolverIP,
+			DnsUpstreamEnabled:     runtimeConfig.Sidecar.DnsUpstreamEnabled,
+			Unanswerable:           runtimeConfig.Sidecar.DnsUnanswerable,
+			SearchDomains:          runtimeConfig.Sidecar.SearchDomains,
+			AdditionalArgs:         runtimeConfig.Sidecar.AdditionalArgs,
+			PodSecurityOverride:    runtimeConfig.Security.PodSecurityContextOverride,
+			ResourceRequestsCPU:    runtimeConfig.Sidecar.Resources.Requests.CPU,
+			ResourceRequestsMemory: runtimeConfig.Sidecar.Resources.Requests.Memory,
+			ResourceLimitsCPU:      runtimeConfig.Sidecar.Resources.Limits.CPU,
+			ResourceLimitsMemory:   runtimeConfig.Sidecar.Resources.Limits.Memory,
+			RouterConfig:           routerConfig{},
 		},
 	)
 	serve(w, r, newAdmitHandler(zh.handleAdmissionRequest))

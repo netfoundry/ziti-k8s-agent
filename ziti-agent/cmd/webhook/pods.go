@@ -32,8 +32,8 @@ const (
 	// Container Default Limits
 	defaultRequestsResourceCPU    = "50m"
 	defaultRequestsResourceMemory = "64Mi"
-	defaultLimitsResourceCPU      = "100m"
-	defaultLimitsResourceMemory   = "128Mi"
+	defaultLimitsResourceCPU      = "500m"
+	defaultLimitsResourceMemory   = "512Mi"
 
 	// Annotation key for explicitly setting identity name
 	annotationIdentityName = "identity.openziti.io/name"
@@ -81,25 +81,29 @@ type zitiClientIntf interface {
 }
 
 type zitiConfig struct {
-	Image           string
-	ImageVersion    string
-	ImagePullPolicy string
-	VolumeMountName string
-	IdentityDir     string
-	Prefix          string
-	RoleKey         string
-	LabelKey        string
-	LabelDelValue   string
-	LabelCrValue    string
-	ResolverIp      string
-	DnsUpstreamEnabled bool
-	Unanswerable       string
-	SearchDomains      []string
-	AdditionalArgs     []string
-	PodSecurityOverride bool
-	ZitiType        zitiType
-	AnnotationKey   string
-	RouterConfig    routerConfig
+	Image                  string
+	ImageVersion           string
+	ImagePullPolicy        string
+	VolumeMountName        string
+	IdentityDir            string
+	Prefix                 string
+	RoleKey                string
+	LabelKey               string
+	LabelDelValue          string
+	LabelCrValue           string
+	ResolverIp             string
+	DnsUpstreamEnabled     bool
+	Unanswerable           string
+	SearchDomains          []string
+	AdditionalArgs         []string
+	PodSecurityOverride    bool
+	ResourceRequestsCPU    string
+	ResourceRequestsMemory string
+	ResourceLimitsCPU      string
+	ResourceLimitsMemory   string
+	ZitiType               zitiType
+	AnnotationKey          string
+	RouterConfig           routerConfig
 }
 
 type routerConfig struct {
@@ -184,7 +188,7 @@ func (zh *zitiHandler) handleAdmissionRequest(ctx context.Context, ar admissionv
 
 				return zh.handleTunnelCreate(
 					ctx,
-					&pod.ObjectMeta,
+					pod,
 					ar.Request.UID,
 					reviewResponse,
 				)
@@ -241,7 +245,9 @@ func (zh *zitiHandler) handleAdmissionRequest(ctx context.Context, ar admissionv
 	return successResponse(reviewResponse)
 }
 
-func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.ObjectMeta, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, uid types.UID, response admissionv1.AdmissionResponse) *admissionv1.AdmissionResponse {
+
+	podMeta := &pod.ObjectMeta
 
 	identityName, err := buildZitiIdentityName(zh.Config.Prefix, podMeta, uid)
 	if err != nil {
@@ -293,53 +299,78 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, podMeta *metav1.O
 		sidecarArgs = append(sidecarArgs, "--verbose")
 	}
 
-	jsonPatch = []JsonPatchEntry{
+	restartPolicyAlways := corev1.ContainerRestartPolicyAlways
 
-		{
-			OP:   "add",
-			Path: "/spec/containers/-",
-			Value: corev1.Container{
-				Name:            identityName,
-				Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
-				ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
-				Args:            sidecarArgs,
-				Env: []corev1.EnvVar{
-					{
-						Name:  "ZITI_ENROLL_TOKEN",
-						Value: identityToken,
-					},
-					{
-						Name:  "ZITI_IDENTITY_DIR",
-						Value: zh.Config.IdentityDir,
-					},
-				},
-				VolumeMounts: []corev1.VolumeMount{
-					{
-						Name:      zh.Config.VolumeMountName,
-						MountPath: zh.Config.IdentityDir,
-						ReadOnly:  false,
-					},
-				},
-				SecurityContext: &corev1.SecurityContext{
-					Capabilities: &corev1.Capabilities{
-						Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
-						Drop: []corev1.Capability{"ALL"},
-					},
-					RunAsUser:  &rootUser,
-					Privileged: &isPrivileged,
-				},
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse(defaultRequestsResourceCPU),
-						corev1.ResourceMemory: resource.MustParse(defaultRequestsResourceMemory),
-					},
-					Limits: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse(defaultLimitsResourceCPU),
-						corev1.ResourceMemory: resource.MustParse(defaultLimitsResourceMemory),
-					},
-				},
+	sidecarContainer := corev1.Container{
+		Name:            identityName,
+		Image:           fmt.Sprintf("%s:%s", zh.Config.Image, zh.Config.ImageVersion),
+		ImagePullPolicy: corev1.PullPolicy(zh.Config.ImagePullPolicy),
+		Args:            sidecarArgs,
+		RestartPolicy:   &restartPolicyAlways,
+		Env: []corev1.EnvVar{
+			{
+				Name:  "ZITI_ENROLL_TOKEN",
+				Value: identityToken,
+			},
+			{
+				Name:  "ZITI_IDENTITY_DIR",
+				Value: zh.Config.IdentityDir,
 			},
 		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      zh.Config.VolumeMountName,
+				MountPath: zh.Config.IdentityDir,
+				ReadOnly:  false,
+			},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add:  []corev1.Capability{"NET_ADMIN", "NET_BIND_SERVICE"},
+				Drop: []corev1.Capability{"ALL"},
+			},
+			RunAsUser:  &rootUser,
+			Privileged: &isPrivileged,
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(zh.Config.ResourceRequestsCPU),
+				corev1.ResourceMemory: resource.MustParse(zh.Config.ResourceRequestsMemory),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(zh.Config.ResourceLimitsCPU),
+				corev1.ResourceMemory: resource.MustParse(zh.Config.ResourceLimitsMemory),
+			},
+		},
+		StartupProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"sh", "-c", "ls " + zh.Config.IdentityDir + "/*.json 2>/dev/null | grep -q ."},
+				},
+			},
+			InitialDelaySeconds: 2,
+			PeriodSeconds:       2,
+			FailureThreshold:    30,
+		},
+	}
+
+	var initContainerPatch JsonPatchEntry
+	if len(pod.Spec.InitContainers) == 0 {
+		initContainerPatch = JsonPatchEntry{
+			OP:    "add",
+			Path:  "/spec/initContainers",
+			Value: []corev1.Container{sidecarContainer},
+		}
+	} else {
+		initContainerPatch = JsonPatchEntry{
+			OP:    "add",
+			Path:  "/spec/initContainers/0",
+			Value: sidecarContainer,
+		}
+	}
+
+	jsonPatch = []JsonPatchEntry{
+		initContainerPatch,
 		{
 			OP:   "add",
 			Path: "/spec/volumes/-",
