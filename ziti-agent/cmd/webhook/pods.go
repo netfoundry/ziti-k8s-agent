@@ -32,8 +32,8 @@ const (
 	// Container Default Limits
 	defaultRequestsResourceCPU    = "50m"
 	defaultRequestsResourceMemory = "64Mi"
-	defaultLimitsResourceCPU      = "100m"
-	defaultLimitsResourceMemory   = "128Mi"
+	defaultLimitsResourceCPU      = "500m"
+	defaultLimitsResourceMemory   = "512Mi"
 
 	// Annotation key for explicitly setting identity name
 	annotationIdentityName = "identity.openziti.io/name"
@@ -81,25 +81,29 @@ type zitiClientIntf interface {
 }
 
 type zitiConfig struct {
-	Image           string
-	ImageVersion    string
-	ImagePullPolicy string
-	VolumeMountName string
-	IdentityDir     string
-	Prefix          string
-	RoleKey         string
-	LabelKey        string
-	LabelDelValue   string
-	LabelCrValue    string
-	ResolverIp      string
-	DnsUpstreamEnabled bool
-	Unanswerable       string
-	SearchDomains      []string
-	AdditionalArgs     []string
-	PodSecurityOverride bool
-	ZitiType        zitiType
-	AnnotationKey   string
-	RouterConfig    routerConfig
+	Image                  string
+	ImageVersion           string
+	ImagePullPolicy        string
+	VolumeMountName        string
+	IdentityDir            string
+	Prefix                 string
+	RoleKey                string
+	LabelKey               string
+	LabelDelValue          string
+	LabelCrValue           string
+	ResolverIp             string
+	DnsUpstreamEnabled     bool
+	Unanswerable           string
+	SearchDomains          []string
+	AdditionalArgs         []string
+	PodSecurityOverride    bool
+	ResourceRequestsCPU    string
+	ResourceRequestsMemory string
+	ResourceLimitsCPU      string
+	ResourceLimitsMemory   string
+	ZitiType               zitiType
+	AnnotationKey          string
+	RouterConfig           routerConfig
 }
 
 type routerConfig struct {
@@ -330,12 +334,12 @@ func (zh *zitiHandler) handleTunnelCreate(ctx context.Context, pod *corev1.Pod, 
 		},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(defaultRequestsResourceCPU),
-				corev1.ResourceMemory: resource.MustParse(defaultRequestsResourceMemory),
+				corev1.ResourceCPU:    resource.MustParse(zh.Config.ResourceRequestsCPU),
+				corev1.ResourceMemory: resource.MustParse(zh.Config.ResourceRequestsMemory),
 			},
 			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(defaultLimitsResourceCPU),
-				corev1.ResourceMemory: resource.MustParse(defaultLimitsResourceMemory),
+				corev1.ResourceCPU:    resource.MustParse(zh.Config.ResourceLimitsCPU),
+				corev1.ResourceMemory: resource.MustParse(zh.Config.ResourceLimitsMemory),
 			},
 		},
 		StartupProbe: &corev1.Probe{

@@ -30,6 +30,14 @@ sidecar:
   dnsUnanswerable: "refused"
   # Custom DNS search domains (empty uses cluster defaults)
   searchDomains: []
+  # Resource requests and limits for the injected sidecar container
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
 
 # Security configuration
 security:

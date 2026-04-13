@@ -48,6 +48,16 @@ type WebhookConfig struct {
 		DnsUnanswerable    string   `yaml:"dnsUnanswerable"`
 		SearchDomains      []string `yaml:"searchDomains"`
 		AdditionalArgs     []string `yaml:"additionalArgs"` // Optional additional arguments for ziti-tunnel sidecar (e.g., ["--verbose"])
+		Resources          struct {
+			Requests struct {
+				CPU    string `yaml:"cpu"`
+				Memory string `yaml:"memory"`
+			} `yaml:"requests"`
+			Limits struct {
+				CPU    string `yaml:"cpu"`
+				Memory string `yaml:"memory"`
+			} `yaml:"limits"`
+		} `yaml:"resources"`
 	} `yaml:"sidecar"`
 
 	Security struct {
@@ -123,6 +133,18 @@ func applyConfigDefaults(cfg *WebhookConfig) {
 		cfg.ClusterDns.Zone = "cluster.local"
 	}
 
+	if cfg.Sidecar.Resources.Requests.CPU == "" {
+		cfg.Sidecar.Resources.Requests.CPU = defaultRequestsResourceCPU
+	}
+	if cfg.Sidecar.Resources.Requests.Memory == "" {
+		cfg.Sidecar.Resources.Requests.Memory = defaultRequestsResourceMemory
+	}
+	if cfg.Sidecar.Resources.Limits.CPU == "" {
+		cfg.Sidecar.Resources.Limits.CPU = defaultLimitsResourceCPU
+	}
+	if cfg.Sidecar.Resources.Limits.Memory == "" {
+		cfg.Sidecar.Resources.Limits.Memory = defaultLimitsResourceMemory
+	}
 }
 
 func validateConfig(cfg *WebhookConfig) error {

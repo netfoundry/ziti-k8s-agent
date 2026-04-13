@@ -36,7 +36,14 @@ data:
       {{- else }}
       searchDomains: []
       {{- end }}
-    
+      resources:
+        requests:
+          cpu: {{ .Values.sidecar.resources.requests.cpu | quote }}
+          memory: {{ .Values.sidecar.resources.requests.memory | quote }}
+        limits:
+          cpu: {{ .Values.sidecar.resources.limits.cpu | quote }}
+          memory: {{ .Values.sidecar.resources.limits.memory | quote }}
+
     security:
       podSecurityContextOverride: {{ .Values.security.podSecurityContextOverride }}
     

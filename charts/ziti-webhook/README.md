@@ -97,6 +97,10 @@ The following table lists the configurable parameters and their default values:
 | `sidecar.dnsUpstreamEnabled` | Enable DNS upstream forwarding | `true` |
 | `sidecar.dnsUnanswerable` | DNS unanswerable query disposition | `"refused"` |
 | `sidecar.searchDomains` | Custom DNS search domains | `[]` |
+| `sidecar.resources.requests.cpu` | CPU request for sidecar | `"50m"` |
+| `sidecar.resources.requests.memory` | Memory request for sidecar | `"64Mi"` |
+| `sidecar.resources.limits.cpu` | CPU limit for sidecar | `"500m"` |
+| `sidecar.resources.limits.memory` | Memory limit for sidecar | `"512Mi"` |
 | `sidecar.additionalArgs` | Additional arguments for ziti-tunnel sidecar (e.g., `["--verbose"]`). If not specified, `--verbose` is automatically added when webhook log level is 4 or higher. | `[]` |
 
 ### Security Configuration
